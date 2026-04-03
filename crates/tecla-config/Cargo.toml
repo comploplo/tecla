@@ -1,0 +1,17 @@
+[package]
+name = "tecla-config"
+version = "0.1.0"
+edition = "2021"
+description = "QMK info.json and keymap.c parser — produces typed rmk keymaps at build time"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+anyhow     = { workspace = true }
+tecla        = { path = "../tecla", features = ["std", "serde"] }
+
+[dev-dependencies]
+similar-asserts = { workspace = true }

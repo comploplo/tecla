@@ -1,0 +1,19 @@
+[package]
+name = "tecla-macros"
+version = "0.1.0"
+edition = "2021"
+description = "Proc macros for rmk — keymap!, layer!, MT!, LT!, and #[keyboard_main]"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+syn        = { workspace = true }
+quote      = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[dev-dependencies]
+similar-asserts = { workspace = true }

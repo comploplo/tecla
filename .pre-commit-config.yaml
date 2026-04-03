@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fmt-check
+        name: just fmt-check
+        entry: just fmt-check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: lint
+        name: just lint
+        entry: just lint
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: test
+        name: just test
+        entry: just test
+        language: system
+        pass_filenames: false
+        always_run: true

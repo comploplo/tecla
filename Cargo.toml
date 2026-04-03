@@ -1,0 +1,159 @@
+[workspace]
+members = [
+    "crates/tecla",
+    "crates/tecla-config",
+    "crates/tecla-cli",
+    "crates/tecla-macros",
+]
+resolver = "2"
+
+# ---------------------------------------------------------------------------
+# Workspace-wide lints — inherited by all crates via `lints.workspace = true`
+# ---------------------------------------------------------------------------
+
+[workspace.lints.rust]
+warnings = "deny"
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+pedantic    = { level = "deny", priority = -1 }
+restriction = { level = "deny", priority = -1 }
+
+# ---------------------------------------------------------------------------
+# Deliberate allows — every entry is a reasoned architectural decision,
+# not a suppression of a real bug.
+# ---------------------------------------------------------------------------
+
+# Meta — allow-attribute hygiene lints are too noisy for this codebase
+blanket_clippy_restriction_lints = "allow"
+
+# Rust idioms we explicitly embrace
+implicit_return      = "allow"   # tail expressions are idiomatic Rust
+question_mark_used   = "allow"   # ? is idiomatic error propagation
+shadow_reuse         = "allow"   # re-binding same name is idiomatic
+shadow_same          = "allow"   # same
+shadow_unrelated     = "allow"   # consistent with shadow_reuse
+else_if_without_else = "allow"   # not always needed
+
+# Documentation — covered by missing_docs at the rustc level
+missing_docs_in_private_items  = "allow"
+missing_errors_doc             = "allow"
+missing_panics_doc             = "allow"
+doc_markdown                   = "allow"   # backtick enforcement too strict for short fragments
+doc_paragraphs_missing_punctuation = "allow"
+
+# API design
+exhaustive_structs = "allow"   # we want exhaustive matching on our own types
+exhaustive_enums   = "allow"
+pub_use            = "allow"   # prelude re-exports are idiomatic
+
+# Naming — module-prefixed names aid clarity across module boundaries
+module_name_repetitions = "allow"
+
+# Item ordering — logical grouping beats strict alpha order
+arbitrary_source_item_ordering = "allow"
+
+# Inlining — LTO handles this in the final firmware binary
+missing_inline_in_public_items = "allow"
+
+# Arithmetic — 100% test coverage verifies correctness
+arithmetic_side_effects = "allow"
+integer_division        = "allow"
+modulo_arithmetic       = "allow"
+
+# Casts — pedantic cast lints (truncation, sign loss) still guard us
+as_conversions = "allow"
+
+# Embedded-specific intentional patterns
+unused_result_ok            = "allow"   # heapless push/.ok() — silent overflow accepted in no_std
+unwrap_used                 = "allow"   # logically-infallible unwraps; test coverage verifies
+panic                       = "allow"   # unreachable!() in exhaustive match arms is valid firmware practice
+assertions_on_result_states = "allow"   # assert!(x.is_ok()) is clear in tests
+wildcard_enum_match_arm     = "allow"   # _ arm needed when matching on external / extensible enums
+
+# no_std — we use cfg_attr for conditional std/core; changing call sites adds noise
+std_instead_of_core  = "allow"
+std_instead_of_alloc = "allow"
+
+# Style choices
+partial_pub_fields            = "allow"   # mix of pub/private fields
+default_numeric_fallback      = "allow"   # integer literals without suffix
+min_ident_chars               = "allow"   # i, r, c are clear in loop contexts
+single_call_fn                = "allow"   # small focused functions are encouraged
+separated_literal_suffix      = "allow"   # 0x04_u8 style
+unseparated_literal_suffix    = "allow"   # 0x04u8 style — both appear in HID tables
+pub_with_shorthand            = "allow"   # pub(super) etc.
+wildcard_imports              = "allow"   # use super::* in test modules
+ref_patterns                  = "allow"   # ref in match arms is fine
+pattern_type_mismatch         = "allow"   # ergonomic matching
+semicolon_outside_block       = "allow"   # style preference
+absolute_paths                = "allow"   # full paths sometimes aid clarity
+used_underscore_binding       = "allow"   # _field used in some match arms
+let_underscore_untyped        = "allow"   # let _ = x is clear discard intent
+unused_trait_names            = "allow"   # anonymous trait imports are sometimes cleaner
+naive_bytecount               = "allow"   # explicit loops are clearer in embedded context
+print_stderr                  = "allow"   # tecla-cli legitimately writes to stderr
+
+# Lifetime style — explicit lifetimes aid readability in embedded traits
+single_char_lifetime_names = "allow"
+elidable_lifetime_names    = "allow"
+
+# Match / if style — sometimes explicit arms or nested ifs read better
+single_match_else        = "allow"
+match_same_arms          = "allow"
+collapsible_if           = "allow"
+if_then_some_else_none   = "allow"
+
+# Pedantic style — minor, readability is project-team preference
+get_first                          = "allow"   # .get(0) vs .first() — minor
+needless_range_loop                = "allow"   # indexed loops sometimes clearer
+redundant_closure_for_method_calls = "allow"   # explicit closures can aid readability
+return_and_then                    = "allow"   # .and_then chains can be more readable
+
+# ---------------------------------------------------------------------------
+# Shared dependency versions — crates reference these via `workspace = true`
+# ---------------------------------------------------------------------------
+
+[workspace.dependencies]
+
+# Core embedded abstractions
+embedded-hal       = "1"
+embedded-hal-async = "1"
+
+# Async runtime
+embassy-executor = { version = "0.7", features = ["executor-thread"] }
+embassy-time     = "0.4"
+embassy-usb      = "0.4"
+embassy-sync     = "0.6"
+
+# USB HID
+usbd-hid = "0.8"
+
+# no_std utilities
+heapless = "0.8"
+bitfield = "0.14"
+
+# Embedded logging (zero-overhead, RTT-based)
+defmt = "0.3"
+
+# Persistent storage abstraction (EEPROM / flash)
+embedded-storage       = "0.3"
+embedded-storage-async = "0.4"
+
+# Serialization (std-only, config parsing)
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Proc macro utilities (tecla-macros)
+syn        = { version = "2", features = ["full"] }
+quote      = "1"
+proc-macro2 = "1"
+
+# CLI (tecla-cli)
+clap   = { version = "4", features = ["derive"] }
+anyhow = "1"
+tokio  = { version = "1", features = ["full"] }
+
+# Testing
+similar-asserts = "1"

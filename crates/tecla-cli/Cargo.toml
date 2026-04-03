@@ -1,0 +1,23 @@
+[package]
+name = "tecla-cli"
+version = "0.1.0"
+edition = "2021"
+description = "rmk flash — fetch a QMK keyboard definition and flash rmk firmware in one step"
+
+[[bin]]
+name = "tecla"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap       = { workspace = true }
+anyhow     = { workspace = true }
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+tecla-config = { path = "../tecla-config" }
+
+[dev-dependencies]
+similar-asserts = { workspace = true }

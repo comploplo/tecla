@@ -1,0 +1,41 @@
+[package]
+name = "tecla"
+version = "0.1.0"
+edition = "2021"
+description = "Embedded Rust keyboard firmware core — no_std, async-first, MCU-agnostic"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+# Enables std — host-side testing, simulation, and build tooling.
+# The core library is no_std by default.
+std = []
+
+# Unlocks deterministic clock injection and the simulate! macro for tests.
+testing = ["std"]
+
+# Enables the async Embassy orchestrator — task::run() and the async scanner /
+# reporter traits. Requires an Embassy time driver in the final binary.
+embassy = ["dep:embassy-time", "dep:embassy-sync"]
+
+# MCU arch — these will gate embassy-executor features in board crates.
+arch-cortex-m = []
+arch-riscv32  = []
+arch-avr      = []
+
+[dependencies]
+embedded-hal       = { workspace = true }
+heapless           = { workspace = true }
+defmt              = { workspace = true }
+
+embassy-time = { workspace = true, optional = true }
+embassy-sync = { workspace = true, optional = true }
+
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+similar-asserts = { workspace = true }
+serde_json      = { workspace = true }
