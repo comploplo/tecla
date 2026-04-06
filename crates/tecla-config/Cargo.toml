@@ -2,16 +2,25 @@
 name = "tecla-config"
 version = "0.1.0"
 edition = "2021"
-description = "QMK info.json and keymap.c parser — produces typed rmk keymaps at build time"
+description = "QMK config parser and keymap transpiler for tecla"
+authors.workspace = true
+license.workspace = true
 
 [lints]
 workspace = true
 
+[features]
+dictionary = ["dep:ureq"]
+
 [dependencies]
-serde      = { workspace = true }
-serde_json = { workspace = true }
-anyhow     = { workspace = true }
-tecla        = { path = "../tecla", features = ["std", "serde"] }
+deser-hjson   = "2"
+serde_json   = { workspace = true }
+serde        = { workspace = true }
+tree-sitter   = { workspace = true }
+tree-sitter-c = { workspace = true }
+ureq          = { version = "3", optional = true }
 
 [dev-dependencies]
 similar-asserts = { workspace = true }
+insta           = { workspace = true, features = ["glob"] }
+ureq            = "3"

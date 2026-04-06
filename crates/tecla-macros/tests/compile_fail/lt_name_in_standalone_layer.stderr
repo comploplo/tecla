@@ -1,0 +1,5 @@
+error: layer name `Fn` can only be used inside keymap!; use a numeric index in standalone layer! or LT!
+ --> tests/compile_fail/lt_name_in_standalone_layer.rs:4:59
+  |
+4 |     let _: tecla::keymap::Layer<()> = layer!(Base, A, LT!(Fn, SPC));
+  |                                                           ^^

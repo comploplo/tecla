@@ -2,7 +2,9 @@
 name = "tecla-macros"
 version = "0.1.0"
 edition = "2021"
-description = "Proc macros for rmk — keymap!, layer!, MT!, LT!, and #[keyboard_main]"
+description = "Proc macros for tecla — keymap!, layer!, MT!, LT!, and #[keyboard_main]"
+authors.workspace = true
+license.workspace = true
 
 [lib]
 proc-macro = true
@@ -17,3 +19,6 @@ proc-macro2 = { workspace = true }
 
 [dev-dependencies]
 similar-asserts = { workspace = true }
+heapless        = { workspace = true }
+trybuild        = { workspace = true }
+tecla = { path = "../tecla", features = ["std"] }

@@ -1,0 +1,26 @@
+[package]
+name = "tecla-esp32s3"
+version = "0.1.0"
+edition = "2021"
+description = "Tecla keyboard firmware board support for ESP32-S3"
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tecla        = { path = "../tecla", features = ["embassy"] }
+tecla-macros = { path = "../tecla-macros" }
+
+embassy-usb      = { workspace = true }
+embassy-time     = { workspace = true }
+embassy-sync     = { workspace = true }
+
+esp-hal          = { workspace = true, features = ["unstable"] }
+esp-println      = { workspace = true }
+esp-backtrace    = { workspace = true }
+
+static_cell     = { workspace = true }
+heapless        = { workspace = true }
+portable-atomic = { version = "1", features = ["critical-section"] }

@@ -57,11 +57,10 @@ impl<const MAX_TAPS: usize> TapDanceRecognizer<MAX_TAPS> {
 
     fn resolve(&mut self) -> Recognition<TapDanceOutcome> {
         self.done = true;
-        let keycode = if self.count == 0 {
-            None
-        } else {
-            self.actions.get(self.count - 1).copied().unwrap_or(None)
-        };
+        let keycode = self
+            .count
+            .checked_sub(1)
+            .and_then(|i| self.actions.get(i).copied().flatten());
         Recognition::Matched(TapDanceOutcome {
             count: self.count,
             keycode,

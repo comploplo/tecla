@@ -1,0 +1,211 @@
+//! End-to-end matrix HIL test for nRF52840.
+
+#![cfg(feature = "hil")]
+#![allow(clippy::tests_outside_test_module, reason = "integration test")]
+#![allow(missing_docs, reason = "integration test")]
+#![expect(clippy::unwrap_used, reason = "test code")]
+#![expect(clippy::expect_used, reason = "test code")]
+#![expect(clippy::print_stderr, reason = "test diagnostic output")]
+#![expect(clippy::str_to_string, reason = "test code")]
+
+use std::path::PathBuf;
+use std::process::Command;
+use tecla::hil::{extract_elf_info, generate_matrix_test_resc, parse_key_log, Platform};
+
+fn firmware_path() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop();
+    p.pop();
+    p.push("target/thumbv7em-none-eabihf/release/examples/hil_matrix_test");
+    p
+}
+
+fn find_symbol(elf: &std::path::Path, name: &str) -> Option<u32> {
+    let output = Command::new("rust-nm")
+        .arg("--defined-only")
+        .arg(elf)
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains(name) {
+            let addr_str = line.split_whitespace().next()?;
+            return u32::from_str_radix(addr_str, 16).ok();
+        }
+    }
+    None
+}
+
+#[rustfmt::skip]
+const PLANCK_BASE_LAYER: [(u8, u8, u8); 34] = [
+    (0, 0, 0x2B), // Tab
+    (0, 1, 0x14), // Q
+    (0, 2, 0x1A), // W
+    (0, 3, 0x08), // E
+    (0, 4, 0x15), // R
+    (0, 5, 0x17), // T
+    (0, 6, 0x1C), // Y
+    (0, 7, 0x18), // U
+    (0, 8, 0x0C), // I
+    (0, 9, 0x12), // O
+    (0,10, 0x13), // P
+    (0,11, 0x2A), // Backspace
+    (1, 0, 0x29), // Escape
+    (1, 1, 0x04), // A
+    (1, 2, 0x16), // S
+    (1, 3, 0x07), // D
+    (1, 4, 0x09), // F
+    (1, 5, 0x0A), // G
+    (1, 6, 0x0B), // H
+    (1, 7, 0x0D), // J
+    (1, 8, 0x0E), // K
+    (1, 9, 0x0F), // L
+    (1,10, 0x33), // Semicolon
+    (1,11, 0x28), // Enter
+    (2, 1, 0x1D), // Z
+    (2, 2, 0x1B), // X
+    (2, 3, 0x06), // C
+    (2, 4, 0x19), // V
+    (2, 5, 0x05), // B
+    (2, 6, 0x11), // N
+    (2, 7, 0x10), // M
+    (2, 8, 0x36), // Comma
+    (2, 9, 0x37), // Dot
+    (2,10, 0x38), // Slash
+];
+
+#[test]
+#[ignore = "requires container runtime and cross-compiled firmware"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "HIL test with setup, execution, and verification"
+)]
+fn planck_keycode_verification() {
+    let elf = firmware_path();
+    assert!(
+        elf.exists(),
+        "firmware not found at {} -- build with: \
+         cargo build -p tecla-nrf52840 --example hil_matrix_test --features hil \
+         --target thumbv7em-none-eabihf --release",
+        elf.display()
+    );
+
+    let elf_abs = elf.canonicalize().unwrap();
+    let info = extract_elf_info(&elf_abs, "hil_marker");
+
+    let report_marker =
+        find_symbol(&elf_abs, "report_marker").expect("report_marker symbol not found");
+    let hil_marker = find_symbol(&elf_abs, "hil_marker").expect("hil_marker symbol not found");
+    let report_buf = find_symbol(&elf_abs, "REPORT_BUF").expect("REPORT_BUF symbol not found");
+    let report_count =
+        find_symbol(&elf_abs, "REPORT_COUNT").expect("REPORT_COUNT symbol not found");
+
+    let tapdance_marker = find_symbol(&elf_abs, "tapdance_marker");
+    let tap_result_addr = find_symbol(&elf_abs, "TAP_RESULT");
+    let hold_layer_result_addr = find_symbol(&elf_abs, "HOLD_LAYER_RESULT");
+
+    let work_dir = std::env::current_dir()
+        .unwrap()
+        .join("target/hil-matrix-nrf52840");
+    std::fs::create_dir_all(&work_dir).unwrap();
+
+    std::fs::write(
+        work_dir.join("platform.repl"),
+        Platform::Nrf52840.repl_content(),
+    )
+    .unwrap();
+
+    let resc = generate_matrix_test_resc(
+        &elf_abs,
+        "/hil/platform.repl",
+        report_marker,
+        hil_marker,
+        report_buf,
+        report_count,
+        &info,
+        10,
+        tapdance_marker,
+        tap_result_addr,
+        hold_layer_result_addr,
+    );
+    std::fs::write(work_dir.join("test.resc"), &resc).unwrap();
+
+    let runtime = std::env::var("TECLA_CONTAINER_RUNTIME").unwrap_or_else(|_| "podman".to_string());
+
+    let cmd_output = Command::new("timeout")
+        .args(["--kill-after=5", "60"])
+        .arg(&runtime)
+        .args([
+            "run",
+            "--rm",
+            "--volume",
+            &format!("{}:/hil:ro", work_dir.display()),
+            "--volume",
+            &format!("{}:{}", elf_abs.display(), elf_abs.display()),
+            "--entrypoint",
+            "/opt/renode/renode",
+            "docker.io/antmicro/renode:latest",
+            "--disable-xwt",
+            "--plain",
+            "-e",
+            "include @/hil/test.resc",
+        ])
+        .output()
+        .expect("container runtime failed");
+
+    let all_output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&cmd_output.stdout),
+        String::from_utf8_lossy(&cmd_output.stderr),
+    );
+
+    assert!(
+        all_output.contains("HIL OK"),
+        "firmware did not complete.\n--- output ---\n{all_output}"
+    );
+
+    let reports = parse_key_log(&all_output);
+    assert!(
+        !reports.is_empty(),
+        "no KEY: entries found in Renode output.\n--- output ---\n{all_output}"
+    );
+
+    let mut verified = 0;
+    let mut failures = Vec::new();
+
+    for &(row, col, expected_usage) in &PLANCK_BASE_LAYER {
+        if let Some(&(_, _, _mods, keycode)) =
+            reports.iter().find(|(r, c, _, _)| *r == row && *c == col)
+        {
+            if keycode == expected_usage {
+                verified += 1;
+            } else {
+                failures.push(format!(
+                    "({row},{col}): expected 0x{expected_usage:02X}, got 0x{keycode:02X}",
+                ));
+            }
+        } else {
+            failures.push(format!("({row},{col}): no report"));
+        }
+    }
+
+    if !failures.is_empty() {
+        eprintln!("failures:");
+        for f in &failures {
+            eprintln!("  {f}");
+        }
+    }
+
+    eprintln!(
+        "planck HIL: {verified}/{} keys verified, {} reports captured",
+        PLANCK_BASE_LAYER.len(),
+        reports.len(),
+    );
+
+    assert_eq!(
+        verified,
+        PLANCK_BASE_LAYER.len(),
+        "{} key(s) failed verification",
+        PLANCK_BASE_LAYER.len() - verified,
+    );
+}

@@ -1,0 +1,19 @@
+---
+source: crates/tecla-config/tests/qmk_keyboards.rs
+expression: output
+---
+// 3 layer(s), 76 keys (1 rows x 76 cols)
+keymap! {
+    #[rustfmt::skip]
+    layer!(BASE,
+        EQL , N1  , N2  , N3  , N4  , N5  , LEFT, RGHT, N6  , N7  , N8  , N9  , N0  , MINS, DEL , Q   , W   , E   , R   , T   , NoOp, NoOp, Y   , U   , I   , O   , P   , BSLS, BSPC, A   , S   , D   , F   , G   , H   , J   , K   , L   , NoOp, NoOp, LSFT, NoOp, X   , C   , V   , B   , NoOp, NoOp, N   , M   , COMM, DOT , NoOp, RSFT, NoOp, QUOT, NoOp, LEFT, RGHT, UP  , DOWN, LBRC, RBRC, NoOp, NoOp, LGUI, LALT, NoOp, HOME, PGUP, SPC , BSPC, END , PGDN, TAB , ENT,
+    ),
+    #[rustfmt::skip]
+    layer!(SYMB,
+        NoOp, F1  , F2  , F3  , F4  , F5  , TRNS, TRNS, F6  , F7  , F8  , F9  , F10 , F11 , TRNS, NoOp, NoOp, NoOp, NoOp, NoOp, TRNS, TRNS, UP  , N7  , N8  , N9  , NoOp, F12 , TRNS, NoOp, NoOp, NoOp, NoOp, GRV , DOWN, N4  , N5  , N6  , NoOp, TRNS, TRNS, NoOp, NoOp, LBRC, RBRC, NoOp, TRNS, TRNS, NoOp, N1  , N2  , N3  , BSLS, TRNS, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, DOT , N0  , EQL , TRNS, NoOp, TRNS, NoOp, NoOp, TRNS, TRNS, NoOp, NoOp, TRNS, TRNS, NoOp, NoOp,
+    ),
+    #[rustfmt::skip]
+    layer!(MDIA,
+        TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp, NoOp, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp, NoOp, NoOp, NoOp, NoOp, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, NoOp,
+    ),
+}

@@ -17,6 +17,53 @@
 //!   elapses (via an Embassy timer).
 //! - Draining any buffered events after a [`Recognition::Matched`] or
 //!   [`Recognition::Failed`] result.
+//!
+//! # Implementing a custom recognizer
+//!
+//! A recognizer should:
+//! 1. Return [`Recognition::Pending`] while still accumulating input.
+//! 2. Return [`Recognition::Matched`] (with the output value) as soon as the
+//!    pattern is unambiguously complete.
+//! 3. Return [`Recognition::Failed`] and call [`reset`](Recognizer::reset)
+//!    internally when the pattern can no longer match.
+//! 4. Expose a deadline via [`next_deadline_ms`](Recognizer::next_deadline_ms)
+//!    if the pattern can time out; return `None` when no timer is needed.
+//! 5. Buffer any events that arrive while `Pending` so they can be replayed by
+//!    the orchestrator after a `Failed` or `Matched` result.
+//!
+//! ```rust,ignore
+//! struct DoubleTap {
+//!     first_press_ms: Option<u64>,
+//!     window_ms: u64,
+//! }
+//!
+//! impl Recognizer for DoubleTap {
+//!     type Output = ();
+//!
+//!     fn observe(&mut self, event: KeyEvent, now_ms: u64) -> Recognition<()> {
+//!         if !event.is_press() { return Recognition::Pending; }
+//!         match self.first_press_ms {
+//!             None => { self.first_press_ms = Some(now_ms); Recognition::Pending }
+//!             Some(t) if now_ms - t <= self.window_ms => {
+//!                 self.reset();
+//!                 Recognition::Matched(())
+//!             }
+//!             _ => { self.reset(); Recognition::Failed }
+//!         }
+//!     }
+//!
+//!     fn tick(&mut self, _now_ms: u64) -> Recognition<()> {
+//!         self.reset();
+//!         Recognition::Failed
+//!     }
+//!
+//!     fn next_deadline_ms(&self) -> Option<u64> {
+//!         self.first_press_ms.map(|t| t + self.window_ms)
+//!     }
+//!
+//!     fn reset(&mut self) { self.first_press_ms = None; }
+//! }
+//! ```
 
 use crate::event::KeyEvent;
 

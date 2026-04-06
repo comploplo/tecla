@@ -48,6 +48,10 @@ impl StenoChord {
         }
     }
 
+    #[expect(
+        clippy::as_conversions,
+        reason = "u64 bits masked to 6 bits then cast to u8"
+    )]
     fn to_gemini_pr(self) -> ([u8; 6], usize) {
         let mut out = [0u8; 6];
         for byte_idx in 0..6_usize {
@@ -62,6 +66,10 @@ impl StenoChord {
         (out, 6)
     }
 
+    #[expect(
+        clippy::as_conversions,
+        reason = "u64 bits masked then cast to u8 for wire format"
+    )]
     fn to_txbolt(self) -> ([u8; 6], usize) {
         let mut out = [0u8; 6];
         let mut len = 0_usize;
@@ -161,6 +169,7 @@ impl Recognizer for StenoRecognizer {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::event::{KeyEvent, KeyPos};
@@ -204,14 +213,11 @@ mod tests {
         rec.observe(press(B, 5), 5);
         rec.observe(release(A, 10), 10);
         let result = rec.observe(release(B, 15), 15);
-        if let Recognition::Matched(chord) = result {
-            let a_bit = 1u64 << A.flat(64);
-            let b_bit = 1u64 << B.flat(64);
-            assert!(chord.keys & a_bit != 0);
-            assert!(chord.keys & b_bit != 0);
-        } else {
-            panic!("expected Matched");
-        }
+        let chord = result.matched().unwrap();
+        let a_bit = 1u64 << A.flat(64);
+        let b_bit = 1u64 << B.flat(64);
+        assert!(chord.keys & a_bit != 0);
+        assert!(chord.keys & b_bit != 0);
     }
 
     #[test]
@@ -256,11 +262,8 @@ mod tests {
         let mut rec = StenoRecognizer::new(StenoProtocol::TxBolt);
         rec.observe(press(A, 0), 0);
         let result = rec.observe(release(A, 10), 10);
-        if let Recognition::Matched(chord) = result {
-            assert_eq!(chord.protocol, StenoProtocol::TxBolt);
-        } else {
-            panic!("expected Matched");
-        }
+        let chord = result.matched().unwrap();
+        assert_eq!(chord.protocol, StenoProtocol::TxBolt);
     }
 
     // ── StenoChord serialization ──────────────────────────────────────────────

@@ -1,6 +1,4 @@
 target/
 lcov*.info
-clippy_errors.txt
+coverage-html/
 original/
-libnull.so
-HANDOFF.md

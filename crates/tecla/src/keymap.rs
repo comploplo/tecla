@@ -27,6 +27,10 @@ impl<Ext: Copy + PartialEq> Layer<Ext> {
     ///
     /// Actions are stored in row-major flat order.
     #[must_use]
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "heapless push overflow silently dropped in no_std"
+    )]
     pub fn new(actions: &[Action<Ext>]) -> Self {
         let mut v = heapless::Vec::new();
         for &a in actions {
@@ -51,6 +55,18 @@ impl<Ext: Copy + PartialEq> Layer<Ext> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.actions.is_empty()
+    }
+
+    /// Replaces the action at flat index `idx`.
+    ///
+    /// Returns `true` if the index was valid, `false` if out of bounds.
+    pub fn set(&mut self, idx: usize, action: Action<Ext>) -> bool {
+        if let Some(slot) = self.actions.get_mut(idx) {
+            *slot = action;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -118,9 +134,16 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
 
     /// Records the resolved layer for `pos` at press time.
     ///
-    /// Call this immediately after resolving a key press. The cached layer is
-    /// used by [`release_action`](LayerStack::release_action) to ensure the
-    /// same action fires on release regardless of subsequent layer changes.
+    /// Call this immediately after [`resolve`](LayerStack::resolve) on a press
+    /// event. The cached layer index is used by
+    /// [`release_action`](LayerStack::release_action) to guarantee that the key
+    /// release fires the same action as the press, even if the active layers
+    /// change while the key is held.
+    ///
+    /// Without this cache, holding a key that activates a layer and then
+    /// releasing a key that was pressed while that layer was active would look
+    /// up the release action on the new (now-different) layer state, causing a
+    /// "stuck key" where the press keycode is never released.
     pub fn cache_press(&mut self, pos: KeyPos, cols: usize) {
         let idx = pos.flat(cols);
         let active = self.state | self.default_state;
@@ -147,7 +170,9 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
 
     /// Returns the action for `pos` using the layer cached at press time.
     ///
-    /// Falls back to the current resolution if no cache entry exists.
+    /// Use this on key release events instead of [`resolve`](LayerStack::resolve).
+    /// Falls back to a fresh resolution if [`cache_press`](LayerStack::cache_press)
+    /// was never called for this position.
     #[must_use]
     pub fn release_action(&self, pos: KeyPos, cols: usize) -> Action<Ext> {
         let idx = pos.flat(cols);
@@ -174,6 +199,10 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
     }
 
     /// Applies a [`LayerOp`] to the layer stack.
+    #[expect(
+        clippy::as_conversions,
+        reason = "u32::leading_zeros to u8 and u8 to usize for layer indexing"
+    )]
     pub fn apply(&mut self, op: LayerOp) {
         match op {
             LayerOp::Momentary(n) | LayerOp::On(n) => {
@@ -187,6 +216,29 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
             }
             LayerOp::SetDefault(n) => {
                 self.default_state = 1 << u32::from(n);
+            }
+            LayerOp::Next => {
+                let combined = self.state | self.default_state;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "u32::leading_zeros() returns 0..=32, fits in u8"
+                )]
+                let highest = 31_u8.saturating_sub(combined.leading_zeros() as u8);
+                let next = highest.saturating_add(1);
+                if (next as usize) < LAYERS {
+                    self.state |= 1 << u32::from(next);
+                }
+            }
+            LayerOp::Prev => {
+                let combined = self.state | self.default_state;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "u32::leading_zeros() returns 0..=32, fits in u8"
+                )]
+                let highest = 31_u8.saturating_sub(combined.leading_zeros() as u8);
+                if highest > 0 {
+                    self.state &= !(1 << u32::from(highest));
+                }
             }
         }
     }
@@ -202,9 +254,33 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
     pub const fn default_state(&self) -> u32 {
         self.default_state
     }
+
+    /// Returns the action at `(layer, key)`, or `None` if out of bounds.
+    #[must_use]
+    pub fn get_action(&self, layer: usize, key: usize) -> Option<Action<Ext>> {
+        self.layers.get(layer).and_then(|l| l.get(key))
+    }
+
+    /// Returns the number of layers.
+    #[must_use]
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Replaces a single action in a layer at runtime.
+    ///
+    /// Returns `true` if both the layer and key indices were valid.
+    pub fn set_action(&mut self, layer: usize, key: usize, action: Action<Ext>) -> bool {
+        if let Some(l) = self.layers.get_mut(layer) {
+            l.set(key, action)
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
+#[expect(clippy::unused_result_ok, reason = "test code")]
 mod tests {
     use super::*;
     use crate::action::{KeyCode, ModifierKey};
@@ -410,5 +486,71 @@ mod tests {
             stack.release_action(pos(0, 0), COLS),
             Action::Key(KeyCode::A)
         );
+    }
+
+    // ── Layer::set ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn layer_set_replaces_action() {
+        let mut layer: Layer<()> = Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
+        assert!(layer.set(0, Action::Key(KeyCode::C)));
+        assert_eq!(layer.get(0), Some(Action::Key(KeyCode::C)));
+    }
+
+    #[test]
+    fn layer_set_out_of_bounds_returns_false() {
+        let mut layer: Layer<()> = Layer::new(&[Action::Key(KeyCode::A)]);
+        assert!(!layer.set(99, Action::Key(KeyCode::B)));
+    }
+
+    // ── LayerStack::set_action ───────────────────────────────────────────────
+
+    #[test]
+    fn set_action_changes_resolved_key() {
+        let mut stack = make_stack(&[Action::Key(KeyCode::A); 6], None);
+        assert!(stack.set_action(0, 0, Action::Key(KeyCode::Z)));
+        assert_eq!(stack.resolve(pos(0, 0), COLS), Action::Key(KeyCode::Z));
+    }
+
+    #[test]
+    fn set_action_invalid_layer_returns_false() {
+        let mut stack = make_stack(&[Action::Key(KeyCode::A); 6], None);
+        assert!(!stack.set_action(99, 0, Action::Key(KeyCode::Z)));
+    }
+
+    #[test]
+    fn set_action_invalid_key_returns_false() {
+        let mut stack = make_stack(&[Action::Key(KeyCode::A); 6], None);
+        assert!(!stack.set_action(0, 99, Action::Key(KeyCode::Z)));
+    }
+
+    #[test]
+    fn layer_op_next_activates_layer_above_highest() {
+        let mut stack = make_stack(
+            &[Action::Key(KeyCode::A); 6],
+            Some(&[Action::Key(KeyCode::B); 6]),
+        );
+        assert_eq!(stack.state(), 0);
+        stack.apply(LayerOp::Next);
+        assert!(stack.state() & (1 << 1) != 0);
+    }
+
+    #[test]
+    fn layer_op_prev_deactivates_highest_layer() {
+        let mut stack = make_stack(
+            &[Action::Key(KeyCode::A); 6],
+            Some(&[Action::Key(KeyCode::B); 6]),
+        );
+        stack.apply(LayerOp::On(1));
+        assert!(stack.state() & (1 << 1) != 0);
+        stack.apply(LayerOp::Prev);
+        assert_eq!(stack.state() & (1 << 1), 0);
+    }
+
+    #[test]
+    fn layer_op_prev_on_base_layer_does_nothing() {
+        let mut stack = make_stack(&[Action::Key(KeyCode::A); 6], None);
+        stack.apply(LayerOp::Prev);
+        assert_eq!(stack.state(), 0);
     }
 }

@@ -1,0 +1,2251 @@
+cargo hack --workspace --exclude tecla-rp2040 --exclude tecla-nrf52840 --exclude tecla-stm32f4 --feature-powerset clippy --all-targets
+info: running `cargo clippy --all-targets --no-default-features` on tecla (1/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil,testing,via` on tecla (2/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr` on tecla (3/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m` on tecla (4/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m` on tecla (5/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32` on tecla (6/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32` on tecla (7/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32` on tecla (8/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32` on tecla (9/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default` on tecla (10/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default` on tecla (11/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default` on tecla (12/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default` on tecla (13/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default` on tecla (14/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default` on tecla (15/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default` on tecla (16/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default` on tecla (17/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy` on tecla (18/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy` on tecla (19/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy` on tecla (20/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy` on tecla (21/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy` on tecla (22/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy` on tecla (23/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy` on tecla (24/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy` on tecla (25/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy` on tecla (26/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy` on tecla (27/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy` on tecla (28/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy` on tecla (29/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy` on tecla (30/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy` on tecla (31/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy` on tecla (32/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy` on tecla (33/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil` on tecla (34/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil` on tecla (35/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil` on tecla (36/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil` on tecla (37/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil` on tecla (38/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil` on tecla (39/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil` on tecla (40/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil` on tecla (41/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil` on tecla (42/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil` on tecla (43/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil` on tecla (44/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil` on tecla (45/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil` on tecla (46/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil` on tecla (47/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil` on tecla (48/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil` on tecla (49/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil` on tecla (50/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil` on tecla (51/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil` on tecla (52/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil` on tecla (53/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil` on tecla (54/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil` on tecla (55/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil` on tecla (56/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil` on tecla (57/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil` on tecla (58/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil` on tecla (59/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil` on tecla (60/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil` on tecla (61/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil` on tecla (62/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil` on tecla (63/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil` on tecla (64/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil` on tecla (65/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features std` on tecla (66/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,std` on tecla (67/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,std` on tecla (68/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,std` on tecla (69/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,std` on tecla (70/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,std` on tecla (71/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,std` on tecla (72/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,std` on tecla (73/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,std` on tecla (74/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,std` on tecla (75/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,std` on tecla (76/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,std` on tecla (77/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,std` on tecla (78/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,std` on tecla (79/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,std` on tecla (80/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,std` on tecla (81/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,std` on tecla (82/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,std` on tecla (83/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,std` on tecla (84/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,std` on tecla (85/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,std` on tecla (86/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,std` on tecla (87/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,std` on tecla (88/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,std` on tecla (89/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,std` on tecla (90/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,std` on tecla (91/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,std` on tecla (92/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,std` on tecla (93/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,std` on tecla (94/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,std` on tecla (95/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,std` on tecla (96/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,std` on tecla (97/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features storage` on tecla (98/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,storage` on tecla (99/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,storage` on tecla (100/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,storage` on tecla (101/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,storage` on tecla (102/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,storage` on tecla (103/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,storage` on tecla (104/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,storage` on tecla (105/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,storage` on tecla (106/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,storage` on tecla (107/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,storage` on tecla (108/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,storage` on tecla (109/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,storage` on tecla (110/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,storage` on tecla (111/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,storage` on tecla (112/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,storage` on tecla (113/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,storage` on tecla (114/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,storage` on tecla (115/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,storage` on tecla (116/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,storage` on tecla (117/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,storage` on tecla (118/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,storage` on tecla (119/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,storage` on tecla (120/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,storage` on tecla (121/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,storage` on tecla (122/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,storage` on tecla (123/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,storage` on tecla (124/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,storage` on tecla (125/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,storage` on tecla (126/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,storage` on tecla (127/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,storage` on tecla (128/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,storage` on tecla (129/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil,storage` on tecla (130/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil,storage` on tecla (131/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil,storage` on tecla (132/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil,storage` on tecla (133/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil,storage` on tecla (134/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil,storage` on tecla (135/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil,storage` on tecla (136/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil,storage` on tecla (137/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil,storage` on tecla (138/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil,storage` on tecla (139/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil,storage` on tecla (140/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil,storage` on tecla (141/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil,storage` on tecla (142/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil,storage` on tecla (143/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil,storage` on tecla (144/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil,storage` on tecla (145/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil,storage` on tecla (146/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil,storage` on tecla (147/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil,storage` on tecla (148/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil,storage` on tecla (149/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil,storage` on tecla (150/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil,storage` on tecla (151/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil,storage` on tecla (152/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil,storage` on tecla (153/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil,storage` on tecla (154/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil,storage` on tecla (155/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil,storage` on tecla (156/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil,storage` on tecla (157/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil,storage` on tecla (158/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil,storage` on tecla (159/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil,storage` on tecla (160/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil,storage` on tecla (161/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features std,storage` on tecla (162/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,std,storage` on tecla (163/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,std,storage` on tecla (164/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,std,storage` on tecla (165/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,std,storage` on tecla (166/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,std,storage` on tecla (167/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,std,storage` on tecla (168/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,std,storage` on tecla (169/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,std,storage` on tecla (170/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,std,storage` on tecla (171/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,std,storage` on tecla (172/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,std,storage` on tecla (173/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,std,storage` on tecla (174/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,std,storage` on tecla (175/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,std,storage` on tecla (176/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,std,storage` on tecla (177/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,std,storage` on tecla (178/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,std,storage` on tecla (179/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,std,storage` on tecla (180/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,std,storage` on tecla (181/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,std,storage` on tecla (182/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,std,storage` on tecla (183/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,std,storage` on tecla (184/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,std,storage` on tecla (185/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,std,storage` on tecla (186/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,std,storage` on tecla (187/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,std,storage` on tecla (188/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,std,storage` on tecla (189/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,std,storage` on tecla (190/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,std,storage` on tecla (191/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,std,storage` on tecla (192/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,std,storage` on tecla (193/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features testing` on tecla (194/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,testing` on tecla (195/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,testing` on tecla (196/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,testing` on tecla (197/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,testing` on tecla (198/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,testing` on tecla (199/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,testing` on tecla (200/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,testing` on tecla (201/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,testing` on tecla (202/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,testing` on tecla (203/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,testing` on tecla (204/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,testing` on tecla (205/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,testing` on tecla (206/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,testing` on tecla (207/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,testing` on tecla (208/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,testing` on tecla (209/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,testing` on tecla (210/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,testing` on tecla (211/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,testing` on tecla (212/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,testing` on tecla (213/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,testing` on tecla (214/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,testing` on tecla (215/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,testing` on tecla (216/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,testing` on tecla (217/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,testing` on tecla (218/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,testing` on tecla (219/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,testing` on tecla (220/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,testing` on tecla (221/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,testing` on tecla (222/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,testing` on tecla (223/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,testing` on tecla (224/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,testing` on tecla (225/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil,testing` on tecla (226/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil,testing` on tecla (227/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil,testing` on tecla (228/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil,testing` on tecla (229/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil,testing` on tecla (230/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil,testing` on tecla (231/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil,testing` on tecla (232/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil,testing` on tecla (233/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil,testing` on tecla (234/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil,testing` on tecla (235/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil,testing` on tecla (236/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil,testing` on tecla (237/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil,testing` on tecla (238/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil,testing` on tecla (239/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil,testing` on tecla (240/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil,testing` on tecla (241/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil,testing` on tecla (242/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil,testing` on tecla (243/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil,testing` on tecla (244/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil,testing` on tecla (245/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil,testing` on tecla (246/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil,testing` on tecla (247/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil,testing` on tecla (248/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil,testing` on tecla (249/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil,testing` on tecla (250/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil,testing` on tecla (251/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil,testing` on tecla (252/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil,testing` on tecla (253/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil,testing` on tecla (254/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil,testing` on tecla (255/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil,testing` on tecla (256/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil,testing` on tecla (257/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features storage,testing` on tecla (258/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,storage,testing` on tecla (259/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,storage,testing` on tecla (260/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,storage,testing` on tecla (261/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,storage,testing` on tecla (262/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,storage,testing` on tecla (263/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,storage,testing` on tecla (264/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,storage,testing` on tecla (265/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,storage,testing` on tecla (266/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,storage,testing` on tecla (267/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,storage,testing` on tecla (268/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,storage,testing` on tecla (269/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,storage,testing` on tecla (270/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,storage,testing` on tecla (271/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,storage,testing` on tecla (272/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,storage,testing` on tecla (273/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,storage,testing` on tecla (274/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,storage,testing` on tecla (275/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,storage,testing` on tecla (276/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,storage,testing` on tecla (277/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,storage,testing` on tecla (278/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,storage,testing` on tecla (279/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,storage,testing` on tecla (280/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,storage,testing` on tecla (281/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,storage,testing` on tecla (282/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,storage,testing` on tecla (283/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,storage,testing` on tecla (284/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,storage,testing` on tecla (285/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,storage,testing` on tecla (286/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,storage,testing` on tecla (287/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,storage,testing` on tecla (288/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,storage,testing` on tecla (289/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil,storage,testing` on tecla (290/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil,storage,testing` on tecla (291/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil,storage,testing` on tecla (292/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil,storage,testing` on tecla (293/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil,storage,testing` on tecla (294/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil,storage,testing` on tecla (295/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil,storage,testing` on tecla (296/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil,storage,testing` on tecla (297/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil,storage,testing` on tecla (298/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil,storage,testing` on tecla (299/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil,storage,testing` on tecla (300/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil,storage,testing` on tecla (301/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil,storage,testing` on tecla (302/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil,storage,testing` on tecla (303/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil,storage,testing` on tecla (304/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil,storage,testing` on tecla (305/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil,storage,testing` on tecla (306/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil,storage,testing` on tecla (307/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil,storage,testing` on tecla (308/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil,storage,testing` on tecla (309/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil,storage,testing` on tecla (310/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil,storage,testing` on tecla (311/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil,storage,testing` on tecla (312/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil,storage,testing` on tecla (313/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil,storage,testing` on tecla (314/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil,storage,testing` on tecla (315/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil,storage,testing` on tecla (316/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil,storage,testing` on tecla (317/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil,storage,testing` on tecla (318/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil,storage,testing` on tecla (319/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil,storage,testing` on tecla (320/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil,storage,testing` on tecla (321/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features via` on tecla (322/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,via` on tecla (323/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,via` on tecla (324/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,via` on tecla (325/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,via` on tecla (326/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,via` on tecla (327/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,via` on tecla (328/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,via` on tecla (329/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,via` on tecla (330/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,via` on tecla (331/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,via` on tecla (332/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,via` on tecla (333/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,via` on tecla (334/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,via` on tecla (335/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,via` on tecla (336/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,via` on tecla (337/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,via` on tecla (338/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,via` on tecla (339/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,via` on tecla (340/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,via` on tecla (341/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,via` on tecla (342/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,via` on tecla (343/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,via` on tecla (344/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,via` on tecla (345/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,via` on tecla (346/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,via` on tecla (347/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,via` on tecla (348/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,via` on tecla (349/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,via` on tecla (350/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,via` on tecla (351/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,via` on tecla (352/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,via` on tecla (353/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil,via` on tecla (354/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil,via` on tecla (355/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil,via` on tecla (356/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil,via` on tecla (357/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil,via` on tecla (358/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil,via` on tecla (359/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil,via` on tecla (360/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil,via` on tecla (361/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil,via` on tecla (362/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil,via` on tecla (363/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil,via` on tecla (364/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil,via` on tecla (365/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil,via` on tecla (366/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil,via` on tecla (367/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil,via` on tecla (368/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil,via` on tecla (369/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil,via` on tecla (370/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil,via` on tecla (371/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil,via` on tecla (372/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil,via` on tecla (373/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil,via` on tecla (374/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil,via` on tecla (375/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil,via` on tecla (376/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil,via` on tecla (377/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil,via` on tecla (378/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil,via` on tecla (379/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil,via` on tecla (380/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil,via` on tecla (381/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil,via` on tecla (382/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil,via` on tecla (383/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil,via` on tecla (384/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,hil,via` on tecla (385/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features std,via` on tecla (386/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,std,via` on tecla (387/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,std,via` on tecla (388/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,std,via` on tecla (389/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,std,via` on tecla (390/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,std,via` on tecla (391/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,std,via` on tecla (392/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,std,via` on tecla (393/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,std,via` on tecla (394/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,std,via` on tecla (395/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,std,via` on tecla (396/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,std,via` on tecla (397/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,std,via` on tecla (398/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,std,via` on tecla (399/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,std,via` on tecla (400/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,std,via` on tecla (401/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,std,via` on tecla (402/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,std,via` on tecla (403/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,std,via` on tecla (404/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,std,via` on tecla (405/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,std,via` on tecla (406/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,std,via` on tecla (407/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,std,via` on tecla (408/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,std,via` on tecla (409/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,std,via` on tecla (410/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,std,via` on tecla (411/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,std,via` on tecla (412/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,std,via` on tecla (413/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,std,via` on tecla (414/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,std,via` on tecla (415/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,std,via` on tecla (416/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,std,via` on tecla (417/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features testing,via` on tecla (418/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,testing,via` on tecla (419/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,testing,via` on tecla (420/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,testing,via` on tecla (421/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,testing,via` on tecla (422/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,testing,via` on tecla (423/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,testing,via` on tecla (424/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,testing,via` on tecla (425/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,testing,via` on tecla (426/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,testing,via` on tecla (427/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,testing,via` on tecla (428/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,testing,via` on tecla (429/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,testing,via` on tecla (430/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,testing,via` on tecla (431/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,testing,via` on tecla (432/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,testing,via` on tecla (433/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,testing,via` on tecla (434/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,testing,via` on tecla (435/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,testing,via` on tecla (436/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,testing,via` on tecla (437/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,testing,via` on tecla (438/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,testing,via` on tecla (439/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,testing,via` on tecla (440/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,testing,via` on tecla (441/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,testing,via` on tecla (442/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,testing,via` on tecla (443/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,testing,via` on tecla (444/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,testing,via` on tecla (445/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,testing,via` on tecla (446/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,testing,via` on tecla (447/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,testing,via` on tecla (448/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,embassy,testing,via` on tecla (449/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features hil,testing,via` on tecla (450/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,hil,testing,via` on tecla (451/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,hil,testing,via` on tecla (452/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,hil,testing,via` on tecla (453/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,hil,testing,via` on tecla (454/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,hil,testing,via` on tecla (455/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,hil,testing,via` on tecla (456/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,hil,testing,via` on tecla (457/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,hil,testing,via` on tecla (458/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,hil,testing,via` on tecla (459/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,hil,testing,via` on tecla (460/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,hil,testing,via` on tecla (461/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,hil,testing,via` on tecla (462/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,hil,testing,via` on tecla (463/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,hil,testing,via` on tecla (464/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,default,hil,testing,via` on tecla (465/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features embassy,hil,testing,via` on tecla (466/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,embassy,hil,testing,via` on tecla (467/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,embassy,hil,testing,via` on tecla (468/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,embassy,hil,testing,via` on tecla (469/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,embassy,hil,testing,via` on tecla (470/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,embassy,hil,testing,via` on tecla (471/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,embassy,hil,testing,via` on tecla (472/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,arch-riscv32,embassy,hil,testing,via` on tecla (473/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features default,embassy,hil,testing,via` on tecla (474/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,default,embassy,hil,testing,via` on tecla (475/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,default,embassy,hil,testing,via` on tecla (476/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-cortex-m,default,embassy,hil,testing,via` on tecla (477/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-riscv32,default,embassy,hil,testing,via` on tecla (478/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-avr,arch-riscv32,default,embassy,hil,testing,via` on tecla (479/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features --features arch-cortex-m,arch-riscv32,default,embassy,hil,testing,via` on tecla (480/483)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+
+info: running `cargo clippy --all-targets --no-default-features` on tecla-config (481/483)
+    Checking tecla-config v0.1.0 (/home/gabe/tecla/crates/tecla-config)
+error: `allow` attribute without specifying a reason
+ --> crates/tecla-config/tests/transpile_structural.rs:5:1
+  |
+5 | #![allow(missing_docs)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#allow_attributes_without_reason
+  = note: `-D clippy::allow-attributes-without-reason` implied by `-D clippy::restriction`
+  = help: to override `-D clippy::restriction` add `#[allow(clippy::allow_attributes_without_reason)]`
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:23:18
+   |
+23 |     let layers = keymap::parse_keymap_c_with_shared(input, &shared).unwrap();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+   = note: `-D clippy::unwrap-used` implied by `-D clippy::restriction`
+   = help: to override `-D clippy::restriction` add `#[allow(clippy::unwrap_used)]`
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:24:5
+   |
+24 |     keymap::validate_keycodes(&layers).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:25:18
+   |
+25 |     let output = keymap::transpile(&layers, Some(12)).unwrap();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:33:18
+   |
+33 |     let layers = keymap::parse_keymap_c_with_shared(input, &shared).unwrap();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:34:5
+   |
+34 |     keymap::validate_keycodes(&layers).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/golden_snapshots.rs:35:18
+   |
+35 |     let output = keymap::transpile(&layers, Some(12)).unwrap();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:108:18
+    |
+108 |     let config = info_json::parse(PLANCK_INFO_JSON).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+    = note: `-D clippy::unwrap-used` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::unwrap_used)]`
+
+error: indexing into a string may panic if the index is within a UTF-8 character
+   --> crates/tecla-config/tests/transpile_structural.rs:194:22
+    |
+194 |         let inner = &token[4..token.len() - 1];
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#string_slice
+    = note: `-D clippy::string-slice` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::string_slice)]`
+
+error: indexing into a string may panic if the index is within a UTF-8 character
+   --> crates/tecla-config/tests/transpile_structural.rs:205:26
+    |
+205 |             let inner = &token[prefix.len()..token.len() - 1];
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#string_slice
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:124:18
+    |
+124 |     let layers = keymap::parse_keymap_c_with_shared(PLANCK_KEYMAP_C, &shared).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/tests/planck_e2e.rs:127:16
+    |
+127 |     assert_eq!(layers[0].keys.len(), 48, "base layer key count");
+    |                ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+    = note: `-D clippy::indexing-slicing` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::indexing_slicing)]`
+
+error: indexing may panic
+   --> crates/tecla-config/tests/planck_e2e.rs:128:16
+    |
+128 |     assert_eq!(layers[1].keys.len(), 48, "fn layer key count");
+    |                ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:130:18
+    |
+130 |     let output = keymap::transpile(&layers, Some(12)).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/transpile_structural.rs:261:18
+    |
+261 |     let layers = keymap::parse_keymap_c_with_shared(PLANCK_KEYMAP_C, &shared).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+    = note: `-D clippy::unwrap-used` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::unwrap_used)]`
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/transpile_structural.rs:262:5
+    |
+262 |     keymap::validate_keycodes(&layers).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:142:18
+    |
+142 |     let layers = keymap::parse_keymap_c_with_shared(PLANCK_KEYMAP_C, &shared).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: `panic` should not be present in production code
+   --> crates/tecla-config/tests/planck_e2e.rs:145:9
+    |
+145 |         panic!("expected 2 layers")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#panic
+    = note: `-D clippy::panic` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::panic)]`
+
+error: could not compile `tecla-config` (test "golden_snapshots") due to 6 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/transpile_structural.rs:279:18
+    |
+279 |     let layers = keymap::parse_keymap_c_with_shared(PLANCK_KEYMAP_C, &shared).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:152:5
+    |
+152 |     keymap::validate_keycodes(&layers).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/tests/planck_e2e.rs:154:18
+    |
+154 |     let output = keymap::transpile(&layers, Some(12)).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: could not compile `tecla-config` (test "planck_e2e") due to 9 previous errors
+error: could not compile `tecla-config` (test "transpile_structural") due to 6 previous errors
+error: used `unwrap()` on a `Result` value
+  --> crates/tecla-config/tests/qmk_keyboards.rs:8:5
+   |
+ 8 | /     Path::new(env!("CARGO_MANIFEST_DIR"))
+ 9 | |         .join("../..")
+10 | |         .canonicalize()
+11 | |         .unwrap()
+   | |_________________^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+   = note: `-D clippy::unwrap-used` implied by `-D clippy::restriction`
+   = help: to override `-D clippy::restriction` add `#[allow(clippy::unwrap_used)]`
+
+error: this function marked with #[test] is outside a #[cfg(test)] module
+  --> crates/tecla-config/tests/qmk_keyboards.rs:39:1
+   |
+39 | / fn parse_all_qmk_info_json() {
+40 | |     let fixtures = workspace_root().join("keyboards");
+41 | |     assert!(
+42 | |         fixtures.exists(),
+...  |
+66 | |     assert_eq!(failed, 0, "info.json: {failed}/{total} failed to parse");
+67 | | }
+   | |_^
+   |
+   = note: move it to a testing module marked with #[cfg(test)]
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#tests_outside_test_module
+   = note: `-D clippy::tests-outside-test-module` implied by `-D clippy::restriction`
+   = help: to override `-D clippy::restriction` add `#[allow(clippy::tests_outside_test_module)]`
+
+error: literal non-ASCII character detected
+  --> crates/tecla-config/tests/qmk_keyboards.rs:43:9
+   |
+43 |         "keyboards/ directory missing — run from repo root"
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider replacing the string with: `"keyboards/ directory missing \u{2014} run from repo root"`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#non_ascii_literal
+   = note: `-D clippy::non-ascii-literal` implied by `-D clippy::restriction`
+   = help: to override `-D clippy::restriction` add `#[allow(clippy::non_ascii_literal)]`
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:54:5
+   |
+54 |     eprintln!("info.json + keyboard.json: {passed}/{total} passed, {failed} failed");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+   = note: `-D clippy::print-stderr` implied by `-D clippy::restriction`
+   = help: to override `-D clippy::restriction` add `#[allow(clippy::print_stderr)]`
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:59:13
+   |
+59 |             eprintln!("  FAIL: {path}");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:62:13
+   |
+62 |             eprintln!("  ... and {} more", failed - 20);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: this function marked with #[test] is outside a #[cfg(test)] module
+  --> crates/tecla-config/tests/qmk_keyboards.rs:70:1
+   |
+70 | / fn parse_all_qmk_keymap_c() {
+71 | |     let fixtures = workspace_root().join("keyboards");
+72 | |     assert!(
+73 | |         fixtures.exists(),
+...  |
+96 | |     assert_eq!(failed, 0, "keymap.c: {failed}/{total} failed to parse");
+97 | | }
+   | |_^
+   |
+   = note: move it to a testing module marked with #[cfg(test)]
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#tests_outside_test_module
+
+error: literal non-ASCII character detected
+  --> crates/tecla-config/tests/qmk_keyboards.rs:74:9
+   |
+74 |         "keyboards/ directory missing — run from repo root"
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider replacing the string with: `"keyboards/ directory missing \u{2014} run from repo root"`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#non_ascii_literal
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:84:5
+   |
+84 |     eprintln!("keymap.c: {passed}/{total} passed, {failed} failed");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:89:13
+   |
+89 |             eprintln!("  FAIL: {path}");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+  --> crates/tecla-config/tests/qmk_keyboards.rs:92:13
+   |
+92 |             eprintln!("  ... and {} more", failed - 20);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: this function marked with #[test] is outside a #[cfg(test)] module
+   --> crates/tecla-config/tests/qmk_keyboards.rs:100:1
+    |
+100 | / fn transpile_coverage() {
+101 | |     let kb = workspace_root().join("keyboards");
+102 | |     assert!(kb.exists(), "keyboards/ directory missing");
+...   |
+178 | | }
+    | |_^
+    |
+    = note: move it to a testing module marked with #[cfg(test)]
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#tests_outside_test_module
+
+error: casting `usize` to `f64` may cause a loss of precision (`usize` can be up to 64 bits wide depending on the target architecture, but `f64`'s mantissa is only 52 bits wide)
+   --> crates/tecla-config/tests/qmk_keyboards.rs:143:15
+    |
+143 |     let pct = (mapped_keys as f64) / (total_keys.max(1) as f64) * 100.0;
+    |               ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#cast_precision_loss
+    = note: `-D clippy::cast-precision-loss` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::cast_precision_loss)]`
+
+error: using a potentially dangerous silent `as` conversion
+   --> crates/tecla-config/tests/qmk_keyboards.rs:143:15
+    |
+143 |     let pct = (mapped_keys as f64) / (total_keys.max(1) as f64) * 100.0;
+    |               ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a safe wrapper for this conversion
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#as_conversions
+    = note: `-D clippy::as-conversions` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::as_conversions)]`
+
+error: casting `usize` to `f64` may cause a loss of precision (`usize` can be up to 64 bits wide depending on the target architecture, but `f64`'s mantissa is only 52 bits wide)
+   --> crates/tecla-config/tests/qmk_keyboards.rs:143:38
+    |
+143 |     let pct = (mapped_keys as f64) / (total_keys.max(1) as f64) * 100.0;
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#cast_precision_loss
+
+error: using a potentially dangerous silent `as` conversion
+   --> crates/tecla-config/tests/qmk_keyboards.rs:143:38
+    |
+143 |     let pct = (mapped_keys as f64) / (total_keys.max(1) as f64) * 100.0;
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a safe wrapper for this conversion
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#as_conversions
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:144:5
+    |
+144 |     eprintln!("\ntranspile coverage: {mapped_keys}/{total_keys} mapped ({pct:.1}%)");
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:145:5
+    |
+145 | /     eprintln!(
+146 | |         "{unmapped} unmapped keycode instances, {} distinct",
+147 | |         unmapped_freq.len()
+148 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:152:5
+    |
+152 |     eprintln!("\nTop 60 unresolved:");
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:154:9
+    |
+154 |         eprintln!("  {count:>5}x  {kc}");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:157:9
+    |
+157 |         eprintln!("  ... and {} more", unmapped_by_freq.len() - 60);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:167:5
+    |
+167 | /     eprintln!(
+168 | |         "\n{passthrough_total} passthrough instances, {} distinct",
+169 | |         by_freq.len()
+170 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:171:5
+    |
+171 |     eprintln!("\nTop 60:");
+    |     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:173:9
+    |
+173 |         eprintln!("  {count:>5}x  {kc}");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: use of `eprintln!`
+   --> crates/tecla-config/tests/qmk_keyboards.rs:176:9
+    |
+176 |         eprintln!("  ... and {} more", by_freq.len() - 60);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#print_stderr
+
+error: could not compile `tecla-config` (test "qmk_keyboards") due to 25 previous errors
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:636:22
+    |
+636 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+    = note: `-D clippy::unwrap-used` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::unwrap_used)]`
+
+error: `panic` should not be present in production code
+   --> crates/tecla-config/src/keymap/parser.rs:639:13
+    |
+639 |             panic!("expected 2 layers")
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#panic
+    = note: `-D clippy::panic` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::panic)]`
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:663:22
+    |
+663 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/parser.rs:665:21
+    |
+665 |         let layer = layers.first().unwrap();
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:691:22
+    |
+691 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/parser.rs:693:21
+    |
+693 |         let layer = layers.first().unwrap();
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap_err()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:701:19
+    |
+701 |         let err = parse_keymap_c(source).unwrap_err();
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Ok`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:722:22
+    |
+722 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:723:20
+    |
+723 |         assert_eq!(layers[0].keys[0], ResolvedKeycode::Momentary(1));
+    |                    ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+    = note: `-D clippy::indexing-slicing` implied by `-D clippy::restriction`
+    = help: to override `-D clippy::restriction` add `#[allow(clippy::indexing_slicing)]`
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:723:20
+    |
+723 |         assert_eq!(layers[0].keys[0], ResolvedKeycode::Momentary(1));
+    |                    ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:737:22
+    |
+737 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:739:13
+    |
+739 |             layers[0].keys[0],
+    |             ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:739:13
+    |
+739 |             layers[0].keys[0],
+    |             ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:755:22
+    |
+755 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:757:13
+    |
+757 |             layers[0].keys[0],
+    |             ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:757:13
+    |
+757 |             layers[0].keys[0],
+    |             ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:770:22
+    |
+770 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:772:13
+    |
+772 |             layers[0].keys[0],
+    |             ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:772:13
+    |
+772 |             layers[0].keys[0],
+    |             ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:786:22
+    |
+786 |         let layers = parse_keymap_c_with_includes(&path, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: only a `panic!` in `if`-then statement
+   --> crates/tecla-config/src/keymap/parser.rs:790:21
+    |
+790 | /                     if raw.contains("_FN") {
+791 | |                         panic!("key {i} in layer {} is unresolved: {raw}", layer.name);
+792 | |                     }
+    | |_____________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#manual_assert
+    = note: `-D clippy::manual-assert` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::manual_assert)]`
+help: replace `if`-then-`panic!` with `assert!`
+    |
+790 -                     if raw.contains("_FN") {
+791 -                         panic!("key {i} in layer {} is unresolved: {raw}", layer.name);
+792 -                     }
+790 +                     assert!(!raw.contains("_FN"), "key {i} in layer {} is unresolved: {raw}", layer.name);
+    |
+
+error: `panic` should not be present in production code
+   --> crates/tecla-config/src/keymap/parser.rs:791:25
+    |
+791 |                         panic!("key {i} in layer {} is unresolved: {raw}", layer.name);
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#panic
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:810:22
+    |
+810 |         let layers = parse_keymap_c_with_shared(src, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/parser.rs:811:18
+    |
+811 |         let kc = layers[0].keys.first().unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:811:18
+    |
+811 |         let kc = layers[0].keys.first().unwrap();
+    |                  ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:833:9
+    |
+833 | /         parser
+834 | |             .set_language(&tree_sitter_c::LANGUAGE.into())
+835 | |             .unwrap();
+    | |_____________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/parser.rs:836:20
+    |
+836 |         let tree = parser.parse(src, None).unwrap();
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/parser.rs:857:22
+    |
+857 |         let layers = parse_keymap_c_with_shared(source, &shared).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:859:13
+    |
+859 |             layers[0].keys[0],
+    |             ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/tecla-config/src/keymap/parser.rs:859:13
+    |
+859 |             layers[0].keys[0],
+    |             ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/transpiler.rs:456:22
+    |
+456 |         let result = transpile(&layers, None).unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap_err()` on a `Result` value
+   --> crates/tecla-config/src/keymap/transpiler.rs:465:19
+    |
+465 |         let err = transpile(&[], None).unwrap_err();
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Ok`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap_err()` on a `Result` value
+   --> crates/tecla-config/src/keymap/transpiler.rs:484:19
+    |
+484 |         let err = transpile(&layers, None).unwrap_err();
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Ok`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap_err()` on a `Result` value
+   --> crates/tecla-config/src/keymap/transpiler.rs:499:19
+    |
+499 |         let err = validate_keycodes(&layers).unwrap_err();
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Ok`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/tecla-config/src/keymap/transpiler.rs:511:9
+    |
+511 |         validate_keycodes(&layers).unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/mod.rs:342:23
+    |
+342 |         let mo_base = defines.resolve_value("QK_MOMENTARY").unwrap();
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/tecla-config/src/keymap/mod.rs:346:23
+    |
+346 |         let lt_base = defines.resolve_value("QK_LAYER_TAP").unwrap();
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unwrap_used
+
+error: `panic` should not be present in production code
+   --> crates/tecla-config/src/proximity.rs:265:13
+    |
+265 |             panic!("missing layout")
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#panic
+
+error: could not compile `tecla-config` (lib test) due to 38 previous errors
+error: process didn't exit successfully: `/home/gabe/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo clippy --all-targets --manifest-path crates/tecla-config/Cargo.toml --no-default-features` (exit status: 101)
+error: Recipe `lint` failed on line 23 with exit code 1

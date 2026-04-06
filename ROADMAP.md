@@ -1,152 +1,299 @@
 # Tecla Roadmap
 
-A QMK-inspired keyboard firmware core built in embedded Rust.
-Targets `no_std` by default, async-first via Embassy, MCU-agnostic via `embedded-hal`.
+An embedded Rust keyboard firmware core — `no_std`, async-first via Embassy,
+MCU-agnostic via `embedded-hal` and `embedded-hal-async`.
 
-**Primary targets:** RP2040, STM32, nRF52840 — modern MCUs with ample flash and RAM.
-**AVR (ATmega32u4):** stretch goal, feature-flagged, tackled after all other phases complete.
-Goal: eventual drop-in replacement for QMK on all supported boards.
+**Primary targets:** RP2040, STM32, nRF52840, ESP32-S3 — modern MCUs
+with ample flash and RAM, all served by mature Rust HAL ecosystems.
 
----
+**Design goals:**
+
+- Match and exceed QMK's keyboard input core with a type-safe, memory-safe,
+  fully-tested Rust implementation
+- One unified `Recognizer` trait for all input disambiguation — tap-hold,
+  combo, leader, tap-dance, steno share a single interface
+- `Action<Ext>` generic extension point: third-party features without forking
+- Embassy async pipeline eliminates busy-waiting; scan → process → report
+  with zero CPU burn between events
+- `unsafe_code = deny` across the entire workspace — memory safety by
+  construction, not convention
+
+**AVR (ATmega32u4):** stretch goal, feature-flagged, after all primary phases.
+
+______________________________________________________________________
 
 ## Phase 1 — Core Types and Abstractions ✅
-The fundamental vocabulary the rest of the codebase speaks.
 
 - [x] `event.rs` — `KeyPos`, `KeyEvent` (press/release with timestamp)
-- [x] `action.rs` — `KeyCode` (HID-aligned enum), `ModifierKey` (bitmask),
-      `ConsumerCode`, `LayerOp`, `Action<Ext>` (generic extension point)
+- [x] `action.rs` — `KeyCode` (HID-aligned), `ModifierKey` (bitmask),
+  `ConsumerCode`, `LayerOp`, `Action<Ext>` generic extension point
 - [x] `modifier.rs` — `ModifierState` (real / weak / oneshot stacks)
-- [x] `recognizer.rs` — `Recognizer` trait + `Recognition<T>` enum —
-      the **unifying primitive** for tap-hold, leader, combo, tap-dance, steno
-- [x] `report.rs` — `KeyboardReport` (6KRO), `ConsumerReport`, `HidReport`
-- [x] `hid.rs` — `Reporter` trait (output boundary)
+- [x] `recognizer.rs` — `Recognizer` trait + `Recognition<T>` — the unifying
+  primitive for all input disambiguation
+- [x] `report.rs` — `KeyboardReport` (6KRO), `NkroKeyboardReport` (128-key
+  bitmap), `ConsumerReport`, `HidReport`
+- [x] `hid.rs` — `Reporter` / `AsyncReporter` output boundary traits
 
----
+______________________________________________________________________
 
 ## Phase 2 — Matrix Scanning ✅
-Read the physical switch matrix and produce raw state.
 
 - [x] `matrix.rs` — `MatrixState<ROWS, COLS>` with safe accessors,
-      `MatrixScanner` trait
-- [ ] Row-strobe / col-read GPIO implementation (board crate)
-- [ ] Direct-pin implementation (board crate)
+  `MatrixScanner` and `AsyncMatrixScanner` traits
+- [x] Row-strobe / col-read GPIO implementation (`GpioMatrixScanner`)
+- [x] Direct-pin implementation (`DirectPinScanner`)
 
----
+______________________________________________________________________
 
 ## Phase 3 — Debounce ✅
-Filter electrical noise from switch contacts.
 
-- [x] `debounce.rs` — `Debouncer<ROWS, COLS>` trait
+- [x] `Debouncer<ROWS, COLS>` trait
 - [x] `SymDefer` — symmetric global-timer defer
 - [x] `AsymEagerDefer` — eager press, deferred release (per-key)
 
----
+______________________________________________________________________
 
 ## Phase 4 — Layer System ✅
-Resolve keycodes from the active layer stack.
 
-- [x] `keymap.rs` — `Layer<Ext>`, `LayerStack<LAYERS, KEYS, Ext>`
+- [x] `Layer<Ext>`, `LayerStack<LAYERS, KEYS, Ext>`
 - [x] Highest-active-layer wins, transparent fallthrough, `NoOp` blocks
 - [x] Press-time layer cache (prevents stuck keys on layer change mid-hold)
-- [x] `LayerOp` dispatch (momentary, toggle, set-default, on, off)
+- [x] `LayerOp` dispatch — momentary, toggle, set-default, on, off
 
----
+______________________________________________________________________
 
 ## Phase 5 — Tap-Hold ✅
-Disambiguate tap vs. hold for `ModTap` and `LayerTap` keys.
 
-- [x] `tapping.rs` — `TapHoldRecognizer<BUF>` implements `Recognizer`
-- [x] Default mode (timeout only)
-- [x] `HoldOnOtherKeyPress` mode
-- [x] `PermissiveHold` mode
-- [x] Configurable `tapping_term_ms` per recognizer
-- [x] Waiting buffer with configurable capacity (default 32)
-- [x] `drain_pending` for event replay after resolution
-- [ ] One-shot modifiers and one-shot layers (next)
+- [x] `TapHoldRecognizer<BUF>` implements `Recognizer`
+- [x] Default (timeout), `HoldOnOtherKeyPress`, `PermissiveHold` modes
+- [x] Configurable `tapping_term_ms`, waiting buffer, `drain_pending` replay
+- [x] One-shot modifiers and one-shot layers in `KeyboardProcessor`
 
----
+______________________________________________________________________
 
 ## Phase 6 — Extended Recognizers ✅
-Remaining `Recognizer` implementations sharing the same trait.
 
-- [x] `leader.rs` — `LeaderRecognizer`: Emacs-style nested trie sequences,
-      per-branch timeouts, which-key metadata for display integration
-- [x] `combo.rs` — `ComboRecognizer`: simultaneous key-set within a window
-- [x] `tap_dance.rs` — `TapDanceRecognizer`: counted rapid taps → action per count
-- [x] `steno.rs` — `StenoRecognizer`: chord until all-release →
-      GeminiPR / TXBOLT serialisation (dictionary stays on host in Plover)
+- [x] `LeaderRecognizer` — Emacs-style nested trie sequences, per-branch
+  timeouts, which-key metadata for display integration
+- [x] `ComboRecognizer` — simultaneous key-set within a configurable window
+- [x] `TapDanceRecognizer` — counted rapid taps → action per count
+- [x] `StenoRecognizer` — chord until all-release, GeminiPR / TXBOLT wire
+  format (dictionary stays on host in Plover)
 
----
+______________________________________________________________________
 
 ## Phase 7 — Keyboard Orchestrator ✅
-Wire the full pipeline into an Embassy async entry point.
 
-- [x] `keyboard.rs` — `KeyboardProcessor`: synchronous event → report core,
-      MCU-agnostic, no Embassy dependency
-- [x] `task.rs` — `tecla::task::run()`: single async Embassy task wrapping the
-      full scan → debounce → process → report pipeline; tap-hold deadline raced
-      via `embassy_time::with_timeout`
-- [x] `AsyncMatrixScanner` trait (`embassy` feature) — async scan boundary
-- [x] `AsyncReporter` trait (`embassy` feature) — async USB send boundary
-- [x] NKRO report (bitmap) as alternative to 6KRO — `NkroKeyboardReport`, `RolloverMode`
-- [x] Report coalescing within USB frame — `usb_task` skips identical consecutive reports
-- [x] `matrix_task` / `keyboard_task` / `usb_task` — three independent Embassy tasks
-      wired by `EventChannel` / `ReportChannel`; tap-hold deadline raced via
-      `embassy_time::with_timeout` in `keyboard_task`
+- [x] `KeyboardProcessor` — synchronous event → report core, no Embassy dep
+- [x] `tecla::task::run()` — single-task async Embassy entry point
+- [x] `matrix_task` / `keyboard_task` / `usb_task` — three-task topology
+  wired by `EventChannel` / `ReportChannel` (generic over `RawMutex`)
+- [x] Tap-hold deadline raced via `embassy_time::with_timeout`
+- [x] `RolloverMode` — switch between 6KRO and NKRO at runtime
+- [x] Report coalescing — `usb_task` skips identical consecutive reports
 
----
+______________________________________________________________________
 
-## Phase 8 — Extended Output (MIDI, Gamepad)
-The `Action<Ext>` generic makes this architectural, not bolted-on.
+## Phase 8 — Proc Macros ✅
 
-- [ ] `MidiReporter` — USB MIDI class device, tight jitter via Embassy task priority
-- [ ] `GamepadReporter` — USB HID gamepad descriptor
-- [ ] `CompositeReporter` — keyboard + MIDI + consumer simultaneously
-- [ ] Encoder events fed into the same pipeline as key events
+- [x] `keymap!` — emit a `LayerStack` from a declarative key table; all layers
+  must have the same key count (compile-time error otherwise)
+- [x] `layer!` — emit a `Layer` from a comma-separated key identifier list
+- [x] `MT!(MOD, KEY)` / `LT!(LAYER, KEY)` — mod-tap and layer-tap shorthands;
+  usable standalone or inline within `layer!` / `keymap!`
+- [x] Layer name resolution — `LT!(Fn, SPC)` inside `keymap!` resolves the
+  name to its index at macro-expand time; forward references supported
+- [x] `#[keyboard_main]` — wraps `async fn main` with `#[embassy_executor::main]`
+- [x] Full HID key identifier table (~80 QMK-compatible aliases: `A`…`Z`,
+  `F1`…`F12`, `SPC`, `ENT`, `LSFT`, `TRNS`, `NoOp`, numpad, nav, …)
+- [x] Compile-time validation — layer count, key count, layer name bounds,
+  duplicate name detection with span-accurate error diagnostics
 
----
+______________________________________________________________________
 
-## Phase 9 — Board Support Layer
-Thin crates wiring the core to real hardware.
+## Phase 9 — RP2040 Hardware Validation ✅
 
-- [ ] RP2040 board crate (Raspberry Pi Pico / Pico W)
-- [ ] STM32F4 board crate (WeAct / BlackPill)
-- [ ] nRF52840 board crate (nice!nano — BLE via SoftDevice)
-- [ ] `probe-rs` flashing and RTT logging for all ARM targets
-- [ ] Split keyboard support (secondary half streams matrix events over UART)
+First real hardware. Validates every architectural decision end-to-end.
 
----
+- [x] `tecla-rp2040` crate — depends on `embassy-rp`
+- [x] Row-strobe / col-read GPIO matrix scanner (`GpioMatrixScanner`)
+- [x] Direct-pin matrix scanner (`DirectPinScanner`)
+- [x] USB HID via `embassy-usb` (`UsbHidReporter`, 6KRO)
+- [x] RTT logging via `defmt` + `probe-rs` (defmt-rtt, probe-rs runner)
+- [x] UF2 artifact for drag-and-drop flashing
+- [x] Example: 4×12 ortholinear layout (Planck-style)
+- [x] Example: split-ready wiring (foundation for Phase 12)
 
-## Phase 10 — QMK Config Parsing
-Read existing QMK keyboards without rewriting configs.
+______________________________________________________________________
 
-- [ ] `tecla-config` — parse `info.json` (matrix layout, pins, USB VID/PID)
-- [ ] Parse `keymap.c` via `build.rs` → emit typed Rust `const` keymap
-- [ ] Validate parsed config at compile time (pin counts, layer bounds)
-- [ ] `tecla-macros` — `keymap!`, `layer!`, `MT!`, `LT!`, `#[keyboard_main]`
+## Phase 10 — QMK Feature Parity: Core Input
 
----
+Close the gap with QMK's keyboard input core. Each item is a self-contained
+`Recognizer` or `KeyboardProcessor` feature.
 
-## Phase 11 — Flash QMK Keyboards
-Drop-in replacement for QMK on supported modern boards.
+- [x] **Repeat key** — `Action::RepeatKey`, replays last non-repeat keycode
+- [x] **Caps Word** — `Action::CapsWord`, auto-shifts A–Z, deactivates on
+  non-continue keys (space, enter, escape, tab, symbols)
+- [x] **Key overrides** — `KeyOverride` struct, intercept key+modifier combos
+  and remap to replacement actions; configured via `with_overrides()`
+- [x] **Layer lock** — `Action::LayerLock(n)`, toggle-locks a layer persistently
+- [x] **Tri-layer** — `TriLayerDef`, auto-activates target layer when two
+  source layers are both active; configured via `with_tri_layers()`
+- [x] **Dynamic macros** — `MacroRecord(slot)` / `MacroStop` / `MacroPlay(slot)`,
+  4 slots × 64 keycodes, stored in RAM
+- [x] **Send String** — `Action::SendString(&'static [KeyCode])`, emits a
+  static keycode sequence as if typed
+- [x] **Autocorrect** — implemented in Phase 14 (trie-based, edit-distance matching)
+- [x] **Mouse keys** — `Action::Mouse(MouseAction)`, HID mouse report for
+  movement, click, and scroll; `MouseReport` type added
+- [x] **Bootmagic** — `Action::Bootmagic`, sets a flag checked at startup
 
-- [ ] UF2 / BIN artifacts compatible with existing QMK bootloaders
-  - [ ] RP2040 UF2 (drag-and-drop)
-  - [ ] STM32 DFU (`dfu-util`)
-  - [ ] nRF52840 (`adafruit-nrfutil` / `probe-rs`)
-- [ ] QMK-compatible bootloader entry (hold key on plug-in)
-- [ ] VIA / VIAL compatibility layer (dynamic keymap remapping over USB HID)
-- [ ] `rmk flash --keyboard <qmk-keyboard-id>` CLI
+______________________________________________________________________
+
+## Phase 11 — Persistent Storage
+
+Save dynamic keymaps, per-key config, and runtime state across power cycles.
+
+- [x] `storage.rs` — async storage via `sequential-storage`, `StorageKey` enum,
+  `PersistedState`, `load_state()` / `save_state()` behind `storage` feature
+- [x] Wear-leveling — delegated to `sequential-storage` (log-structured flash)
+- [x] Persist: default layer, locked layers, rollover mode, dynamic macro slots
+- [x] Runtime keymap remapping — `Layer::set()`, `LayerStack::set_action()`,
+  `KeyboardProcessor::restore_state()`
+- [x] EEPROM emulation shim — `EepromShim` with `read_byte`/`write_byte`, wired to Via protocol
+
+______________________________________________________________________
+
+## Phase 12 — Split Keyboard
+
+Half of the custom keyboard market. Needs its own phase.
+
+- [x] `SplitTransport` trait — async send/recv for `KeyEvent`s
+- [x] `remote_event_task` — primary half receives from transport into EventChannel
+- [x] `secondary_task` — secondary half scans + debounces + sends over transport
+- [x] Half-identification — `SplitRole` enum + `SplitConfig` with col_offset remapping
+- [x] USB arbitration — split.rs example shows primary-only USB enumeration
+- [x] `UartTransport` — async UART impl over `embedded-io-async`, 11-byte framed KeyEvent
+- [ ] Validated targets: Corne (3×6), Kyria (3×6+5t), Lily58 (4×6)
+
+______________________________________________________________________
+
+## Phase 13 — Extended Output
+
+The `Action<Ext>` hook makes these architectural additions, not bolt-ons.
+
+- [x] MIDI support — `MidiAction`, `MidiEvent`, `HidReport::Midi` + auto note-off on release
+- [x] Gamepad support — `GamepadAction`, `GamepadReport`, `HidReport::Gamepad` + button/axis tracking
+- [x] Composite output — `HidReport` enum IS the composite; board crates route by variant
+- [x] Encoder support — `encoder_task` routes rotations as virtual key positions
+  through the full `KeyboardProcessor` pipeline, layer-resolved per encoder
+- [x] Pointing device — `PointingEvent`, `AsyncPointingScanner`, `pointing_task`,
+  `pointing_event_to_report`; sends `HidReport::Mouse` to report channel
+
+______________________________________________________________________
+
+## Phase 14 — Autocorrect and Autocomplete
+
+Deferred from Phase 10. Pure core logic, no hardware deps.
+
+- [x] `AutocorrectEngine` — trie-based dictionary, circular keystroke buffer,
+  word-boundary-triggered correction with edit-distance matching,
+  `Action::AutocorrectToggle`
+- [x] Rollover transposition detection via `check_transposed()` (opt-in)
+- [x] `AutocompleteEngine` — trie-based prefix walking, frequency-ranked
+  suggestions, `Action::AutocompleteAccept` / `AutocompleteToggle`
+- [x] Default dictionary — `tecla_config::dictionary::fetch_and_compile()` downloads SCOWL and compiles to trie
+- [x] Keyboard-proximity weighted matching — `proximity::generate_proximity_table()` + `AutocorrectEngine::with_proximity()`
+
+Future exploration (not in scope now, may revisit):
+
+- Human debouncing — with proximity metrics + full dictionary trie, detect
+  accidental adjacent-key presses, letters out of order, spacebar before last
+  char or after first char. Deterministic rules, slim code. Experiment once
+  proximity and dictionary are in place.
+- WPM-adaptive correction aggressiveness (CHI 2018: 136M keystrokes study)
+- Frecency-weighted per-word correction ranking (Mozilla-style exponential decay)
+- Character trigram model for typo vs intentional-word discrimination (~4KB)
+- DAFSA compression for ~3x smaller dictionaries than plain trie
+- Aho-Corasick multi-pattern matching via double-array trie (daachorse crate)
+- TinyML character-level prediction on MCU (MCUNet, speculative)
+
+______________________________________________________________________
+
+## Phase 15 — QMK Config Import and Via/Vial
+
+Make tecla a drop-in replacement for QMK from the user's perspective.
+Parser and protocol work is pure Rust — no hardware deps.
+
+- [x] `tecla-config` crate — parse QMK `info.json` (matrix, pins, USB VID/PID)
+- [x] `keymap.c` transpiler — parse QMK keycodes, emit `keymap!`/`layer!` Rust source
+- [x] Compile-time validation — dimension checks, unknown keycodes, layer consistency
+- [x] Via / Vial protocol — `ViaProtocol` in core, dynamic keymap get/set over USB HID
+
+______________________________________________________________________
+
+## Phase 16 — RGB / LED / Audio / Haptic
+
+Display and feedback subsystems. Animation engine and reactive event system
+are pure core logic; hardware drivers are board-specific.
+
+- [x] LED/RGB driver trait — `LedDriver` async trait abstracting WS2812/IS31FL3733
+- [x] RGB task — `rgb_task` async Embassy task ticking animation engine + LED driver
+- [x] Reactive animations — respond to keypress events from the pipeline
+- [x] Audio — `audio.rs` with `Tone`, `Melody`, `AudioCommand`, `BuzzerDriver` trait,
+  `AudioController`, `audio_task`, built-in melodies (startup, layer-change, error)
+- [x] Haptic feedback — `haptic.rs` with `HapticEffect`, `HapticCommand`, `HapticDriver`
+  trait, `HapticController`, `haptic_task`
+
+______________________________________________________________________
+
+## Phase 17 — Wireless (BLE)
+
+nRF52840 via SoftDevice or nrf-softdevice crate. This is ZMK territory —
+tecla's goal is to match ZMK's BLE quality with a superior core.
+Blocked on nRF52840 hardware.
+
+- [x] BLE HID profile — `BleReporter` trait extending `AsyncReporter` with connect/disconnect/advertise
+- [x] Pairing and bonding — `BondInfo`, `BleHostManager<MAX_HOSTS>`, `StorageKey::BleHost0..3`
+- [x] Multi-host switching — `Action::BleHostSwitch(u8)`, `Action::BleAdvertise`, `Action::BleDisconnect`
+- [x] Power management — `PowerManager` trait with `enter_deep_sleep()`, `wake_reason()`, `Action::Sleep`
+- [x] Battery service — `BatteryLevel` with percent/millivolts, `is_low()`, `is_critical()`
+- [x] Simultaneous USB + BLE — `DualReporter`, `OutputMode`, `Action::OutputSelect`,
+  `OUT_USB` / `OUT_BLE` keymap tokens; user selects transport at runtime
+
+______________________________________________________________________
+
+## Phase 18 — Additional MCU Targets
+
+Blocked on hardware.
+
+- [x] STM32F4 support — `tecla-stm32f4` board crate, Planck example, builds for thumbv7em-none-eabihf
+- [ ] CH32V3 support (`ch32-hal`, ultra-low-cost RISC-V)
+- [x] ESP32-S3 support — `tecla-esp32s3` board crate written, excluded pending upstream esp-hal bug
+- [ ] Shared HAL abstraction layer
+
+______________________________________________________________________
+
+## Phase 19 — Flash CLI and Artifacts
+
+Hardware-dependent tooling from original Phase 16.
+
+- [ ] `tecla flash --keyboard <qmk-id>` CLI
   - [ ] Fetches `info.json` from QMK firmware repo
-  - [ ] Compiles and flashes in one step
+  - [ ] Compiles and flashes in one step via `probe-rs` or UF2
+- [ ] UF2 / DFU / `adafruit-nrfutil` artifacts per target
 
----
+______________________________________________________________________
 
-## Stretch Goal — AVR Support
-Drop-in replacement on legacy ATmega32u4 boards (Pro Micro, Elite-C, Teensy 2.0).
-Tackled only after Phases 1–11 are complete.
+## Stretch — AVR and Zephyr
+
+**AVR (ATmega32u4):** Pro Micro, Elite-C, Teensy 2.0.
 
 - [ ] `avr` feature flag — gates Embassy, swaps in sync polling loop
-- [ ] Code size audit — monomorphization budget within 32KB flash
+- [ ] Code-size audit — monomorphization budget within 32 KB flash
 - [ ] AVR HEX artifact via `avrdude`
-- [ ] CI target: `avr-unknown-gnu-atmega32u4`
+
+**Zephyr RTOS target:**
+
+- [ ] `zephyr-hal` backend as an alternative to Embassy for shops already
+  on Zephyr

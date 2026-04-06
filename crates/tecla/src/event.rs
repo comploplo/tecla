@@ -72,6 +72,39 @@ impl KeyEvent {
     }
 }
 
+/// Rotation direction of a rotary encoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EncoderDirection {
+    /// Clockwise rotation.
+    Clockwise,
+    /// Counter-clockwise rotation.
+    CounterClockwise,
+}
+
+/// A single step event from a rotary encoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncoderEvent {
+    /// Zero-based encoder index.
+    pub encoder_id: u8,
+    /// Direction of the step.
+    pub direction: EncoderDirection,
+    /// Timestamp in milliseconds since firmware start.
+    pub timestamp_ms: u64,
+}
+
+/// A pointing-device event (trackball, trackpad, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PointingEvent {
+    /// Horizontal movement (positive = right).
+    pub dx: i16,
+    /// Vertical movement (positive = down).
+    pub dy: i16,
+    /// Button bitmask (bit 0 = left, bit 1 = right, bit 2 = middle).
+    pub buttons: u8,
+    /// Vertical scroll (positive = up).
+    pub scroll: i8,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +201,39 @@ mod tests {
             KeyEvent::press(KeyPos::new(0, 0), 0),
             KeyEvent::press(KeyPos::new(0, 1), 0),
         );
+    }
+
+    #[test]
+    fn encoder_directions_are_distinct() {
+        assert_ne!(
+            EncoderDirection::Clockwise,
+            EncoderDirection::CounterClockwise
+        );
+    }
+
+    #[test]
+    fn encoder_event_stores_fields() {
+        let e = EncoderEvent {
+            encoder_id: 2,
+            direction: EncoderDirection::Clockwise,
+            timestamp_ms: 100,
+        };
+        assert_eq!(e.encoder_id, 2);
+        assert_eq!(e.direction, EncoderDirection::Clockwise);
+        assert_eq!(e.timestamp_ms, 100);
+    }
+
+    #[test]
+    fn pointing_event_stores_fields() {
+        let e = PointingEvent {
+            dx: 10,
+            dy: -5,
+            buttons: 0x01,
+            scroll: 3,
+        };
+        assert_eq!(e.dx, 10);
+        assert_eq!(e.dy, -5);
+        assert_eq!(e.buttons, 0x01);
+        assert_eq!(e.scroll, 3);
     }
 }

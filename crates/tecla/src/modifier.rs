@@ -103,6 +103,12 @@ impl ModifierState {
     pub fn report_byte(&self) -> ModifierKey {
         self.real.union(self.weak).union(self.oneshot)
     }
+
+    /// Returns `true` if the combined modifier state contains all bits in `mods`.
+    #[must_use]
+    pub fn contains(&self, mods: ModifierKey) -> bool {
+        self.report_byte().contains(mods)
+    }
 }
 
 #[cfg(test)]

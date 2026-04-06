@@ -27,25 +27,57 @@
 
 use heapless::{Deque, Vec};
 
-use crate::action::{Action, KeyCode, LayerOp};
+use crate::action::{
+    Action, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction,
+    TriLayerDef,
+};
+use crate::autocomplete::AutocompleteEngine;
+use crate::autocorrect::AutocorrectEngine;
 use crate::event::{KeyEvent, KeyPos};
 use crate::keymap::LayerStack;
 use crate::modifier::ModifierState;
 use crate::recognizer::{Recognition, Recognizer};
-use crate::report::{ConsumerReport, HidReport, KeyboardReport, NkroKeyboardReport};
+use crate::report::{
+    ConsumerReport, GamepadReport, HidReport, KeyboardReport, MidiEvent, MouseReport,
+    NkroKeyboardReport,
+};
 use crate::tapping::{TapHoldConfig, TapHoldDecision, TapHoldRecognizer};
 
 /// Controls whether the keyboard emits 6KRO or NKRO HID reports.
+///
+/// The default is [`Kro6`](RolloverMode::Kro6) for maximum OS compatibility.
+/// Switch to [`Nkro`](RolloverMode::Nkro) if you need more than six simultaneous
+/// keys — gaming keyboards, chord-heavy layouts, or steno practice.
+///
+/// Note that some BIOS / boot environments only recognise the boot-protocol
+/// 6KRO report. A production board crate may want to expose a key combo that
+/// toggles this at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RolloverMode {
-    /// Six-key rollover: standard boot-protocol report, 6 simultaneous keys.
+    /// Six-key rollover: standard HID boot-protocol report.
+    ///
+    /// Compatible with every OS and BIOS. Supports up to 6 non-modifier keys
+    /// simultaneously plus all 8 modifier bits.
     #[default]
     Kro6,
-    /// N-key rollover: bitmap report, up to 128 simultaneous keys.
+    /// N-key rollover: 16-byte bitmap report, up to 128 simultaneous keys.
+    ///
+    /// Requires a host driver that understands the NKRO HID report descriptor.
+    /// Modern Linux, macOS, and Windows all support it; older BIOSes may not.
     Nkro,
 }
 
 // ── ActiveHold ────────────────────────────────────────────────────────────────
+
+/// The held outcome of a tap-hold key — only the hold variants.
+///
+/// `TapHoldDecision::Tap` is never stored here because tap decisions are fully
+/// handled (press + release emitted) at resolution time and require no cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldDecision {
+    Mod(ModifierKey),
+    Layer(u8),
+}
 
 /// A resolved tap-hold that is still physically held down.
 ///
@@ -54,7 +86,7 @@ pub enum RolloverMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ActiveHold {
     pos: KeyPos,
-    decision: TapHoldDecision,
+    decision: HoldDecision,
 }
 
 // ── KeyboardProcessor ─────────────────────────────────────────────────────────
@@ -74,7 +106,7 @@ pub struct KeyboardProcessor<
     const KEYS: usize,
     Ext = (),
 > where
-    Ext: Copy + PartialEq,
+    Ext: Copy + PartialEq + 'static,
 {
     layer_stack: LayerStack<LAYERS, KEYS, Ext>,
     modifier_state: ModifierState,
@@ -84,12 +116,28 @@ pub struct KeyboardProcessor<
     pressed_keys: Vec<u8, 16>,
     pending: Deque<KeyEvent, 32>,
     rollover_mode: RolloverMode,
+    caps_word_active: bool,
+    locked_layers: u32,
+    last_keycode: Option<KeyCode>,
+    repeat_active: bool,
+    tri_layers: &'static [TriLayerDef],
+    overrides: &'static [KeyOverride<Ext>],
+    macro_slots: [Deque<KeyCode, 64>; 4],
+    macro_recording: Option<u8>,
+    playback_queue: Deque<KeyCode, 64>,
+    mouse_buttons: u8,
+    gamepad_buttons: u16,
+    gamepad_axes: [i8; 6],
+    bootmagic_triggered: bool,
+    pending_ble: Option<crate::ble::BleCommand>,
+    autocorrect: Option<AutocorrectEngine>,
+    autocomplete: Option<AutocompleteEngine>,
 }
 
 impl<const ROWS: usize, const COLS: usize, const LAYERS: usize, const KEYS: usize, Ext>
     KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>
 where
-    Ext: Copy + PartialEq,
+    Ext: Copy + PartialEq + 'static,
 {
     /// Creates a new processor with the given layer stack and tap-hold config.
     #[must_use]
@@ -103,14 +151,124 @@ where
             pressed_keys: Vec::new(),
             pending: Deque::new(),
             rollover_mode: RolloverMode::Kro6,
+            caps_word_active: false,
+            locked_layers: 0,
+            last_keycode: None,
+            repeat_active: false,
+            tri_layers: &[],
+            overrides: &[],
+            macro_slots: [Deque::new(), Deque::new(), Deque::new(), Deque::new()],
+            macro_recording: None,
+            playback_queue: Deque::new(),
+            mouse_buttons: 0,
+            gamepad_buttons: 0,
+            gamepad_axes: [0; 6],
+            bootmagic_triggered: false,
+            pending_ble: None,
+            autocorrect: None,
+            autocomplete: None,
         }
     }
 
-    /// Sets the rollover mode. Call this on the result of [`new`](Self::new).
+    /// Sets the rollover mode, consuming and returning `self` for builder chaining.
     #[must_use]
     pub fn with_rollover_mode(mut self, mode: RolloverMode) -> Self {
         self.rollover_mode = mode;
         self
+    }
+
+    /// Sets the tri-layer definitions for automatic layer activation.
+    #[must_use]
+    pub fn with_tri_layers(mut self, defs: &'static [TriLayerDef]) -> Self {
+        self.tri_layers = defs;
+        self
+    }
+
+    /// Sets the key override table for modifier-aware key remapping.
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: &'static [KeyOverride<Ext>]) -> Self {
+        self.overrides = overrides;
+        self
+    }
+
+    /// Attaches an autocorrect engine, consuming and returning `self`.
+    #[must_use]
+    pub fn with_autocorrect(mut self, engine: AutocorrectEngine) -> Self {
+        self.autocorrect = Some(engine);
+        self
+    }
+
+    /// Attaches an autocomplete engine, consuming and returning `self`.
+    #[must_use]
+    pub fn with_autocomplete(mut self, engine: AutocompleteEngine) -> Self {
+        self.autocomplete = Some(engine);
+        self
+    }
+
+    /// Returns `true` if a [`Action::Bootmagic`] key was pressed.
+    ///
+    /// Board crates check this at startup to decide whether to jump to the
+    /// bootloader or wipe configuration.
+    #[must_use]
+    pub fn bootmagic_triggered(&self) -> bool {
+        self.bootmagic_triggered
+    }
+
+    /// Returns and clears the pending BLE command, if any.
+    #[must_use]
+    pub fn pending_ble_command(&mut self) -> Option<crate::ble::BleCommand> {
+        self.pending_ble.take()
+    }
+
+    /// Returns the default layer bitmask.
+    #[must_use]
+    pub fn default_state(&self) -> u32 {
+        self.layer_stack.default_state()
+    }
+
+    /// Returns the locked-layers bitmask.
+    #[must_use]
+    pub fn locked_layers(&self) -> u32 {
+        self.locked_layers
+    }
+
+    /// Returns the current rollover mode.
+    #[must_use]
+    pub fn rollover_mode(&self) -> RolloverMode {
+        self.rollover_mode
+    }
+
+    /// Returns a reference to a dynamic macro slot, or `None` if out of range.
+    #[must_use]
+    pub fn macro_slot(&self, idx: u8) -> Option<&Deque<KeyCode, 64>> {
+        self.macro_slots.get(usize::from(idx))
+    }
+
+    /// Restores previously persisted state at boot.
+    ///
+    /// Call this once after construction, before processing any events.
+    pub fn restore_state(
+        &mut self,
+        default_state: u32,
+        locked_layers: u32,
+        rollover_mode: RolloverMode,
+        macros: [Deque<KeyCode, 64>; 4],
+    ) {
+        self.layer_stack.apply(LayerOp::SetDefault(0));
+        for bit in 0..32u8 {
+            if default_state & (1 << u32::from(bit)) != 0 {
+                self.layer_stack.apply(LayerOp::SetDefault(bit));
+                break;
+            }
+        }
+        self.locked_layers = locked_layers;
+        for bit in 0..32u8 {
+            if locked_layers & (1 << u32::from(bit)) != 0 {
+                self.layer_stack.apply(LayerOp::On(bit));
+            }
+        }
+        self.rollover_mode = rollover_mode;
+        self.macro_slots = macros;
     }
 
     /// Processes a key event, calling `emit` for each HID report produced.
@@ -121,7 +279,7 @@ where
     where
         F: FnMut(HidReport) + ?Sized,
     {
-        self.pending.push_back(event).ok();
+        let _ = self.pending.push_back(event);
         self.drain_pending(now_ms, emit);
     }
 
@@ -140,8 +298,11 @@ where
             if result.is_pending() {
                 return;
             }
-            let rec = self.active_tap_hold.take().unwrap();
-            self.handle_tap_hold_result(result, rec, now_ms, emit);
+            if let Some(rec) = self.active_tap_hold.take() {
+                if let Recognition::Matched(decision) = result {
+                    self.handle_tap_hold_result(decision, rec, now_ms, emit);
+                }
+            }
             self.drain_pending(now_ms, emit);
         }
     }
@@ -154,6 +315,19 @@ where
         self.active_tap_hold
             .as_ref()
             .and_then(|r| r.next_deadline_ms())
+    }
+
+    /// Replaces a single action in the keymap at runtime.
+    ///
+    /// Returns `true` if both the layer and key indices were valid.
+    pub fn set_action(&mut self, layer: usize, key: usize, action: Action<Ext>) -> bool {
+        self.layer_stack.set_action(layer, key, action)
+    }
+
+    /// Returns the action at `(layer, key)`, or `None` if out of bounds.
+    #[must_use]
+    pub fn get_action(&self, layer: usize, key: usize) -> Option<Action<Ext>> {
+        self.layer_stack.get_action(layer, key)
     }
 
     // ── internal ─────────────────────────────────────────────────────────────
@@ -176,8 +350,11 @@ where
             if result.is_pending() {
                 return;
             }
-            let rec = self.active_tap_hold.take().unwrap();
-            self.handle_tap_hold_result(result, rec, now_ms, emit);
+            if let Some(rec) = self.active_tap_hold.take() {
+                if let Recognition::Matched(decision) = result {
+                    self.handle_tap_hold_result(decision, rec, now_ms, emit);
+                }
+            }
             return;
         }
 
@@ -188,12 +365,21 @@ where
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "central dispatch over all Action variants"
+    )]
     fn handle_press<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
     where
         F: FnMut(HidReport) + ?Sized,
     {
         self.layer_stack.cache_press(event.pos, COLS);
-        let action = self.layer_stack.resolve(event.pos, COLS);
+        let resolved = self.layer_stack.resolve(event.pos, COLS);
+
+        let action = match resolved {
+            Action::Key(kc) => self.apply_override(kc).unwrap_or(resolved),
+            other => other,
+        };
 
         match action {
             Action::Key(kc) => {
@@ -208,8 +394,19 @@ where
             }
             Action::Layer(op) => {
                 self.layer_stack.apply(op);
+                self.check_tri_layers();
             }
-            Action::ModTap { .. } | Action::LayerTap { .. } => {
+            Action::LayerLock(n) => {
+                let bit = 1 << u32::from(n);
+                self.locked_layers ^= bit;
+                if self.locked_layers & bit != 0 {
+                    self.layer_stack.apply(LayerOp::On(n));
+                } else {
+                    self.layer_stack.apply(LayerOp::Off(n));
+                }
+                self.check_tri_layers();
+            }
+            Action::ModTap { .. } | Action::LayerTap { .. } | Action::TapToggle(_) => {
                 if let Some(rec) =
                     TapHoldRecognizer::from_action(self.tap_hold_config, action, event)
                 {
@@ -221,8 +418,112 @@ where
             }
             Action::OneShotLayer(n) => {
                 self.layer_stack.apply(LayerOp::On(n));
+                self.check_tri_layers();
             }
-            Action::Transparent | Action::NoOp | Action::Ext(_) => {}
+            Action::CapsWord => {
+                self.caps_word_active = true;
+            }
+            Action::RepeatKey => {
+                if let Some(kc) = self.last_keycode {
+                    self.repeat_active = true;
+                    self.press_keycode(kc, emit);
+                    self.repeat_active = false;
+                }
+            }
+            Action::MacroRecord(slot) => {
+                if let Some(buf) = self.macro_slots.get_mut(usize::from(slot)) {
+                    buf.clear();
+                    self.macro_recording = Some(slot);
+                }
+            }
+            Action::MacroStop => {
+                self.macro_recording = None;
+            }
+            Action::MacroPlay(slot) => {
+                if let Some(buf) = self.macro_slots.get(usize::from(slot)) {
+                    self.playback_queue.clear();
+                    for kc in buf {
+                        let _ = self.playback_queue.push_back(*kc);
+                    }
+                }
+                self.drain_playback(emit);
+            }
+            Action::SendString(codes) => {
+                self.playback_queue.clear();
+                for kc in codes {
+                    let _ = self.playback_queue.push_back(*kc);
+                }
+                self.drain_playback(emit);
+            }
+            Action::LayerMod { layer, modifier } => {
+                self.layer_stack.apply(LayerOp::On(layer));
+                self.check_tri_layers();
+                self.modifier_state.press(modifier);
+                self.emit_keyboard(emit);
+            }
+            Action::ModifiedKey { modifier, key } => {
+                self.modifier_state.press(modifier);
+                self.press_keycode(key, emit);
+            }
+            Action::Mouse(ma) => {
+                self.handle_mouse_press(ma, emit);
+            }
+            Action::Midi(ma) => {
+                Self::emit_midi_press(ma, emit);
+            }
+            Action::Gamepad(ga) => {
+                self.handle_gamepad_press(ga, emit);
+            }
+            Action::AutocorrectToggle => {
+                if let Some(ref mut e) = self.autocorrect {
+                    e.set_enabled(!e.enabled());
+                }
+            }
+            Action::AutocompleteToggle => {
+                if let Some(ref mut e) = self.autocomplete {
+                    e.set_enabled(!e.enabled());
+                }
+            }
+            Action::AutocompleteAccept => {
+                if let Some(ref mut e) = self.autocomplete {
+                    if let Some(codes) = e.accept() {
+                        for &uid in codes.as_slice() {
+                            if let Some(kc) = KeyCode::from_usage_id(uid) {
+                                let _ = self.playback_queue.push_back(kc);
+                            }
+                        }
+                    }
+                }
+                self.drain_playback(emit);
+            }
+            Action::Bootmagic => {
+                self.bootmagic_triggered = true;
+            }
+            Action::BleAdvertise => {
+                self.pending_ble = Some(crate::ble::BleCommand::Advertise);
+            }
+            Action::BleDisconnect => {
+                self.pending_ble = Some(crate::ble::BleCommand::Disconnect);
+            }
+            Action::BleHostSwitch(n) => {
+                self.pending_ble = Some(crate::ble::BleCommand::SwitchHost(n));
+            }
+            Action::Audio(_)
+            | Action::Haptic(_)
+            | Action::OutputSelect(_)
+            | Action::Rgb(_)
+            | Action::Sleep
+            | Action::Transparent
+            | Action::NoOp
+            | Action::Ext(_) => {}
+        }
+
+        if let Some(slot) = self.macro_recording {
+            if let Action::Key(kc) = action {
+                if let Some(buf) = self.macro_slots.get_mut(usize::from(slot)) {
+                    let _ = buf.push_back(kc);
+                }
+            }
         }
 
         let _ = now_ms;
@@ -248,10 +549,55 @@ where
             }
             Action::Layer(LayerOp::Momentary(n)) => {
                 self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
             }
             Action::OneShotLayer(n) => {
                 self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
             }
+            Action::RepeatKey => {
+                if let Some(kc) = self.last_keycode {
+                    self.release_keycode(kc, emit);
+                }
+            }
+            Action::LayerMod { layer, modifier } => {
+                self.modifier_state.release(modifier);
+                self.emit_keyboard(emit);
+                self.layer_stack.apply(LayerOp::Off(layer));
+                self.check_tri_layers();
+            }
+            Action::ModifiedKey { modifier, key } => {
+                self.release_keycode(key, emit);
+                self.modifier_state.release(modifier);
+                self.emit_keyboard(emit);
+            }
+            Action::Mouse(ma) => {
+                self.handle_mouse_release(ma, emit);
+            }
+            Action::Midi(ma) => {
+                Self::emit_midi_release(ma, emit);
+            }
+            Action::Gamepad(ga) => {
+                self.handle_gamepad_release(ga, emit);
+            }
+            Action::Audio(_)
+            | Action::AutocompleteAccept
+            | Action::AutocompleteToggle
+            | Action::AutocorrectToggle
+            | Action::BleAdvertise
+            | Action::BleDisconnect
+            | Action::BleHostSwitch(_)
+            | Action::Bootmagic
+            | Action::CapsWord
+            | Action::Haptic(_)
+            | Action::LayerLock(_)
+            | Action::MacroRecord(_)
+            | Action::MacroStop
+            | Action::MacroPlay(_)
+            | Action::OutputSelect(_)
+            | Action::Rgb(_)
+            | Action::SendString(_)
+            | Action::Sleep => {}
             _ => {
                 if let Some(idx) = self.active_holds.iter().position(|h| h.pos == event.pos) {
                     let hold = self.active_holds.swap_remove(idx);
@@ -263,50 +609,69 @@ where
 
     fn handle_tap_hold_result<F>(
         &mut self,
-        result: Recognition<TapHoldDecision>,
+        decision: TapHoldDecision,
         mut rec: TapHoldRecognizer,
         now_ms: u64,
         emit: &mut F,
     ) where
         F: FnMut(HidReport) + ?Sized,
     {
-        match result {
-            Recognition::Matched(TapHoldDecision::Tap(kc)) => {
+        match decision {
+            TapHoldDecision::Tap(kc) => {
                 self.press_keycode(kc, emit);
-                rec.drain_pending(|e| self.pending.push_back(e).ok().unwrap_or(()));
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
                 self.drain_pending(now_ms, emit);
                 self.release_keycode(kc, emit);
             }
-            Recognition::Matched(decision @ TapHoldDecision::HoldMod(m)) => {
+            TapHoldDecision::HoldMod(m) => {
                 let pos = rec.tap_pos();
                 self.modifier_state.press(m);
                 self.emit_keyboard(emit);
-                self.active_holds.push(ActiveHold { pos, decision }).ok();
-                rec.drain_pending(|e| self.pending.push_back(e).ok().unwrap_or(()));
+                let _ = self.active_holds.push(ActiveHold {
+                    pos,
+                    decision: HoldDecision::Mod(m),
+                });
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
             }
-            Recognition::Matched(decision @ TapHoldDecision::HoldLayer(n)) => {
+            TapHoldDecision::TapToggleLayer(n) => {
+                self.layer_stack.apply(LayerOp::Toggle(n));
+                self.check_tri_layers();
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
+                self.drain_pending(now_ms, emit);
+            }
+            TapHoldDecision::HoldLayer(n) => {
                 let pos = rec.tap_pos();
                 self.layer_stack.apply(LayerOp::On(n));
-                self.active_holds.push(ActiveHold { pos, decision }).ok();
-                rec.drain_pending(|e| self.pending.push_back(e).ok().unwrap_or(()));
+                let _ = self.active_holds.push(ActiveHold {
+                    pos,
+                    decision: HoldDecision::Layer(n),
+                });
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
             }
-            Recognition::Pending | Recognition::Failed => {}
         }
     }
 
-    fn apply_hold_release<F>(&mut self, decision: TapHoldDecision, emit: &mut F)
+    fn apply_hold_release<F>(&mut self, decision: HoldDecision, emit: &mut F)
     where
         F: FnMut(HidReport) + ?Sized,
     {
         match decision {
-            TapHoldDecision::HoldMod(m) => {
+            HoldDecision::Mod(m) => {
                 self.modifier_state.release(m);
                 self.emit_keyboard(emit);
             }
-            TapHoldDecision::HoldLayer(n) => {
+            HoldDecision::Layer(n) => {
                 self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
             }
-            TapHoldDecision::Tap(_) => {}
         }
     }
 
@@ -314,12 +679,48 @@ where
     where
         F: FnMut(HidReport) + ?Sized,
     {
+        if !self.repeat_active {
+            self.last_keycode = Some(kc);
+        }
+
+        let mut caps_shift_applied = false;
+        if self.caps_word_active {
+            if Self::is_caps_word_shift(kc) {
+                self.modifier_state.press(ModifierKey::LSHIFT);
+                caps_shift_applied = true;
+            } else if !Self::is_caps_word_continue(kc) {
+                self.caps_word_active = false;
+            }
+        }
+
+        if let Some(ref mut engine) = self.autocorrect {
+            if let Some(correction) = engine.process_keycode(kc, 0) {
+                for _ in 0..correction.backspaces {
+                    let _ = self.playback_queue.push_back(KeyCode::Backspace);
+                }
+                for &uid in correction.replacement_slice() {
+                    if let Some(rkc) = KeyCode::from_usage_id(uid) {
+                        let _ = self.playback_queue.push_back(rkc);
+                    }
+                }
+                self.drain_playback(emit);
+            }
+        }
+
+        if let Some(ref mut engine) = self.autocomplete {
+            engine.process_keycode(kc);
+        }
+
         let uid = kc.usage_id();
         if uid != 0 && !self.pressed_keys.contains(&uid) {
-            self.pressed_keys.push(uid).ok();
+            let _ = self.pressed_keys.push(uid);
         }
         self.emit_keyboard(emit);
         self.modifier_state.consume_oneshot();
+
+        if caps_shift_applied {
+            self.modifier_state.release(ModifierKey::LSHIFT);
+        }
     }
 
     fn release_keycode<F>(&mut self, kc: KeyCode, emit: &mut F)
@@ -332,6 +733,168 @@ where
         }
         self.modifier_state.clear_weak();
         self.emit_keyboard(emit);
+    }
+
+    fn is_caps_word_shift(kc: KeyCode) -> bool {
+        let uid = kc.usage_id();
+        (0x04..=0x1D).contains(&uid)
+    }
+
+    fn is_caps_word_continue(kc: KeyCode) -> bool {
+        let uid = kc.usage_id();
+        (0x04..=0x1D).contains(&uid)
+            || (0x1E..=0x27).contains(&uid)
+            || uid == 0x2D
+            || uid == 0x2A
+            || uid == 0x4C
+    }
+
+    fn check_tri_layers(&mut self) {
+        for def in self.tri_layers {
+            let both = (1 << u32::from(def.layer1)) | (1 << u32::from(def.layer2));
+            if self.layer_stack.state() & both == both {
+                self.layer_stack.apply(LayerOp::On(def.target));
+            } else {
+                self.layer_stack.apply(LayerOp::Off(def.target));
+            }
+        }
+    }
+
+    fn drain_playback<F>(&mut self, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        while let Some(kc) = self.playback_queue.pop_front() {
+            self.press_keycode(kc, emit);
+            self.release_keycode(kc, emit);
+        }
+    }
+
+    fn handle_mouse_press<F>(&mut self, action: MouseAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match action {
+            MouseAction::Move { dx, dy } => {
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx,
+                    dy,
+                    scroll: 0,
+                }));
+            }
+            MouseAction::Click(btn) => {
+                self.mouse_buttons |= 1 << btn.saturating_sub(1);
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx: 0,
+                    dy: 0,
+                    scroll: 0,
+                }));
+            }
+            MouseAction::Scroll(amount) => {
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx: 0,
+                    dy: 0,
+                    scroll: amount,
+                }));
+            }
+        }
+    }
+
+    fn handle_mouse_release<F>(&mut self, action: MouseAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let MouseAction::Click(btn) = action {
+            self.mouse_buttons &= !(1 << btn.saturating_sub(1));
+            emit(HidReport::Mouse(MouseReport {
+                buttons: self.mouse_buttons,
+                dx: 0,
+                dy: 0,
+                scroll: 0,
+            }));
+        }
+    }
+
+    fn emit_midi_press<F>(action: MidiAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let event = match action {
+            MidiAction::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => MidiEvent::NoteOn {
+                channel,
+                note,
+                velocity,
+            },
+            MidiAction::NoteOff { channel, note } => MidiEvent::NoteOff { channel, note },
+            MidiAction::Cc {
+                channel,
+                controller,
+                value,
+            } => MidiEvent::Cc {
+                channel,
+                controller,
+                value,
+            },
+        };
+        emit(HidReport::Midi(event));
+    }
+
+    fn emit_midi_release<F>(action: MidiAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let MidiAction::NoteOn { channel, note, .. } = action {
+            emit(HidReport::Midi(MidiEvent::NoteOff { channel, note }));
+        }
+    }
+
+    fn handle_gamepad_press<F>(&mut self, action: GamepadAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match action {
+            GamepadAction::ButtonPress(btn) => {
+                self.gamepad_buttons |= 1 << u16::from(btn);
+            }
+            GamepadAction::AxisSet { axis, value } => {
+                if let Some(slot) = self.gamepad_axes.get_mut(usize::from(axis)) {
+                    *slot = value;
+                }
+            }
+        }
+        emit(HidReport::Gamepad(GamepadReport {
+            buttons: self.gamepad_buttons,
+            axes: self.gamepad_axes,
+        }));
+    }
+
+    fn handle_gamepad_release<F>(&mut self, action: GamepadAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let GamepadAction::ButtonPress(btn) = action {
+            self.gamepad_buttons &= !(1 << u16::from(btn));
+            emit(HidReport::Gamepad(GamepadReport {
+                buttons: self.gamepad_buttons,
+                axes: self.gamepad_axes,
+            }));
+        }
+    }
+
+    fn apply_override(&self, kc: KeyCode) -> Option<Action<Ext>> {
+        for ov in self.overrides {
+            if ov.trigger == kc && self.modifier_state.contains(ov.required_mods) {
+                return Some(ov.replacement);
+            }
+        }
+        None
     }
 
     fn emit_keyboard<F>(&self, emit: &mut F)
@@ -354,13 +917,17 @@ where
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
+#[expect(clippy::unused_result_ok, reason = "test code")]
 mod tests {
     use super::RolloverMode;
     use super::*;
-    use crate::action::{Action, KeyCode, LayerOp, ModifierKey};
+    use crate::action::{
+        Action, KeyCode, KeyOverride, LayerOp, ModifierKey, MouseAction, TriLayerDef,
+    };
     use crate::event::{KeyEvent, KeyPos};
     use crate::keymap::{Layer, LayerStack};
-    use crate::report::{ConsumerReport, HidReport};
+    use crate::report::{ConsumerReport, HidReport, MouseReport};
     use crate::tapping::{TapHoldConfig, TapHoldMode};
 
     const ROWS: usize = 2;
@@ -409,16 +976,22 @@ mod tests {
     fn keyboard_keycodes(report: HidReport) -> [u8; 6] {
         match report {
             HidReport::Keyboard(r) => r.keycodes,
-            HidReport::Consumer(_) => [0; 6],
-            HidReport::NkroKeyboard(_) => [0; 6],
+            HidReport::Consumer(_)
+            | HidReport::NkroKeyboard(_)
+            | HidReport::Mouse(_)
+            | HidReport::Midi(_)
+            | HidReport::Gamepad(_) => [0; 6],
         }
     }
 
     fn keyboard_mods(report: HidReport) -> u8 {
         match report {
             HidReport::Keyboard(r) => r.modifiers,
-            HidReport::Consumer(_) => 0,
-            HidReport::NkroKeyboard(_) => 0,
+            HidReport::Consumer(_)
+            | HidReport::NkroKeyboard(_)
+            | HidReport::Mouse(_)
+            | HidReport::Midi(_)
+            | HidReport::Gamepad(_) => 0,
         }
     }
 
@@ -1015,11 +1588,11 @@ mod tests {
             Action::NoOp,
         ]);
         proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
-        let mut count = 0usize;
-        proc.process_event(press(pos(0, 1), 50), 50, &mut |_| {
-            count += 1;
+        let mut reports = heapless::Vec::<_, 16>::new();
+        proc.process_event(press(pos(0, 1), 50), 50, &mut |r| {
+            reports.push(r).ok();
         });
-        assert_eq!(count, 0);
+        assert!(reports.is_empty());
     }
 
     // ── tick() with no active tap-hold ────────────────────────────────────────
@@ -1027,11 +1600,11 @@ mod tests {
     #[test]
     fn tick_with_no_tap_hold_does_nothing() {
         let mut proc = make_processor(&[Action::Key(KeyCode::A); 6]);
-        let mut count = 0usize;
-        proc.tick(100, &mut |_| {
-            count += 1;
+        let mut reports = heapless::Vec::<_, 16>::new();
+        proc.tick(100, &mut |r| {
+            reports.push(r).ok();
         });
-        assert_eq!(count, 0);
+        assert!(reports.is_empty());
     }
 
     // ── tick() pending early-return ───────────────────────────────────────────
@@ -1082,5 +1655,1561 @@ mod tests {
         use crate::report::NkroKeyboardReport;
         let report = HidReport::NkroKeyboard(NkroKeyboardReport::default());
         assert_eq!(keyboard_mods(report), 0);
+    }
+
+    // ── Caps Word ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn caps_word_shifts_alpha_keys() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 20), 20, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_does_not_shift_digits() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::N1),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 20), 20, emit);
+        });
+        assert_eq!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_deactivates_on_space() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::Space),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_eq!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_continues_on_backspace() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::Backspace),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_shift_does_not_persist_after_release() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 1), 30), 30, emit);
+        });
+        assert_eq!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    // ── Layer Lock ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn layer_lock_activates_and_persists() {
+        let mut proc = make_processor_two_layers(
+            &[
+                Action::LayerLock(1),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        );
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 20), 20, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
+    }
+
+    #[test]
+    fn layer_lock_second_press_unlocks() {
+        let mut proc = make_processor_two_layers(
+            &[
+                Action::LayerLock(1),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::LayerLock(1),
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        );
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 0), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 40), 40, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    // ── Repeat Key ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn repeat_key_emits_last_keycode() {
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::RepeatKey,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 20), 20, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    #[test]
+    fn repeat_key_noop_when_nothing_pressed() {
+        let mut proc = make_processor(&[
+            Action::RepeatKey,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn repeat_key_does_not_update_history() {
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::RepeatKey,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 40), 40, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    #[test]
+    fn repeat_key_release_emits_release() {
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::RepeatKey,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 1), 30), 30, emit);
+        });
+        assert!(!keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    // ── Tri-layer ────────────────────────────────────────────────────────────
+
+    fn make_processor_three_layers(
+        base: &[Action],
+        mid: &[Action],
+        top: &[Action],
+    ) -> KeyboardProcessor<ROWS, COLS, 3, KEYS> {
+        let mut layers: heapless::Vec<Layer<()>, 3> = heapless::Vec::new();
+        layers.push(Layer::new(base)).ok();
+        layers.push(Layer::new(mid)).ok();
+        layers.push(Layer::new(top)).ok();
+        KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
+    }
+
+    #[test]
+    fn tri_layer_activates_when_both_held() {
+        static TRI: &[TriLayerDef] = &[TriLayerDef {
+            layer1: 1,
+            layer2: 2,
+            target: 0,
+        }];
+        let mut proc = make_processor_three_layers(
+            &[
+                Action::Layer(LayerOp::Momentary(1)),
+                Action::Layer(LayerOp::Momentary(2)),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::C),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        )
+        .with_tri_layers(TRI);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        assert!(proc.layer_stack.state() & 1 != 0);
+    }
+
+    #[test]
+    fn tri_layer_deactivates_when_one_released() {
+        static TRI: &[TriLayerDef] = &[TriLayerDef {
+            layer1: 1,
+            layer2: 2,
+            target: 0,
+        }];
+        let mut proc = make_processor_three_layers(
+            &[
+                Action::Layer(LayerOp::Momentary(1)),
+                Action::Layer(LayerOp::Momentary(2)),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::C),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        )
+        .with_tri_layers(TRI);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 20), 20, &mut |_| {});
+        assert_eq!(proc.layer_stack.state() & 1, 0);
+    }
+
+    #[test]
+    fn tri_layer_no_defs_is_noop() {
+        let mut proc = make_processor(&[
+            Action::Layer(LayerOp::Momentary(1)),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+    }
+
+    // ── Key Overrides ────────────────────────────────────────────────────────
+
+    #[test]
+    fn key_override_replaces_action_when_mods_match() {
+        static OVERRIDES: &[KeyOverride] = &[KeyOverride {
+            trigger: KeyCode::Backspace,
+            required_mods: ModifierKey::LSHIFT,
+            suppress_mods: ModifierKey::NONE,
+            replacement: Action::Key(KeyCode::Delete),
+        }];
+        let mut proc = make_processor(&[
+            Action::Modifier(ModifierKey::LSHIFT),
+            Action::Key(KeyCode::Backspace),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ])
+        .with_overrides(OVERRIDES);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 10), 10, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::Delete.usage_id()));
+    }
+
+    #[test]
+    fn key_override_does_not_trigger_without_mods() {
+        static OVERRIDES: &[KeyOverride] = &[KeyOverride {
+            trigger: KeyCode::Backspace,
+            required_mods: ModifierKey::LSHIFT,
+            suppress_mods: ModifierKey::NONE,
+            replacement: Action::Key(KeyCode::Delete),
+        }];
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::Backspace),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ])
+        .with_overrides(OVERRIDES);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(
+            keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::Backspace.usage_id())
+        );
+    }
+
+    #[test]
+    fn empty_overrides_has_no_effect() {
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    // ── Dynamic Macros ───────────────────────────────────────────────────────
+
+    #[test]
+    fn macro_record_and_play() {
+        let mut proc = make_processor(&[
+            Action::MacroRecord(0),
+            Action::Key(KeyCode::A),
+            Action::MacroStop,
+            Action::MacroPlay(0),
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(press(pos(0, 2), 30), 30, &mut |_| {});
+        proc.process_event(release(pos(0, 2), 35), 35, &mut |_| {});
+
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(1, 0), 40), 40, emit);
+        });
+        assert!(reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::A.usage_id())));
+    }
+
+    #[test]
+    fn macro_play_empty_slot_is_noop() {
+        let mut proc = make_processor(&[
+            Action::MacroPlay(0),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    // ── Send String ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn send_string_emits_keycodes() {
+        static SEQ: &[KeyCode] = &[KeyCode::H, KeyCode::I];
+        let mut proc = make_processor(&[
+            Action::SendString(SEQ),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports.len() >= 2);
+        assert!(reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::H.usage_id())));
+    }
+
+    #[test]
+    fn send_string_empty_is_noop() {
+        static SEQ: &[KeyCode] = &[];
+        let mut proc = make_processor(&[
+            Action::SendString(SEQ),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    // ── Mouse Keys ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn mouse_click_emits_mouse_report() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Click(1)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 1,
+                dx: 0,
+                dy: 0,
+                scroll: 0
+            })
+        );
+    }
+
+    #[test]
+    fn mouse_click_release_clears_button() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Click(1)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 0,
+                dx: 0,
+                dy: 0,
+                scroll: 0
+            })
+        );
+    }
+
+    #[test]
+    fn mouse_move_emits_delta() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Move { dx: 10, dy: -5 }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 0,
+                dx: 10,
+                dy: -5,
+                scroll: 0
+            })
+        );
+    }
+
+    #[test]
+    fn mouse_scroll_emits_scroll() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Scroll(3)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 0,
+                dx: 0,
+                dy: 0,
+                scroll: 3
+            })
+        );
+    }
+
+    // ── Bootmagic ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn bootmagic_sets_flag() {
+        let mut proc = make_processor(&[
+            Action::Bootmagic,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        assert!(!proc.bootmagic_triggered());
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        assert!(proc.bootmagic_triggered());
+    }
+
+    #[test]
+    fn ble_advertise_sets_pending_command() {
+        let mut proc = make_processor(&[
+            Action::BleAdvertise,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        assert!(proc.pending_ble_command().is_none());
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        assert_eq!(
+            proc.pending_ble_command(),
+            Some(crate::ble::BleCommand::Advertise)
+        );
+        assert!(proc.pending_ble_command().is_none());
+    }
+
+    #[test]
+    fn ble_disconnect_sets_pending_command() {
+        let mut proc = make_processor(&[
+            Action::BleDisconnect,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        assert_eq!(
+            proc.pending_ble_command(),
+            Some(crate::ble::BleCommand::Disconnect)
+        );
+    }
+
+    #[test]
+    fn ble_host_switch_sets_pending_command() {
+        let mut proc = make_processor(&[
+            Action::BleHostSwitch(2),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        assert_eq!(
+            proc.pending_ble_command(),
+            Some(crate::ble::BleCommand::SwitchHost(2))
+        );
+    }
+
+    // ── State accessors & restore ────────────────────────────────────────────
+
+    #[test]
+    fn default_state_returns_layer_default() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert_eq!(proc.default_state(), 1);
+    }
+
+    #[test]
+    fn locked_layers_initially_zero() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert_eq!(proc.locked_layers(), 0);
+    }
+
+    #[test]
+    fn rollover_mode_returns_current() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert_eq!(proc.rollover_mode(), RolloverMode::Kro6);
+    }
+
+    #[test]
+    fn macro_slot_returns_none_for_invalid() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert!(proc.macro_slot(99).is_none());
+    }
+
+    #[test]
+    fn macro_slot_returns_some_for_valid() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert!(proc.macro_slot(0).is_some());
+    }
+
+    #[test]
+    fn restore_state_applies_rollover_mode() {
+        let mut proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        proc.restore_state(
+            1,
+            0,
+            RolloverMode::Nkro,
+            [Deque::new(), Deque::new(), Deque::new(), Deque::new()],
+        );
+        assert_eq!(proc.rollover_mode(), RolloverMode::Nkro);
+    }
+
+    #[test]
+    fn restore_state_applies_locked_layers() {
+        let mut proc =
+            make_processor_two_layers(&[Action::Key(KeyCode::A); 6], &[Action::Key(KeyCode::B); 6]);
+        proc.restore_state(
+            1,
+            0b10,
+            RolloverMode::Kro6,
+            [Deque::new(), Deque::new(), Deque::new(), Deque::new()],
+        );
+        assert_eq!(proc.locked_layers(), 0b10);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
+    }
+
+    #[test]
+    fn restore_state_applies_non_zero_default_layer() {
+        let mut proc =
+            make_processor_two_layers(&[Action::Key(KeyCode::A); 6], &[Action::Key(KeyCode::B); 6]);
+        proc.restore_state(
+            0b10,
+            0,
+            RolloverMode::Kro6,
+            [Deque::new(), Deque::new(), Deque::new(), Deque::new()],
+        );
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
+    }
+
+    #[test]
+    fn restore_state_applies_macros() {
+        let mut proc = make_processor(&[
+            Action::MacroPlay(0),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let mut slot: Deque<KeyCode, 64> = Deque::new();
+        slot.push_back(KeyCode::Z).ok();
+        proc.restore_state(
+            1,
+            0,
+            RolloverMode::Kro6,
+            [slot, Deque::new(), Deque::new(), Deque::new()],
+        );
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::Z.usage_id())));
+    }
+
+    // ── Edge cases: Caps Word ────────────────────────────────────────────────
+
+    #[test]
+    fn caps_word_deactivates_on_enter() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::Enter),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_eq!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_continues_on_digits() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::N5),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_continues_on_minus() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::Minus),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn caps_word_continues_on_delete() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::Delete),
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    // ── Edge cases: Dynamic Macros ───────────────────────────────────────────
+
+    #[test]
+    fn macro_stop_without_record_is_harmless() {
+        let mut proc = make_processor(&[
+            Action::MacroStop,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    }
+
+    #[test]
+    fn macro_record_invalid_slot_is_harmless() {
+        let mut proc = make_processor(&[
+            Action::MacroRecord(99),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    }
+
+    #[test]
+    fn macro_play_invalid_slot_is_harmless() {
+        let mut proc = make_processor(&[
+            Action::MacroPlay(99),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn macro_records_multiple_keys_and_replays_in_order() {
+        let mut proc = make_processor(&[
+            Action::MacroRecord(0),
+            Action::Key(KeyCode::A),
+            Action::Key(KeyCode::B),
+            Action::MacroStop,
+            Action::MacroPlay(0),
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 15), 15, &mut |_| {});
+        proc.process_event(press(pos(0, 2), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 2), 25), 25, &mut |_| {});
+        proc.process_event(press(pos(1, 0), 30), 30, &mut |_| {});
+        proc.process_event(release(pos(1, 0), 35), 35, &mut |_| {});
+
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(1, 1), 40), 40, emit);
+        });
+        let has_a = reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::A.usage_id()));
+        let has_b = reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::B.usage_id()));
+        assert!(has_a);
+        assert!(has_b);
+    }
+
+    // ── Edge cases: Mouse keys ───────────────────────────────────────────────
+
+    #[test]
+    fn mouse_two_buttons_held_simultaneously() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Click(1)),
+            Action::Mouse(MouseAction::Click(2)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 1), 10), 10, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 0b11,
+                dx: 0,
+                dy: 0,
+                scroll: 0
+            })
+        );
+    }
+
+    #[test]
+    fn mouse_release_one_button_keeps_other() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Click(1)),
+            Action::Mouse(MouseAction::Click(2)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 20), 20, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Mouse(MouseReport {
+                buttons: 0b10,
+                dx: 0,
+                dy: 0,
+                scroll: 0
+            })
+        );
+    }
+
+    #[test]
+    fn mouse_move_release_emits_nothing() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Move { dx: 5, dy: 5 }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn mouse_scroll_release_emits_nothing() {
+        let mut proc = make_processor(&[
+            Action::Mouse(MouseAction::Scroll(-1)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    // ── Edge cases: Key Overrides ────────────────────────────────────────────
+
+    #[test]
+    fn key_override_with_no_overrides_configured() {
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ])
+        .with_overrides(&[]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    // ── Edge cases: Send String ──────────────────────────────────────────────
+
+    #[test]
+    fn send_string_release_is_noop() {
+        static SEQ: &[KeyCode] = &[KeyCode::A];
+        let mut proc = make_processor(&[
+            Action::SendString(SEQ),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    // ── Integration: full pipeline ───────────────────────────────────────────
+
+    #[test]
+    fn integration_layer_lock_plus_key_override() {
+        static OVERRIDES: &[KeyOverride] = &[KeyOverride {
+            trigger: KeyCode::B,
+            required_mods: ModifierKey::LSHIFT,
+            suppress_mods: ModifierKey::NONE,
+            replacement: Action::Key(KeyCode::N1),
+        }];
+        let mut proc = make_processor_two_layers(
+            &[
+                Action::LayerLock(1),
+                Action::Modifier(ModifierKey::LSHIFT),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        )
+        .with_overrides(OVERRIDES);
+
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 30), 30, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::N1.usage_id()));
+    }
+
+    #[test]
+    fn integration_caps_word_with_repeat_key() {
+        let mut proc = make_processor(&[
+            Action::CapsWord,
+            Action::Key(KeyCode::A),
+            Action::RepeatKey,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 30), 30, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+        assert_ne!(keyboard_mods(*reports.first().unwrap()) & 0x02, 0);
+    }
+
+    #[test]
+    fn integration_tri_layer_with_momentary_holds() {
+        static TRI: &[TriLayerDef] = &[TriLayerDef {
+            layer1: 1,
+            layer2: 2,
+            target: 0,
+        }];
+        let mut proc = make_processor_three_layers(
+            &[
+                Action::Layer(LayerOp::Momentary(1)),
+                Action::Layer(LayerOp::Momentary(2)),
+                Action::Key(KeyCode::A),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Transparent,
+                Action::Key(KeyCode::C),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        )
+        .with_tri_layers(TRI);
+
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 10), 10, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
+
+        proc.process_event(release(pos(0, 2), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 30), 30, &mut |_| {});
+
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 2), 40), 40, emit);
+        });
+        assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::A.usage_id()));
+    }
+
+    #[test]
+    fn integration_macro_record_play_then_caps_word() {
+        let mut proc = make_processor(&[
+            Action::MacroRecord(0),
+            Action::Key(KeyCode::H),
+            Action::MacroStop,
+            Action::MacroPlay(0),
+            Action::CapsWord,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
+        proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+        proc.process_event(release(pos(0, 1), 15), 15, &mut |_| {});
+        proc.process_event(press(pos(0, 2), 20), 20, &mut |_| {});
+        proc.process_event(release(pos(0, 2), 25), 25, &mut |_| {});
+
+        proc.process_event(press(pos(1, 1), 30), 30, &mut |_| {});
+        proc.process_event(release(pos(1, 1), 35), 35, &mut |_| {});
+
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(1, 0), 40), 40, emit);
+        });
+        let has_h = reports
+            .iter()
+            .any(|r| keyboard_keycodes(*r).contains(&KeyCode::H.usage_id()));
+        assert!(has_h);
+    }
+
+    // ── MIDI ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn midi_note_on_emits_midi_report() {
+        use crate::action::MidiAction;
+        use crate::report::MidiEvent;
+        let mut proc = make_processor(&[
+            Action::Midi(MidiAction::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 100,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Midi(MidiEvent::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 100
+            }),
+        );
+    }
+
+    #[test]
+    fn midi_note_on_release_emits_note_off() {
+        use crate::action::MidiAction;
+        use crate::report::MidiEvent;
+        let mut proc = make_processor(&[
+            Action::Midi(MidiAction::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 100,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Midi(MidiEvent::NoteOff {
+                channel: 0,
+                note: 60
+            }),
+        );
+    }
+
+    #[test]
+    fn midi_cc_emits_midi_report() {
+        use crate::action::MidiAction;
+        use crate::report::MidiEvent;
+        let mut proc = make_processor(&[
+            Action::Midi(MidiAction::Cc {
+                channel: 1,
+                controller: 7,
+                value: 64,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Midi(MidiEvent::Cc {
+                channel: 1,
+                controller: 7,
+                value: 64
+            }),
+        );
+    }
+
+    #[test]
+    fn midi_cc_release_emits_nothing() {
+        use crate::action::MidiAction;
+        let mut proc = make_processor(&[
+            Action::Midi(MidiAction::Cc {
+                channel: 1,
+                controller: 7,
+                value: 64,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn midi_note_off_action_emits_note_off() {
+        use crate::action::MidiAction;
+        use crate::report::MidiEvent;
+        let mut proc = make_processor(&[
+            Action::Midi(MidiAction::NoteOff {
+                channel: 2,
+                note: 48,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Midi(MidiEvent::NoteOff {
+                channel: 2,
+                note: 48
+            }),
+        );
+    }
+
+    // ── Gamepad ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gamepad_button_press_emits_report() {
+        use crate::action::GamepadAction;
+        use crate::report::GamepadReport;
+        let mut proc = make_processor(&[
+            Action::Gamepad(GamepadAction::ButtonPress(0)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Gamepad(GamepadReport {
+                buttons: 1,
+                axes: [0; 6]
+            }),
+        );
+    }
+
+    #[test]
+    fn gamepad_button_release_clears_bit() {
+        use crate::action::GamepadAction;
+        use crate::report::GamepadReport;
+        let mut proc = make_processor(&[
+            Action::Gamepad(GamepadAction::ButtonPress(0)),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Gamepad(GamepadReport {
+                buttons: 0,
+                axes: [0; 6]
+            }),
+        );
+    }
+
+    #[test]
+    fn gamepad_axis_set_emits_report() {
+        use crate::action::GamepadAction;
+        use crate::report::GamepadReport;
+        let mut proc = make_processor(&[
+            Action::Gamepad(GamepadAction::AxisSet {
+                axis: 0,
+                value: 127,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        let expected_axes = [127, 0, 0, 0, 0, 0];
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Gamepad(GamepadReport {
+                buttons: 0,
+                axes: expected_axes
+            }),
+        );
+    }
+
+    #[test]
+    fn gamepad_axis_release_does_not_emit() {
+        use crate::action::GamepadAction;
+        let mut proc = make_processor(&[
+            Action::Gamepad(GamepadAction::AxisSet {
+                axis: 0,
+                value: 127,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn gamepad_axis_out_of_range_ignored() {
+        use crate::action::GamepadAction;
+        use crate::report::GamepadReport;
+        let mut proc = make_processor(&[
+            Action::Gamepad(GamepadAction::AxisSet {
+                axis: 10,
+                value: 127,
+            }),
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+            Action::NoOp,
+        ]);
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(
+            *reports.first().unwrap(),
+            HidReport::Gamepad(GamepadReport {
+                buttons: 0,
+                axes: [0; 6]
+            }),
+        );
+    }
+
+    #[test]
+    fn keyboard_keycodes_returns_zeros_for_midi_report() {
+        use crate::report::MidiEvent;
+        let report = HidReport::Midi(MidiEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 127,
+        });
+        assert_eq!(keyboard_keycodes(report), [0; 6]);
+    }
+
+    #[test]
+    fn keyboard_mods_returns_zero_for_midi_report() {
+        use crate::report::MidiEvent;
+        let report = HidReport::Midi(MidiEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 127,
+        });
+        assert_eq!(keyboard_mods(report), 0);
+    }
+
+    #[test]
+    fn keyboard_keycodes_returns_zeros_for_gamepad_report() {
+        use crate::report::GamepadReport;
+        let report = HidReport::Gamepad(GamepadReport::default());
+        assert_eq!(keyboard_keycodes(report), [0; 6]);
+    }
+
+    #[test]
+    fn keyboard_mods_returns_zero_for_gamepad_report() {
+        use crate::report::GamepadReport;
+        let report = HidReport::Gamepad(GamepadReport::default());
+        assert_eq!(keyboard_mods(report), 0);
+    }
+
+    #[test]
+    fn with_autocorrect_attaches_engine() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert!(proc.autocorrect.is_none());
+        let proc = proc.with_autocorrect(crate::autocorrect::AutocorrectEngine::new(&[]));
+        assert!(proc.autocorrect.is_some());
+    }
+
+    #[test]
+    fn with_autocomplete_attaches_engine() {
+        let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert!(proc.autocomplete.is_none());
+        let proc = proc.with_autocomplete(crate::autocomplete::AutocompleteEngine::new(&[]));
+        assert!(proc.autocomplete.is_some());
+    }
+
+    #[test]
+    fn set_action_and_get_action_roundtrip() {
+        let mut proc = make_processor(&[Action::Key(KeyCode::A); 6]);
+        assert_eq!(proc.get_action(0, 0), Some(Action::Key(KeyCode::A)));
+        assert!(proc.set_action(0, 0, Action::Key(KeyCode::Z)));
+        assert_eq!(proc.get_action(0, 0), Some(Action::Key(KeyCode::Z)));
+    }
+
+    #[test]
+    fn layer_mod_activates_layer_and_modifier_on_press() {
+        let mut proc = make_processor_two_layers(
+            &[
+                Action::LayerMod {
+                    layer: 1,
+                    modifier: ModifierKey::LSHIFT,
+                },
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+            &[
+                Action::Transparent,
+                Action::Key(KeyCode::B),
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+                Action::NoOp,
+            ],
+        );
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, 0), 0), 0, emit);
+        });
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            keyboard_mods(*reports.first().unwrap()),
+            ModifierKey::LSHIFT.bits()
+        );
+        assert!(proc.layer_stack.state() & (1 << 1) != 0);
+
+        let reports = collect_reports(|emit| {
+            proc.process_event(release(pos(0, 0), 10), 10, emit);
+        });
+        assert_eq!(keyboard_mods(*reports.first().unwrap()), 0);
+        assert_eq!(proc.layer_stack.state() & (1 << 1), 0);
     }
 }

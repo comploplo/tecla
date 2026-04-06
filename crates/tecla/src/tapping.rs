@@ -21,6 +21,8 @@ use crate::recognizer::{Recognition, Recognizer};
 pub enum TapHoldDecision {
     /// Key tapped — emit this keycode as a regular keypress.
     Tap(KeyCode),
+    /// Key tapped — toggle this layer on/off (TapToggle tap outcome).
+    TapToggleLayer(u8),
     /// Key held — activate this modifier until the key is released.
     HoldMod(ModifierKey),
     /// Key held — activate this layer until the key is released.
@@ -88,8 +90,9 @@ enum State {
 ///
 /// # Lifecycle
 ///
-/// 1. Construct with [`TapHoldRecognizer::new`], passing the action and the
-///    initial press event.
+/// 1. Construct with [`TapHoldRecognizer::mod_tap`],
+///    [`TapHoldRecognizer::layer_tap`], or [`TapHoldRecognizer::from_action`],
+///    passing the action and the initial press event.
 /// 2. Feed subsequent events via [`observe`](Recognizer::observe).
 /// 3. When [`tick`](Recognizer::tick) is called at or after
 ///    [`next_deadline_ms`](Recognizer::next_deadline_ms), the tapping term
@@ -110,6 +113,7 @@ pub struct TapHoldRecognizer<const BUF: usize = 32> {
     waiting: Deque<KeyEvent, BUF>,
     /// For `PermissiveHold`: tracks whether another key was pressed.
     saw_other_press: bool,
+    tap_toggle_layer: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +141,7 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
             },
             waiting: Deque::new(),
             saw_other_press: false,
+            tap_toggle_layer: None,
         }
     }
 
@@ -158,6 +163,24 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
             },
             waiting: Deque::new(),
             saw_other_press: false,
+            tap_toggle_layer: None,
+        }
+    }
+
+    /// Creates a recognizer for a `TapToggle` action.
+    #[must_use]
+    pub fn tap_toggle(config: TapHoldConfig, layer: u8, press_event: KeyEvent) -> Self {
+        Self {
+            config,
+            tap_key_pos: press_event.pos,
+            tap_keycode: KeyCode::None,
+            hold_action: HoldAction::Layer(layer),
+            state: State::Deciding {
+                press_ms: press_event.timestamp_ms,
+            },
+            waiting: Deque::new(),
+            saw_other_press: false,
+            tap_toggle_layer: Some(layer),
         }
     }
 
@@ -175,6 +198,7 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
             Action::LayerTap { layer, tap } => {
                 Some(Self::layer_tap(config, layer, tap, press_event))
             }
+            Action::TapToggle(layer) => Some(Self::tap_toggle(config, layer, press_event)),
             _ => None,
         }
     }
@@ -204,7 +228,11 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
 
     fn resolve_tap(&mut self) -> Recognition<TapHoldDecision> {
         self.state = State::Done;
-        Recognition::Matched(TapHoldDecision::Tap(self.tap_keycode))
+        if let Some(layer) = self.tap_toggle_layer {
+            Recognition::Matched(TapHoldDecision::TapToggleLayer(layer))
+        } else {
+            Recognition::Matched(TapHoldDecision::Tap(self.tap_keycode))
+        }
     }
 
     fn resolve_hold(&mut self) -> Recognition<TapHoldDecision> {
@@ -220,6 +248,10 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
 impl<const BUF: usize> Recognizer for TapHoldRecognizer<BUF> {
     type Output = TapHoldDecision;
 
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "heapless push overflow silently dropped in no_std"
+    )]
     fn observe(&mut self, event: KeyEvent, now_ms: u64) -> Recognition<TapHoldDecision> {
         let press_ms = match self.state {
             State::Deciding { press_ms } => press_ms,

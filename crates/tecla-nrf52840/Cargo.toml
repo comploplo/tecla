@@ -1,0 +1,42 @@
+[package]
+name = "tecla-nrf52840"
+version = "0.1.0"
+edition = "2021"
+description = "Tecla keyboard firmware board support for nRF52840"
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tecla        = { path = "../tecla", features = ["embassy"] }
+tecla-macros = { path = "../tecla-macros" }
+
+embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
+embassy-nrf      = { workspace = true }
+embassy-usb      = { workspace = true }
+embassy-time     = { workspace = true }
+embassy-sync     = { workspace = true }
+
+cortex-m     = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt  = { workspace = true }
+defmt        = { workspace = true }
+defmt-rtt    = { workspace = true }
+panic-probe  = { workspace = true }
+static_cell  = { workspace = true }
+heapless     = { workspace = true }
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+cortex-m-semihosting = { version = "0.5", optional = true }
+
+trouble-host       = { version = "0.6", optional = true, features = ["derive", "gatt", "security"] }
+nrf-sdc            = { version = "0.3", optional = true, default-features = false, features = ["peripheral"] }
+nrf-mpsl           = { version = "0.3", optional = true, default-features = false }
+bt-hci             = { version = "0.8", optional = true }
+embassy-futures    = { version = "0.1", optional = true }
+
+[features]
+default = []
+hil = ["dep:cortex-m-semihosting"]
+ble = ["dep:trouble-host", "dep:nrf-sdc", "dep:nrf-mpsl", "dep:bt-hci", "dep:embassy-futures", "nrf-sdc/nrf52840", "nrf-sdc/defmt", "nrf-mpsl/nrf52840", "nrf-mpsl/defmt", "nrf-mpsl/critical-section-impl"]

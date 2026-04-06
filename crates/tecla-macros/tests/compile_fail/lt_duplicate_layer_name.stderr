@@ -1,0 +1,5 @@
+error: duplicate layer name `Base`; already defined as layer 0
+ --> tests/compile_fail/lt_duplicate_layer_name.rs:6:16
+  |
+6 |         layer!(Base, C, D),
+  |                ^^^^

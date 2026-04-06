@@ -6,6 +6,16 @@
 use crate::action::ConsumerCode;
 use crate::modifier::ModifierState;
 
+/// Standard 6KRO boot-protocol keyboard HID report descriptor (63 bytes).
+///
+/// USB HID spec appendix B.1. Compatible with every OS and BIOS.
+pub const KEYBOARD_REPORT_DESCRIPTOR: &[u8] = &[
+    0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
+    0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01, 0x95, 0x05, 0x75, 0x01,
+    0x05, 0x08, 0x19, 0x01, 0x29, 0x05, 0x91, 0x02, 0x95, 0x01, 0x75, 0x03, 0x91, 0x01, 0x95, 0x06,
+    0x75, 0x08, 0x15, 0x00, 0x25, 0xDD, 0x05, 0x07, 0x19, 0x00, 0x29, 0xDD, 0x81, 0x00, 0xC0,
+];
+
 /// Maximum number of simultaneous non-modifier keycodes in a 6KRO report.
 pub const KRO_KEYS: usize = 6;
 
@@ -118,6 +128,58 @@ impl ConsumerReport {
     }
 }
 
+/// HID mouse report for cursor movement, clicks, and scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MouseReport {
+    /// Button bitmask (bit 0 = left, bit 1 = right, bit 2 = middle).
+    pub buttons: u8,
+    /// Horizontal movement (positive = right).
+    pub dx: i8,
+    /// Vertical movement (positive = down).
+    pub dy: i8,
+    /// Vertical scroll (positive = up).
+    pub scroll: i8,
+}
+
+/// A MIDI event produced by the action pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MidiEvent {
+    /// Note-on event.
+    NoteOn {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// MIDI note number (0–127).
+        note: u8,
+        /// Velocity (0–127).
+        velocity: u8,
+    },
+    /// Note-off event.
+    NoteOff {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// MIDI note number (0–127).
+        note: u8,
+    },
+    /// Control-change event.
+    Cc {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// Controller number (0–127).
+        controller: u8,
+        /// Controller value (0–127).
+        value: u8,
+    },
+}
+
+/// A HID gamepad report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GamepadReport {
+    /// Button bitmask (up to 16 buttons).
+    pub buttons: u16,
+    /// Axis values: x, y, z, rx, ry, rz (−128 to 127 each).
+    pub axes: [i8; 6],
+}
+
 /// A HID report produced by the action pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HidReport {
@@ -127,6 +189,12 @@ pub enum HidReport {
     Consumer(ConsumerReport),
     /// N-key rollover keyboard report (bitmap format).
     NkroKeyboard(NkroKeyboardReport),
+    /// Mouse report (movement, clicks, scroll).
+    Mouse(MouseReport),
+    /// MIDI event (note on/off, CC).
+    Midi(MidiEvent),
+    /// Gamepad report (buttons + axes).
+    Gamepad(GamepadReport),
 }
 
 #[cfg(test)]
@@ -238,5 +306,57 @@ mod tests {
     fn hid_report_nkro_variant() {
         let r = HidReport::NkroKeyboard(NkroKeyboardReport::new());
         assert!(matches!(r, HidReport::NkroKeyboard(_)));
+    }
+
+    #[test]
+    fn midi_event_note_on_variant() {
+        let e = MidiEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 127,
+        };
+        assert!(matches!(e, MidiEvent::NoteOn { .. }));
+    }
+
+    #[test]
+    fn midi_event_note_off_variant() {
+        let e = MidiEvent::NoteOff {
+            channel: 0,
+            note: 60,
+        };
+        assert!(matches!(e, MidiEvent::NoteOff { .. }));
+    }
+
+    #[test]
+    fn midi_event_cc_variant() {
+        let e = MidiEvent::Cc {
+            channel: 0,
+            controller: 1,
+            value: 64,
+        };
+        assert!(matches!(e, MidiEvent::Cc { .. }));
+    }
+
+    #[test]
+    fn gamepad_report_default_is_zeroed() {
+        let r = GamepadReport::default();
+        assert_eq!(r.buttons, 0);
+        assert_eq!(r.axes, [0; 6]);
+    }
+
+    #[test]
+    fn hid_report_midi_variant() {
+        let r = HidReport::Midi(MidiEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 127,
+        });
+        assert!(matches!(r, HidReport::Midi(_)));
+    }
+
+    #[test]
+    fn hid_report_gamepad_variant() {
+        let r = HidReport::Gamepad(GamepadReport::default());
+        assert!(matches!(r, HidReport::Gamepad(_)));
     }
 }

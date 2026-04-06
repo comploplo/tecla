@@ -2,10 +2,21 @@
 members = [
     "crates/tecla",
     "crates/tecla-config",
-    "crates/tecla-cli",
     "crates/tecla-macros",
+    "crates/tecla-rp2040",
+    "crates/tecla-nrf52840",
+    "crates/tecla-stm32f4",
+]
+# esp-hal 1.0 + esp-rom-sys has an i8::to_ascii_lowercase bug on the current
+# espup toolchain (1.93.0.0). Re-include once upstream fixes land.
+exclude = [
+    "crates/tecla-esp32s3",
 ]
 resolver = "2"
+
+[workspace.package]
+authors = ["Gabe Oppenheimer"]
+license = "MIT OR Apache-2.0"
 
 # ---------------------------------------------------------------------------
 # Workspace-wide lints — inherited by all crates via `lints.workspace = true`
@@ -13,7 +24,7 @@ resolver = "2"
 
 [workspace.lints.rust]
 warnings = "deny"
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "deny"
 
 [workspace.lints.clippy]
@@ -62,19 +73,16 @@ arithmetic_side_effects = "allow"
 integer_division        = "allow"
 modulo_arithmetic       = "allow"
 
-# Casts — pedantic cast lints (truncation, sign loss) still guard us
-as_conversions = "allow"
-
 # Embedded-specific intentional patterns
-unused_result_ok            = "allow"   # heapless push/.ok() — silent overflow accepted in no_std
-unwrap_used                 = "allow"   # logically-infallible unwraps; test coverage verifies
-panic                       = "allow"   # unreachable!() in exhaustive match arms is valid firmware practice
 assertions_on_result_states = "allow"   # assert!(x.is_ok()) is clear in tests
 wildcard_enum_match_arm     = "allow"   # _ arm needed when matching on external / extensible enums
 
 # no_std — we use cfg_attr for conditional std/core; changing call sites adds noise
 std_instead_of_core  = "allow"
 std_instead_of_alloc = "allow"
+
+# Module directory layout — mod.rs style (contradicts self_named_module_files, pick one)
+mod_module_files = "allow"
 
 # Style choices
 partial_pub_fields            = "allow"   # mix of pub/private fields
@@ -91,9 +99,11 @@ semicolon_outside_block       = "allow"   # style preference
 absolute_paths                = "allow"   # full paths sometimes aid clarity
 used_underscore_binding       = "allow"   # _field used in some match arms
 let_underscore_untyped        = "allow"   # let _ = x is clear discard intent
+let_underscore_must_use       = "allow"   # let _ = x discards must_use intentionally
 unused_trait_names            = "allow"   # anonymous trait imports are sometimes cleaner
 naive_bytecount               = "allow"   # explicit loops are clearer in embedded context
-print_stderr                  = "allow"   # tecla-cli legitimately writes to stderr
+little_endian_bytes            = "allow"   # wire formats use explicit LE encoding
+host_endian_bytes              = "allow"   # sometimes needed alongside LE/BE
 
 # Lifetime style — explicit lifetimes aid readability in embedded traits
 single_char_lifetime_names = "allow"
@@ -118,42 +128,62 @@ return_and_then                    = "allow"   # .and_then chains can be more re
 [workspace.dependencies]
 
 # Core embedded abstractions
-embedded-hal       = "1"
-embedded-hal-async = "1"
+embedded-hal = "1"
 
 # Async runtime
-embassy-executor = { version = "0.7", features = ["executor-thread"] }
-embassy-time     = "0.4"
-embassy-usb      = "0.4"
-embassy-sync     = "0.6"
-
-# USB HID
-usbd-hid = "0.8"
+embassy-executor = { version = "0.10", features = ["executor-thread"] }
+embassy-time     = "0.5"
+embassy-usb      = "0.6"
+embassy-sync     = "0.7"
 
 # no_std utilities
 heapless = "0.8"
-bitfield = "0.14"
 
 # Embedded logging (zero-overhead, RTT-based)
-defmt = "0.3"
+defmt = "1"
 
-# Persistent storage abstraction (EEPROM / flash)
-embedded-storage       = "0.3"
-embedded-storage-async = "0.4"
-
-# Serialization (std-only, config parsing)
+# Serialization (std-only, used by tecla core for config round-tripping)
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Persistent storage
+embedded-storage-async = "0.4"
+sequential-storage     = { version = "7", features = ["heapless"] }
+embedded-io-async      = "0.6"
+postcard               = { version = "1", default-features = false, features = ["heapless"] }
 
 # Proc macro utilities (tecla-macros)
 syn        = { version = "2", features = ["full"] }
 quote      = "1"
 proc-macro2 = "1"
 
-# CLI (tecla-cli)
-clap   = { version = "4", features = ["derive"] }
-anyhow = "1"
-tokio  = { version = "1", features = ["full"] }
+# RP2040 board support
+embassy-rp  = { version = "0.10", features = ["defmt", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-nrf = { version = "0.10", features = ["nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac"] }
+embassy-stm32 = { version = "0.6", features = ["stm32f411ce", "time-driver-any", "exti", "unstable-pac"] }
+cortex-m    = { version = "0.7", features = ["inline-asm"] }
+cortex-m-rt = "0.7"
+defmt-rtt   = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+static_cell = "2"
+
+# ESP32-S3 board support
+esp-hal         = { version = "1", features = ["esp32s3"] }
+esp-hal-embassy = { version = "0.9", features = ["esp32s3"] }
+esp-println     = { version = "0.14", features = ["esp32s3"] }
+esp-backtrace   = { version = "0.15", features = ["esp32s3", "panic-handler"] }
+
+# Tree-sitter (C parser for QMK keymap transpiler)
+tree-sitter   = "0.26"
+tree-sitter-c = "0.24"
 
 # Testing
 similar-asserts = "1"
+trybuild        = { version = "1", features = ["diff"] }
+insta           = { version = "1", features = ["glob"] }
+
+[profile.release]
+debug         = 2
+lto           = true
+opt-level     = "s"
+codegen-units = 1

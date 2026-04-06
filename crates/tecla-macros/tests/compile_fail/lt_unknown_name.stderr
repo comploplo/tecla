@@ -1,0 +1,5 @@
+error: unknown layer name `Typo`
+ --> tests/compile_fail/lt_unknown_name.rs:5:32
+  |
+5 |         layer!(Base, A, B, LT!(Typo, SPC)),
+  |                                ^^^^

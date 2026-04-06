@@ -1,0 +1,33 @@
+// nRF52840 — Cortex-M4F, minimal stubs for Embassy firmware boot.
+//
+// Memory map (from nRF52840 product spec):
+//   0x00000000  Flash           1 MB
+//   0x20000000  SRAM          256 KB
+//   0x40000000  APB peripherals
+//   0x50000000  AHB peripherals
+
+flash: Memory.MappedMemory @ sysbus 0x00000000
+    size: 0x100000
+
+sram: Memory.MappedMemory @ sysbus 0x20000000
+    size: 0x40000
+
+ficr: Memory.MappedMemory @ sysbus 0x10000000
+    size: 0x1000
+
+uicr: Memory.MappedMemory @ sysbus 0x10001000
+    size: 0x1000
+
+apb: Memory.MappedMemory @ sysbus 0x40000000
+    size: 0x40000
+
+ahb: Memory.MappedMemory @ sysbus 0x50000000
+    size: 0x10000
+
+nvic: IRQControllers.NVIC @ sysbus 0xe000e000
+    systickFrequency: 64000000
+    -> cpu@0
+
+cpu: CPU.CortexM @ sysbus
+    cpuType: "cortex-m4f"
+    nvic: nvic

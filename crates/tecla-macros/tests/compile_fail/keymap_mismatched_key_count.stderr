@@ -1,0 +1,5 @@
+error: layer `Fn` has 2 keys but layer `Base` has 3; all layers must have the same key count
+ --> tests/compile_fail/keymap_mismatched_key_count.rs:6:16
+  |
+6 |         layer!(Fn,   F1, F2),
+  |                ^^

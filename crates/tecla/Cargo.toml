@@ -3,6 +3,8 @@ name = "tecla"
 version = "0.1.0"
 edition = "2021"
 description = "Embedded Rust keyboard firmware core — no_std, async-first, MCU-agnostic"
+authors.workspace = true
+license.workspace = true
 
 [lints]
 workspace = true
@@ -17,9 +19,14 @@ std = []
 # Unlocks deterministic clock injection and the simulate! macro for tests.
 testing = ["std"]
 
+# Hardware-in-the-loop test fixtures via Renode + Podman/Docker.
+hil = ["std"]
+
 # Enables the async Embassy orchestrator — task::run() and the async scanner /
 # reporter traits. Requires an Embassy time driver in the final binary.
-embassy = ["dep:embassy-time", "dep:embassy-sync"]
+embassy = ["dep:embassy-time", "dep:embassy-sync", "dep:embedded-io-async"]
+storage = ["dep:postcard", "dep:embedded-storage-async", "dep:sequential-storage", "dep:serde"]
+via = ["storage"]
 
 # MCU arch — these will gate embassy-executor features in board crates.
 arch-cortex-m = []
@@ -32,10 +39,17 @@ heapless           = { workspace = true }
 defmt              = { workspace = true }
 
 embassy-time = { workspace = true, optional = true }
-embassy-sync = { workspace = true, optional = true }
+embassy-sync     = { workspace = true, optional = true }
+embedded-io-async = { workspace = true, optional = true }
 
 serde = { workspace = true, optional = true }
+
+postcard               = { workspace = true, optional = true }
+embedded-storage-async = { workspace = true, optional = true }
+sequential-storage     = { workspace = true, optional = true }
+
 
 [dev-dependencies]
 similar-asserts = { workspace = true }
 serde_json      = { workspace = true }
+tecla-config    = { path = "../tecla-config" }
