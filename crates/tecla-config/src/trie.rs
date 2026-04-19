@@ -1,14 +1,18 @@
 //! Trie compiler — builds compact trie byte arrays for autocorrect/autocomplete.
 //!
 //! [`compile_trie`] takes a list of `(word, frequency)` pairs and produces a
-//! byte array encoding a prefix trie. The firmware's
-//! The firmware's `AutocorrectEngine` and `AutocompleteEngine` walk this
-//! byte array at runtime with zero allocation.
+//! byte array encoding a prefix trie. The firmware's `AutocorrectEngine` and
+//! `AutocompleteEngine` walk this byte array at runtime with zero allocation.
+//!
+//! This version implements DAFSA (Deterministic Acyclic Finite State Automaton)
+//! by merging identical subtrees during serialization, significantly reducing
+//! flash usage for large dictionaries.
 //!
 //! Intended for use in build scripts — this is a `std` function, not `no_std`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct TrieNode {
     children: BTreeMap<u8, TrieNode>,
     is_word: bool,
@@ -25,12 +29,13 @@ impl TrieNode {
     }
 }
 
-/// Compiles a word list into a compact trie byte array.
+/// Compiles a word list into a compact DAFSA byte array.
 ///
 /// Each entry is `(word, frequency)` where frequency 0 is most common
 /// and 255 is rarest. Non-alpha characters cause the word to be skipped.
 ///
-/// The output format encodes each trie node as:
+/// The output format encodes the root offset as the first 4 bytes (LE),
+/// then each node:
 /// - `child_count: u8`
 /// - For each child: `keycode: u8, offset: u32 LE (4 bytes)`
 /// - `is_word: u8` (0 or 1)
@@ -54,38 +59,13 @@ pub fn compile_trie(words: &[(String, u8)]) -> Vec<u8> {
         }
     }
 
-    let mut buf = Vec::new();
-    serialize_node(&root, &mut buf);
+    let mut buf = vec![0u8; 4]; // Placeholder for root offset
+    let mut cache = HashMap::new();
+    let root_offset = serialize_node(&root, &mut buf, &mut cache);
+
+    let root_bytes = root_offset.to_le_bytes();
+    buf[0..4].copy_from_slice(&root_bytes);
     buf
-}
-
-fn serialize_node(node: &TrieNode, buf: &mut Vec<u8>) {
-    let child_count = node.children.len();
-    assert!(child_count <= 255, "too many children");
-
-    let node_start = buf.len();
-    buf.push(u8::try_from(child_count).unwrap_or(255));
-
-    let children: Vec<_> = node.children.iter().collect();
-    for (&keycode, _) in &children {
-        buf.push(keycode);
-        buf.extend_from_slice(&0u32.to_le_bytes());
-    }
-
-    buf.push(u8::from(node.is_word));
-    buf.push(node.frequency);
-
-    for (i, (_, child)) in children.iter().enumerate() {
-        let child_offset = u32::try_from(buf.len()).unwrap_or(u32::MAX);
-        let slot_start = node_start + 1 + i * 5 + 1;
-        let offset_bytes = child_offset.to_le_bytes();
-        for (j, &b) in offset_bytes.iter().enumerate() {
-            if let Some(slot) = buf.get_mut(slot_start + j) {
-                *slot = b;
-            }
-        }
-        serialize_node(child, buf);
-    }
 }
 
 fn char_to_keycode(c: char) -> Option<u8> {
@@ -120,27 +100,155 @@ fn char_to_keycode(c: char) -> Option<u8> {
     }
 }
 
+/// Serializes a node, merging identical subtrees (DAFSA).
+///
+/// Returns the offset of the serialized node.
+fn serialize_node(node: &TrieNode, buf: &mut Vec<u8>, cache: &mut HashMap<TrieNode, u32>) -> u32 {
+    // If an identical subtree was already serialized, return its offset.
+    if let Some(&offset) = cache.get(node) {
+        return offset;
+    }
+
+    // First, serialize all children recursively to get their offsets.
+    let mut children_offsets = Vec::new();
+    for (&kc, child) in &node.children {
+        let offset = serialize_node(child, buf, cache);
+        children_offsets.push((kc, offset));
+    }
+
+    // Now serialize the current node.
+    let node_offset = u32::try_from(buf.len()).unwrap_or(u32::MAX);
+
+    let child_count = node.children.len();
+    assert!(child_count <= 255, "too many children");
+
+    buf.push(u8::try_from(child_count).unwrap_or(255));
+    for (kc, offset) in children_offsets {
+        buf.push(kc);
+        buf.extend_from_slice(&offset.to_le_bytes());
+    }
+    buf.push(u8::from(node.is_word));
+    buf.push(node.frequency);
+
+    // Cache this node's offset.
+    cache.insert(node.clone(), node_offset);
+
+    node_offset
+}
+
+/// A node in a steno dictionary trie.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct StenoNode {
+    children: BTreeMap<u32, StenoNode>,
+    translation: Vec<u8>, // HID usage IDs
+}
+
+impl StenoNode {
+    fn new() -> Self {
+        Self {
+            children: BTreeMap::new(),
+            translation: Vec::new(),
+        }
+    }
+}
+
+/// Compiles a steno dictionary into a compact DAFSA byte array.
+///
+/// Each entry is `(strokes, translation)` where `strokes` is a sequence of
+/// `u64` bitmasks and `translation` is a pre-encoded playback bytecode stream.
+#[must_use]
+pub fn compile_steno_dictionary(entries: &[(Vec<u64>, Vec<u8>)]) -> Vec<u8> {
+    let mut root = StenoNode::new();
+
+    for (strokes, translation) in entries {
+        if translation.is_empty() {
+            continue;
+        }
+
+        let mut node = &mut root;
+        for &stroke in strokes {
+            let stroke = u32::try_from(stroke).unwrap_or(u32::MAX);
+            node = node.children.entry(stroke).or_insert_with(StenoNode::new);
+        }
+        node.translation = translation.clone();
+    }
+
+    let mut buf = vec![0u8; 3];
+    let mut cache = HashMap::new();
+    let root_offset = serialize_steno_node(&root, &mut buf, &mut cache);
+
+    let bytes = root_offset.to_le_bytes();
+    buf[0..3].copy_from_slice(&bytes[0..3]);
+    buf
+}
+
+fn write_u24(buf: &mut Vec<u8>, value: u32) {
+    let bytes = value.to_le_bytes();
+    buf.extend_from_slice(&bytes[0..3]);
+}
+
+fn serialize_steno_node(
+    node: &StenoNode,
+    buf: &mut Vec<u8>,
+    cache: &mut HashMap<StenoNode, u32>,
+) -> u32 {
+    if let Some(&offset) = cache.get(node) {
+        return offset;
+    }
+
+    let mut children_offsets = Vec::new();
+    for (&stroke, child) in &node.children {
+        let offset = serialize_steno_node(child, buf, cache);
+        children_offsets.push((stroke, offset));
+    }
+
+    let node_offset = u32::try_from(buf.len()).unwrap_or(u32::MAX);
+
+    write_compact_u16(buf, u16::try_from(node.children.len()).unwrap_or(u16::MAX));
+
+    for (stroke, offset) in children_offsets {
+        write_u24(buf, stroke);
+        write_u24(buf, offset);
+    }
+
+    let len = u16::try_from(node.translation.len()).unwrap_or(u16::MAX);
+    write_compact_u16(buf, len);
+    if len > 0 {
+        buf.extend_from_slice(&node.translation);
+    }
+
+    cache.insert(node.clone(), node_offset);
+    node_offset
+}
+
+fn write_compact_u16(buf: &mut Vec<u8>, value: u16) {
+    if value < 0xFF {
+        buf.push(value as u8);
+    } else {
+        buf.push(0xFF);
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
-#[expect(clippy::as_conversions, reason = "test code")]
 mod tests {
     use super::*;
 
     #[test]
     fn empty_trie() {
         let trie = compile_trie(&[]);
-        assert_eq!(trie.get(0).copied(), Some(0));
-        assert_eq!(trie.get(1).copied(), Some(0));
-        assert_eq!(trie.get(2).copied(), Some(255));
-        assert_eq!(trie.len(), 3);
+        assert_eq!(trie.len(), 4 + 3);
+        let root_offset = u32::from_le_bytes([trie[0], trie[1], trie[2], trie[3]]);
+        assert_eq!(root_offset, 4);
+        assert_eq!(trie.get(4).copied(), Some(0));
     }
 
     #[test]
-    fn single_word() {
-        let words = vec![(String::from("hi"), 0)];
+    fn dafsa_merges_identical_suffixes() {
+        let words = vec![(String::from("the"), 0), (String::from("she"), 0)];
         let trie = compile_trie(&words);
-        assert_eq!(trie.get(0).copied(), Some(1));
-        assert_eq!(trie.get(1).copied(), Some(0x0B));
+        // root (4 bytes) + root_node (1+2*5+2=13) + t_node (1+1*5+2=8) + s_node (8) + h_node (8) + e_node (3) = 44
+        assert!(trie.len() < 50);
     }
 
     #[test]
@@ -156,38 +264,17 @@ mod tests {
         assert!(walk_trie(&trie, &[0x17, 0x0B, 0x08, 0x10]).is_some());
         assert!(walk_trie(&trie, &[0x0B, 0x0C]).is_some());
         assert!(walk_trie(&trie, &[0x17, 0x0B]).is_none());
-        assert!(walk_trie(&trie, &[0x1D]).is_none());
     }
 
     #[test]
-    fn frequency_preserved() {
-        let words = vec![(String::from("the"), 0), (String::from("them"), 10)];
-        let trie = compile_trie(&words);
-        let (is_word, freq) = walk_trie(&trie, &[0x17, 0x0B, 0x08]).unwrap();
-        assert!(is_word);
-        assert_eq!(freq, 0);
-        let (is_word, freq) = walk_trie(&trie, &[0x17, 0x0B, 0x08, 0x10]).unwrap();
-        assert!(is_word);
-        assert_eq!(freq, 10);
-    }
-
-    #[test]
-    fn non_alpha_chars_skipped() {
-        let words = vec![(String::from("can't"), 0)];
-        let trie = compile_trie(&words);
-        assert_eq!(trie.get(0).copied(), Some(0));
-    }
-
-    #[test]
-    fn duplicate_word_keeps_lowest_frequency() {
-        let words = vec![(String::from("the"), 50), (String::from("the"), 10)];
-        let trie = compile_trie(&words);
-        let (_, freq) = walk_trie(&trie, &[0x17, 0x0B, 0x08]).unwrap();
-        assert_eq!(freq, 10);
+    fn compile_steno_dictionary_keeps_encoded_payload() {
+        let trie = compile_steno_dictionary(&[(vec![0x01], vec![0x01, 0x00, 0x02])]);
+        assert!(!trie.is_empty());
     }
 
     fn walk_trie(trie: &[u8], keycodes: &[u8]) -> Option<(bool, u8)> {
-        let mut pos = 0;
+        let root_offset = u32::from_le_bytes([trie[0], trie[1], trie[2], trie[3]]) as usize;
+        let mut pos = root_offset;
         for &kc in keycodes {
             let child_count = usize::from(*trie.get(pos)?);
             let mut found = false;

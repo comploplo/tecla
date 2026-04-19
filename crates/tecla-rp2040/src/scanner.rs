@@ -5,7 +5,7 @@
 //! pull-ups. A column reads low when the switch at that row/col intersection
 //! is pressed (active-low matrix).
 
-use embassy_rp::gpio::{Input, Output};
+use embassy_rp::gpio::{Drive, Flex, Input, Output, Pull};
 use embassy_time::Timer;
 use tecla::matrix::{AsyncMatrixScanner, MatrixState};
 
@@ -51,6 +51,92 @@ impl<'d, const KEYS: usize> AsyncMatrixScanner<1, KEYS> for DirectPinScanner<'d,
         let mut state = MatrixState::new();
         for (i, pin) in self.pins.iter().enumerate() {
             state.set(0, i, pin.is_low());
+        }
+        Ok(state)
+    }
+}
+
+/// Capacitive touch scanner for keyboards with touch-sensitive pads.
+///
+/// Measures discharge time per pin: charge all pins high, switch each to
+/// input sequentially, count cycles until low. A finger adds capacitance,
+/// increasing the count. Calibrates at boot (4 rounds, threshold = 1.3x
+/// baseline). Maps keys into a `1 × KEYS` matrix (single row).
+pub struct CapTouchScanner<'d, const KEYS: usize> {
+    pins: [Flex<'d>; KEYS],
+    thresholds: [u32; KEYS],
+}
+
+impl<'d, const KEYS: usize> CapTouchScanner<'d, KEYS> {
+    const CHARGE_CYCLES: u32 = 1250;
+    const MAX_DISCHARGE_COUNT: u32 = 100_000;
+    const CALIBRATION_ROUNDS: usize = 4;
+    const THRESHOLD_NUMERATOR: u32 = 333;
+    const THRESHOLD_SHIFT: u32 = 10;
+
+    /// Creates a new scanner, calibrating touch thresholds at boot.
+    pub fn new(mut pins: [Flex<'d>; KEYS]) -> Self {
+        for pin in &mut pins {
+            pin.set_pull(Pull::None);
+            pin.set_drive_strength(Drive::_12mA);
+        }
+        let mut scanner = Self {
+            pins,
+            thresholds: [0; KEYS],
+        };
+        scanner.calibrate();
+        scanner
+    }
+
+    fn calibrate(&mut self) {
+        let mut accum = [0u32; KEYS];
+        for _ in 0..Self::CALIBRATION_ROUNDS {
+            let counts = self.read_counts();
+            for (a, c) in accum.iter_mut().zip(counts.iter()) {
+                *a += c;
+            }
+        }
+        for (th, sum) in self.thresholds.iter_mut().zip(accum.iter()) {
+            *th = (*sum * Self::THRESHOLD_NUMERATOR) >> Self::THRESHOLD_SHIFT;
+        }
+    }
+
+    fn charge_all(&mut self) {
+        for pin in &mut self.pins {
+            pin.set_as_output();
+            pin.set_high();
+        }
+        for _ in 0..Self::CHARGE_CYCLES {
+            cortex_m::asm::nop();
+        }
+    }
+
+    fn read_counts(&mut self) -> [u32; KEYS] {
+        self.charge_all();
+        let mut counts = [0u32; KEYS];
+        for (i, pin) in self.pins.iter_mut().enumerate() {
+            pin.set_as_input();
+            let mut counter = 0u32;
+            while counter < Self::MAX_DISCHARGE_COUNT {
+                if pin.is_low() {
+                    break;
+                }
+                counter += 1;
+            }
+            counts[i] = counter;
+        }
+        counts
+    }
+}
+
+impl<'d, const KEYS: usize> AsyncMatrixScanner<1, KEYS> for CapTouchScanner<'d, KEYS> {
+    type Error = core::convert::Infallible;
+
+    async fn scan(&mut self) -> Result<MatrixState<1, KEYS>, Self::Error> {
+        let counts = self.read_counts();
+        let mut state = MatrixState::new();
+        for (i, (count, threshold)) in counts.iter().zip(self.thresholds.iter()).enumerate() {
+            state.set(0, i, *count > *threshold);
         }
         Ok(state)
     }

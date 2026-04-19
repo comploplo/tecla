@@ -20,8 +20,8 @@ use cortex_m_rt::entry;
 use cortex_m_semihosting::debug::{self, EXIT_FAILURE, EXIT_SUCCESS};
 use cortex_m_semihosting::hprintln;
 use embassy_nrf as _;
+use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::tapping::TapHoldConfig;
 use tecla_macros::keymap;
 
 const ROWS: usize = 4;

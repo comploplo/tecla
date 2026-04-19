@@ -1,0 +1,9 @@
+name = "steno_uni_v4"
+crate = "tecla-rp2040"
+example = "steno_uni_v4"
+target = "thumbv6m-none-eabi"
+flash = "uf2"
+features = ["steno-dictionary"]
+vendor = "stenokeyboards"
+family = "uni_v4"
+

@@ -24,7 +24,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 use tecla::hil::{
-    extract_elf_info, generate_matrix_test_resc, parse_key_log, parse_tapdance_log, Platform,
+    extract_elf_info, generate_matrix_test_resc, parse_key_log, parse_tapdance_log,
+    run_renode_container, Platform,
 };
 
 fn firmware_path() -> PathBuf {
@@ -157,26 +158,35 @@ fn planck_keycode_verification() {
 
     let runtime = std::env::var("TECLA_CONTAINER_RUNTIME").unwrap_or_else(|_| "podman".to_string());
 
-    let cmd_output = Command::new("timeout")
-        .args(["--kill-after=5", "60"])
-        .arg(&runtime)
-        .args([
-            "run",
-            "--rm",
-            "--volume",
-            &format!("{}:/hil:ro", work_dir.display()),
-            "--volume",
-            &format!("{}:{}", elf_abs.display(), elf_abs.display()),
-            "--entrypoint",
-            "/opt/renode/renode",
-            "docker.io/antmicro/renode:latest",
-            "--disable-xwt",
-            "--plain",
-            "-e",
-            "include @/hil/test.resc",
-        ])
-        .output()
-        .expect("container runtime failed");
+    let cidfile = work_dir.join("renode.cid");
+    let mut cmd = Command::new(&runtime);
+    cmd.args([
+        "run",
+        "--rm",
+        "--cidfile",
+        cidfile.to_str().expect("cidfile path not valid UTF-8"),
+        "--volume",
+        &format!("{}:/hil:ro", work_dir.display()),
+        "--volume",
+        &format!("{}:{}", elf_abs.display(), elf_abs.display()),
+        "--entrypoint",
+        "/opt/renode/renode",
+        "docker.io/antmicro/renode:latest",
+        "--disable-xwt",
+        "--plain",
+        "-e",
+        "include @/hil/test.resc",
+    ]);
+
+    let cmd_output = run_renode_container(cmd, Platform::Rp2040, || {
+        let Ok(cid) = std::fs::read_to_string(&cidfile) else {
+            return;
+        };
+        let cid = cid.trim();
+        if !cid.is_empty() {
+            let _ = Command::new(&runtime).args(["rm", "-f", cid]).status();
+        }
+    });
 
     let all_output = format!(
         "{}\n{}",

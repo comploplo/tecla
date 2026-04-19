@@ -4,9 +4,9 @@
     reason = "integration tests live in tests/ by convention"
 )]
 use tecla::action::{Action, KeyCode, LayerOp, ModifierKey};
-use tecla::event::KeyPos;
-use tecla::keymap::{Layer, LayerStack};
-use tecla_macros::{keymap, layer, LT, MT};
+use tecla::pipeline::event::KeyPos;
+use tecla::pipeline::keymap::{Layer, LayerStack};
+use tecla_macros::{keymap, layer, steno, LT, MT};
 
 // ── layer! ────────────────────────────────────────────────────────────────────
 
@@ -167,6 +167,26 @@ fn keymap_macro_single_layer() {
         layer!(Base, SPC, ENT),
     };
     assert_eq!(stack.default_state(), 1);
+}
+
+// ── steno! ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn steno_macro_produces_correct_layer_stack_type() {
+    let stack: LayerStack<1, 12, ()> = steno! {
+        layer!(Base, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+    };
+    assert_eq!(stack.state(), 0);
+}
+
+#[test]
+fn steno_macro_resolves_steno_actions_correctly() {
+    let stack: LayerStack<1, 3, ()> = steno! {
+        layer!(Base, 0, 1, 2),
+    };
+    assert_eq!(stack.resolve(KeyPos::new(0, 0), 3), Action::Steno(0));
+    assert_eq!(stack.resolve(KeyPos::new(0, 1), 3), Action::Steno(1));
+    assert_eq!(stack.resolve(KeyPos::new(0, 2), 3), Action::Steno(2));
 }
 
 // ── layer name resolution ─────────────────────────────────────────────────────

@@ -1,0 +1,8 @@
+name = "asterisk_v1_4"
+crate = "tecla-rp2040"
+example = "asterisk_v1_4"
+target = "thumbv6m-none-eabi"
+flash = "uf2"
+features = ["steno-dictionary"]
+vendor = "stenokeyboards"
+family = "asterisk"

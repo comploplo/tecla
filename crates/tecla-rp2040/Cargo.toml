@@ -30,5 +30,17 @@ portable-atomic = { version = "1", features = ["critical-section"] }
 
 cortex-m-semihosting = { version = "0.5", optional = true }
 
+[build-dependencies]
+tecla-config = { path = "../tecla-config" }
+
 [features]
 hil = ["dep:cortex-m-semihosting"]
+steno-dictionary = []
+
+[[example]]
+name = "steno_uni_v4"
+required-features = ["steno-dictionary"]
+
+[[example]]
+name = "asterisk_v1_4"
+required-features = ["steno-dictionary"]

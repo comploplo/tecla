@@ -1,0 +1,12 @@
+[submodule ".vendor/qmk_firmware"]
+	path = .vendor/qmk_firmware
+	url = https://github.com/qmk/qmk_firmware
+	branch = master
+[submodule ".vendor/plover-lapwing-aio"]
+	path = .vendor/plover-lapwing-aio
+	url = https://github.com/aerickt/plover-lapwing-aio
+	branch = main
+[submodule ".vendor/zmk"]
+	path = .vendor/zmk
+	url = https://github.com/zmkfirmware/zmk
+	branch = main

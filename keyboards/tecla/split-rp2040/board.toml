@@ -1,0 +1,6 @@
+name = "split-rp2040"
+crate = "tecla-rp2040"
+example = "split"
+target = "thumbv6m-none-eabi"
+flash = "probe-rs"
+

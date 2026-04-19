@@ -19,8 +19,8 @@
 use trouble_host::prelude::*;
 
 use tecla::ble::BleError;
-use tecla::hid::{AsyncReporter, ReportError};
-use tecla::report::HidReport;
+use tecla::pipeline::hid::{AsyncReporter, ReportError};
+use tecla::pipeline::report::HidReport;
 
 use embassy_nrf::rng::Rng as HwRng;
 use embassy_nrf::{bind_interrupts, peripherals, rng, Peri};
@@ -91,7 +91,7 @@ impl<'a, 'server, P: PacketPool> BleHidReporter<'a, 'server, P> {
         self.conn = None;
     }
 
-    fn serialize_keyboard_report(kr: &tecla::report::KeyboardReport) -> [u8; 9] {
+    fn serialize_keyboard_report(kr: &tecla::pipeline::report::KeyboardReport) -> [u8; 9] {
         [
             0x01,
             kr.modifiers,
@@ -109,7 +109,7 @@ impl<'a, 'server, P: PacketPool> BleHidReporter<'a, 'server, P> {
         clippy::as_conversions,
         reason = "consumer keycode enum to u16 wire bytes"
     )]
-    fn serialize_consumer_report(cr: &tecla::report::ConsumerReport) -> [u8; 3] {
+    fn serialize_consumer_report(cr: &tecla::pipeline::report::ConsumerReport) -> [u8; 3] {
         let usage = cr.keycode.map_or(0u16, |k| k as u16);
         [0x02, usage as u8, (usage >> 8) as u8]
     }

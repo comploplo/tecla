@@ -15,6 +15,7 @@
 //!
 //! See also: [`autocomplete`](crate::autocomplete) for prefix completion.
 
+use core::convert::TryFrom;
 use heapless::Deque;
 
 use crate::action::KeyCode;
@@ -98,10 +99,6 @@ impl AutocorrectEngine {
     }
 
     /// Feeds a keycode to the engine, returning a correction if one matches.
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "heapless push overflow silently dropped in no_std"
-    )]
     pub fn process_keycode(&mut self, kc: KeyCode, now_ms: u64) -> Option<Correction> {
         if !self.enabled {
             return None;
@@ -124,7 +121,7 @@ impl AutocorrectEngine {
         if self.buffer.is_full() {
             self.buffer.pop_front();
         }
-        self.buffer.push_back(uid).ok();
+        let _ = self.buffer.push_back(uid);
         self.last_press_time = now_ms;
         self.prev_keycode = Some(uid);
 
@@ -153,11 +150,7 @@ impl AutocorrectEngine {
         }
 
         let word = self.extract_word(false);
-        if word.is_empty() || trie_lookup(self.dictionary, &word) {
-            return None;
-        }
-
-        if word.len() < 3 {
+        if word.is_empty() || trie_lookup(self.dictionary, &word) || word.len() < 3 {
             return None;
         }
 
@@ -195,16 +188,12 @@ impl AutocorrectEngine {
         None
     }
 
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "heapless push overflow silently dropped in no_std"
-    )]
     fn extract_word(&self, transposed: bool) -> heapless::Vec<u8, 64> {
         let mut word = heapless::Vec::new();
         let buf_len = self.buffer.len();
         for i in 0..buf_len {
             let val = self.get_buffer_char(i, transposed);
-            word.push(val).ok();
+            let _ = word.push(val);
         }
         word
     }
@@ -253,23 +242,29 @@ fn find_correction(
     proximity: Option<&[[u8; 26]; 26]>,
 ) -> Option<Correction> {
     let mut searcher = EditSearch::new(dictionary, proximity);
-    searcher.search(0, word, 2);
+    searcher.search_root(word, 2);
     let (replacement_word, _) = searcher.best?;
     Some(make_correction(&replacement_word, word.len()))
 }
 
 fn trie_lookup(trie: &[u8], word: &[u8]) -> bool {
-    let mut pos = 0;
+    let Some(mut pos) = read_root_pos(trie) else {
+        return false;
+    };
     for &kc in word {
-        let Some(&child_count) = trie.get(pos) else {
+        let Some(child_count) = node_child_count(trie, pos) else {
             return false;
         };
-        let cc = usize::from(child_count);
         let mut found = false;
-        for i in 0..cc {
-            let slot = pos + 1 + i * 5;
+        for i in 0..child_count {
+            let Some(slot) = child_slot(pos, i) else {
+                continue;
+            };
             if trie.get(slot).copied() == Some(kc) {
-                pos = read_offset(trie, slot);
+                let Some(next) = read_offset(trie, slot) else {
+                    return false;
+                };
+                pos = next;
                 found = true;
                 break;
             }
@@ -281,46 +276,69 @@ fn trie_lookup(trie: &[u8], word: &[u8]) -> bool {
     is_word_at(trie, pos)
 }
 
-#[expect(clippy::as_conversions, reason = "u32 trie offset to usize")]
-fn read_offset(trie: &[u8], slot: usize) -> usize {
-    let b0 = u32::from(trie.get(slot + 1).copied().unwrap_or(0));
-    let b1 = u32::from(trie.get(slot + 2).copied().unwrap_or(0));
-    let b2 = u32::from(trie.get(slot + 3).copied().unwrap_or(0));
-    let b3 = u32::from(trie.get(slot + 4).copied().unwrap_or(0));
-    (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) as usize
+fn read_root_pos(trie: &[u8]) -> Option<usize> {
+    let bytes = trie.get(0..4)?;
+    let root = u32::from_le_bytes(bytes.try_into().ok()?);
+    usize::try_from(root).ok()
+}
+
+fn read_offset(trie: &[u8], slot: usize) -> Option<usize> {
+    let start = slot.checked_add(1)?;
+    let end = start.checked_add(4)?;
+    let bytes = trie.get(start..end)?;
+    let offset = u32::from_le_bytes(bytes.try_into().ok()?);
+    usize::try_from(offset).ok()
+}
+
+fn node_child_count(trie: &[u8], pos: usize) -> Option<usize> {
+    trie.get(pos).copied().map(usize::from)
+}
+
+fn node_flag_pos(pos: usize, child_count: usize) -> Option<usize> {
+    let children_len = child_count.checked_mul(5)?;
+    pos.checked_add(1)?.checked_add(children_len)
+}
+
+fn child_slot(pos: usize, i: usize) -> Option<usize> {
+    let offset = i.checked_mul(5)?;
+    pos.checked_add(1)?.checked_add(offset)
 }
 
 fn is_word_at(trie: &[u8], pos: usize) -> bool {
-    let cc = usize::from(trie.get(pos).copied().unwrap_or(0));
-    let flag_pos = pos + 1 + cc * 5;
+    let Some(child_count) = node_child_count(trie, pos) else {
+        return false;
+    };
+    let Some(flag_pos) = node_flag_pos(pos, child_count) else {
+        return false;
+    };
     trie.get(flag_pos).copied() == Some(1)
 }
 
 fn freq_at(trie: &[u8], pos: usize) -> u8 {
-    let cc = usize::from(trie.get(pos).copied().unwrap_or(0));
-    let flag_pos = pos + 1 + cc * 5;
-    trie.get(flag_pos + 1).copied().unwrap_or(255)
-}
-
-fn child_count_at(trie: &[u8], pos: usize) -> usize {
-    usize::from(trie.get(pos).copied().unwrap_or(0))
+    let Some(child_count) = node_child_count(trie, pos) else {
+        return 255;
+    };
+    let Some(flag_pos) = node_flag_pos(pos, child_count) else {
+        return 255;
+    };
+    flag_pos
+        .checked_add(1)
+        .and_then(|next| trie.get(next))
+        .copied()
+        .unwrap_or(255)
 }
 
 fn child_at(trie: &[u8], pos: usize, i: usize) -> Option<(u8, usize)> {
-    let slot = pos + 1 + i * 5;
+    let slot = child_slot(pos, i)?;
     let edge_kc = trie.get(slot).copied()?;
-    Some((edge_kc, read_offset(trie, slot)))
+    Some((edge_kc, read_offset(trie, slot)?))
 }
 
 const HID_A: u8 = 0x04;
 
-#[expect(
-    clippy::as_conversions,
-    reason = "u8 offset to usize for array indexing"
-)]
-const fn letter_index(usage_id: u8) -> Option<usize> {
-    if usage_id >= HID_A && usage_id < HID_A + 26 {
-        Some((usage_id - HID_A) as usize)
+fn letter_index(usage_id: u8) -> Option<usize> {
+    if (HID_A..(HID_A + 26)).contains(&usage_id) {
+        Some(usize::from(usage_id - HID_A))
     } else {
         None
     }
@@ -345,18 +363,27 @@ impl<'a> EditSearch<'a> {
         }
     }
 
+    fn search_root(&mut self, word: &[u8], max_dist: u8) {
+        if let Some(root_pos) = read_root_pos(self.trie) {
+            self.search(root_pos, word, max_dist);
+        }
+    }
+
     fn search(&mut self, pos: usize, remaining: &[u8], max_dist: u8) {
-        let cc = child_count_at(self.trie, pos);
+        let Some(child_count) = node_child_count(self.trie, pos) else {
+            return;
+        };
 
         if remaining.is_empty() {
-            self.handle_leaf(pos, cc, max_dist);
+            self.handle_leaf(pos, child_count, max_dist);
             return;
         }
 
-        let target = remaining.get(0).copied().unwrap_or(0);
-        let rest = remaining.get(1..).unwrap_or(&[]);
+        let Some((&target, rest)) = remaining.split_first() else {
+            return;
+        };
 
-        for i in 0..cc {
+        for i in 0..child_count {
             let Some((edge_kc, child_pos)) = child_at(self.trie, pos, i) else {
                 continue;
             };
@@ -364,7 +391,7 @@ impl<'a> EditSearch<'a> {
             if max_dist > 0 {
                 self.try_substitute(edge_kc, child_pos, target, rest, max_dist);
                 self.try_insert(edge_kc, child_pos, remaining, max_dist);
-                self.try_transpose(pos, cc, edge_kc, target, remaining, max_dist);
+                self.try_transpose(pos, child_count, edge_kc, target, remaining, max_dist);
             }
         }
 
@@ -395,11 +422,9 @@ impl<'a> EditSearch<'a> {
     }
 
     fn try_match(&mut self, edge_kc: u8, child_pos: usize, target: u8, rest: &[u8], max_dist: u8) {
-        if edge_kc == target {
-            if self.current.push(edge_kc).is_ok() {
-                self.search(child_pos, rest, max_dist);
-                self.current.truncate(self.current.len() - 1);
-            }
+        if edge_kc == target && self.current.push(edge_kc).is_ok() {
+            self.search(child_pos, rest, max_dist);
+            self.current.truncate(self.current.len() - 1);
         }
     }
 
@@ -422,14 +447,15 @@ impl<'a> EditSearch<'a> {
         }
     }
 
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "indices are bounds-checked by letter_index"
-    )]
     fn substitution_cost(&self, a: u8, b: u8) -> u16 {
         if let Some(table) = self.proximity {
             if let (Some(ai), Some(bi)) = (letter_index(a), letter_index(b)) {
-                return u16::from(table[ai][bi]);
+                return table
+                    .get(ai)
+                    .and_then(|row| row.get(bi))
+                    .copied()
+                    .map(u16::from)
+                    .unwrap_or(255);
             }
         }
         255
@@ -454,7 +480,7 @@ impl<'a> EditSearch<'a> {
         max_dist: u8,
     ) {
         let rest = remaining.get(1..).unwrap_or(&[]);
-        if rest.is_empty() || rest.get(0).copied() != Some(edge_kc) {
+        if rest.first().copied() != Some(edge_kc) {
             return;
         }
         let rest2 = remaining.get(2..).unwrap_or(&[]);
@@ -465,13 +491,11 @@ impl<'a> EditSearch<'a> {
                 continue;
             };
             if edge_kc2 == target {
-                if self.current.push(edge_kc).is_ok() {
-                    if self.current.push(edge_kc2).is_ok() {
-                        self.search(child_pos2, rest2, max_dist - 1);
-                        self.current.truncate(self.current.len() - 1);
-                    }
-                    self.current.truncate(self.current.len() - 1);
+                let base_len = self.current.len();
+                if self.current.push(edge_kc).is_ok() && self.current.push(edge_kc2).is_ok() {
+                    self.search(child_pos2, rest2, max_dist - 1);
                 }
+                self.current.truncate(base_len);
             }
         }
         self.proximity_cost -= pcost;
@@ -500,7 +524,6 @@ fn is_word_boundary(uid: u8) -> bool {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     extern crate std;
 
@@ -679,6 +702,30 @@ mod tests {
     }
 
     #[test]
+    fn truncated_trie_lookup_returns_false() {
+        assert!(!trie_lookup(&[0, 0, 0, 0, 1], &[0x04]));
+    }
+
+    #[test]
+    fn invalid_offset_trie_lookup_returns_false() {
+        let trie = [
+            4,
+            0,
+            0,
+            0,
+            1,
+            KeyCode::A.usage_id(),
+            255,
+            255,
+            255,
+            255,
+            0,
+            255,
+        ];
+        assert!(!trie_lookup(&trie, &[KeyCode::A.usage_id()]));
+    }
+
+    #[test]
     fn correction_prefers_lower_frequency() {
         let dict = leaked_trie(&[("cat", 0), ("bat", 50), ("hat", 100)]);
         let mut engine = AutocorrectEngine::new(dict);
@@ -705,8 +752,8 @@ mod tests {
         let dict = leaked_trie(&[("sat", 50), ("pat", 50)]);
 
         let mut table = [[255u8; 26]; 26];
-        for i in 0..26 {
-            table[i][i] = 0;
+        for (i, row) in table.iter_mut().enumerate() {
+            row[i] = 0;
         }
         let d_idx = usize::from(KeyCode::D.usage_id() - 0x04);
         let s_idx = usize::from(KeyCode::S.usage_id() - 0x04);

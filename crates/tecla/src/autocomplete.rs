@@ -11,6 +11,8 @@
 //!
 //! See also: [`autocorrect`](crate::autocorrect) for typo correction.
 
+use core::convert::TryFrom;
+
 use heapless::Vec;
 
 use crate::action::KeyCode;
@@ -54,10 +56,6 @@ impl AutocompleteEngine {
     }
 
     /// Feeds a keycode, updating the current suggestion.
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "heapless push overflow silently dropped in no_std"
-    )]
     pub fn process_keycode(&mut self, kc: KeyCode) {
         if !self.enabled {
             return;
@@ -73,15 +71,11 @@ impl AutocompleteEngine {
             return;
         }
 
-        self.buffer.push(uid).ok();
+        let _ = self.buffer.push(uid);
         self.update_suggestion();
     }
 
     /// Accepts the current suggestion, returning the remaining keycodes.
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "heapless push overflow silently dropped in no_std"
-    )]
     pub fn accept(&mut self) -> Option<Vec<u8, 32>> {
         if self.suggestion.is_empty() {
             return None;
@@ -89,7 +83,7 @@ impl AutocompleteEngine {
         let result = self.suggestion.clone();
         let mut new_buf = self.buffer.clone();
         for &b in &result {
-            new_buf.push(b).ok();
+            let _ = new_buf.push(b);
         }
         self.buffer = new_buf;
         self.suggestion.clear();
@@ -144,43 +138,37 @@ impl AutocompleteEngine {
     }
 }
 
-#[expect(
-    clippy::as_conversions,
-    reason = "u8 child count to usize for iteration"
-)]
 fn walk_to_prefix(trie: &[u8], prefix: &[u8]) -> Option<usize> {
-    let mut pos = 0;
+    let mut pos = read_root_pos(trie)?;
     for &kc in prefix {
-        let child_count = *trie.get(pos)? as usize;
-        let mut found = false;
+        let mut next = None;
+        let child_count = node_child_count(trie, pos)?;
         for i in 0..child_count {
-            let slot = pos + 1 + i * 5;
+            let slot = child_slot(pos, i)?;
             if trie.get(slot).copied() == Some(kc) {
-                pos = read_offset_u32(trie, slot)?;
-                found = true;
+                next = read_offset_u32(trie, slot);
                 break;
             }
         }
-        if !found {
-            return None;
-        }
+        pos = next?;
     }
     Some(pos)
 }
 
-#[expect(clippy::as_conversions, reason = "u32 trie offset to usize")]
-fn read_offset_u32(trie: &[u8], slot: usize) -> Option<usize> {
-    let b0 = u32::from(*trie.get(slot + 1)?);
-    let b1 = u32::from(*trie.get(slot + 2)?);
-    let b2 = u32::from(*trie.get(slot + 3)?);
-    let b3 = u32::from(*trie.get(slot + 4)?);
-    Some((b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) as usize)
+fn read_root_pos(trie: &[u8]) -> Option<usize> {
+    let bytes = trie.get(0..4)?;
+    let root = u32::from_le_bytes(bytes.try_into().ok()?);
+    usize::try_from(root).ok()
 }
 
-#[expect(
-    clippy::as_conversions,
-    reason = "u8 child count to usize for iteration"
-)]
+fn read_offset_u32(trie: &[u8], slot: usize) -> Option<usize> {
+    let start = slot.checked_add(1)?;
+    let end = start.checked_add(4)?;
+    let bytes = trie.get(start..end)?;
+    let offset = u32::from_le_bytes(bytes.try_into().ok()?);
+    usize::try_from(offset).ok()
+}
+
 fn find_best_completion(
     trie: &[u8],
     pos: usize,
@@ -189,13 +177,18 @@ fn find_best_completion(
     best_freq: &mut u8,
     found: &mut bool,
 ) {
-    let Some(&child_count) = trie.get(pos) else {
+    let Some(child_count) = node_child_count(trie, pos) else {
         return;
     };
-    let cc = child_count as usize;
-    let flag_pos = pos + 1 + cc * 5;
+    let Some(flag_pos) = node_flag_pos(pos, child_count) else {
+        return;
+    };
     let is_word = trie.get(flag_pos).copied() == Some(1);
-    let freq = trie.get(flag_pos + 1).copied().unwrap_or(255);
+    let freq = flag_pos
+        .checked_add(1)
+        .and_then(|next| trie.get(next))
+        .copied()
+        .unwrap_or(255);
 
     if is_word && !path.is_empty() && (freq < *best_freq || !*found) {
         *best = path.clone();
@@ -203,8 +196,10 @@ fn find_best_completion(
         *found = true;
     }
 
-    for i in 0..cc {
-        let slot = pos + 1 + i * 5;
+    for i in 0..child_count {
+        let Some(slot) = child_slot(pos, i) else {
+            continue;
+        };
         let Some(&edge_kc) = trie.get(slot) else {
             continue;
         };
@@ -219,6 +214,20 @@ fn find_best_completion(
     }
 }
 
+fn node_child_count(trie: &[u8], pos: usize) -> Option<usize> {
+    trie.get(pos).copied().map(usize::from)
+}
+
+fn node_flag_pos(pos: usize, child_count: usize) -> Option<usize> {
+    let children_len = child_count.checked_mul(5)?;
+    pos.checked_add(1)?.checked_add(children_len)
+}
+
+fn child_slot(pos: usize, child_index: usize) -> Option<usize> {
+    let child_offset = child_index.checked_mul(5)?;
+    pos.checked_add(1)?.checked_add(child_offset)
+}
+
 fn is_word_boundary(uid: u8) -> bool {
     uid == KeyCode::Space.usage_id()
         || uid == KeyCode::Enter.usage_id()
@@ -227,7 +236,6 @@ fn is_word_boundary(uid: u8) -> bool {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     extern crate std;
 
@@ -415,6 +423,34 @@ mod tests {
     fn empty_trie_no_crash() {
         let dict = leaked_trie(&[]);
         let mut engine = AutocompleteEngine::new(dict);
+        engine.process_keycode(KeyCode::A);
+        assert!(engine.suggestion().is_none());
+    }
+
+    #[test]
+    fn truncated_trie_data_is_ignored() {
+        let mut engine = AutocompleteEngine::new(&[0, 0, 0, 0, 1, 0]);
+        engine.process_keycode(KeyCode::A);
+        assert!(engine.suggestion().is_none());
+    }
+
+    #[test]
+    fn invalid_child_offset_is_ignored() {
+        let trie = std::boxed::Box::leak(std::boxed::Box::new([
+            4,
+            0,
+            0,
+            0,
+            1,
+            KeyCode::A.usage_id(),
+            255,
+            255,
+            255,
+            255,
+            0,
+            255,
+        ]));
+        let mut engine = AutocompleteEngine::new(trie);
         engine.process_keycode(KeyCode::A);
         assert!(engine.suggestion().is_none());
     }

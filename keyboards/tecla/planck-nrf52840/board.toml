@@ -1,0 +1,6 @@
+name = "planck-nrf52840"
+crate = "tecla-nrf52840"
+example = "planck"
+target = "thumbv7em-none-eabihf"
+flash = "probe-rs"
+

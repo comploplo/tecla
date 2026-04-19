@@ -208,11 +208,26 @@ just fmt        # format
 just lint       # clippy (pedantic + restriction, all feature combos)
 just test       # cargo nextest run --workspace
 just hack       # test every feature combination (cargo-hack)
+just flash [--device <usb-device>] --qmk-keyboard <keyboard_name>   # flash a QMK-backed board profile
+just flash [--device <usb-device>] --tecla-config <profile>         # flash a Tecla-native board profile
+just flash --list                           # list supported profiles and UF2-compatible USB devices
 just cov        # LLVM coverage report (opens in browser)
 just outdated   # fail if any dependency has a newer version
 just hil        # hardware-in-the-loop tests via Renode + Podman
 just ci         # all of the above — same gates as CI
 ```
+
+`just flash --device <usb-device> --tecla-config <profile>` builds the matching
+board example and flashes it using the configured method. For UF2 targets, the
+device selector should identify the board's live USB device, not the mounted
+boot drive, so the tool can verify the right board before copying the UF2.
+`just flash --device <usb-device> --qmk-keyboard <keyboard_name>` resolves a
+vendored QMK `keyboard_name` and flashes the matching Tecla-backed profile
+when one exists.
+`just flash --list` now includes the currently connected USB devices, so you
+can choose a safe `--device` value before switching the board into UF2 mode.
+`just flash --list` prints the native profiles, matching QMK board names,
+USB devices, and currently mounted UF2 flash targets.
 
 ### HIL testing
 

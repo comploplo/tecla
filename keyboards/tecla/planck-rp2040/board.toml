@@ -1,0 +1,7 @@
+name = "planck-rp2040"
+crate = "tecla-rp2040"
+example = "planck"
+target = "thumbv6m-none-eabi"
+flash = "probe-rs"
+qmk_family = "planck"
+

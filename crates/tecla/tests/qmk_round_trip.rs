@@ -16,12 +16,12 @@ use std::path::Path;
 
 use heapless::Vec as HVec;
 use tecla::action::{Action, KeyCode, LayerOp, ModifierKey};
-use tecla::event::{KeyEvent, KeyPos};
+use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::keymap::{Layer, LayerStack};
-use tecla::report::HidReport;
-use tecla::tapping::TapHoldConfig;
-use tecla_config::keymap::{parse_keymap_c_with_shared, QmkDefines, ResolvedKeycode};
+use tecla::pipeline::event::{KeyEvent, KeyPos};
+use tecla::pipeline::keymap::{Layer, LayerStack};
+use tecla::pipeline::report::HidReport;
+use tecla_config::qmk::keymap::{parse_keymap_c_with_shared, QmkDefines, ResolvedKeycode};
 
 fn workspace_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -32,14 +32,11 @@ fn workspace_root() -> std::path::PathBuf {
 
 fn load_shared_defines() -> QmkDefines {
     let quantum = workspace_root().join("keyboards/quantum");
-    if quantum.exists() {
-        tecla_config::keymap::QmkDefines::from_quantum_dir(&quantum)
-    } else {
-        QmkDefines::from_raw(
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        )
-    }
+    assert!(
+        quantum.exists(),
+        "QMK quantum directory not found at {quantum:?} — run `git submodule update --init`"
+    );
+    tecla_config::qmk::keymap::QmkDefines::from_quantum_dir(&quantum)
 }
 
 fn qmk_mods_to_modifier(mods: u8) -> Option<ModifierKey> {
@@ -156,14 +153,11 @@ fn planck_qmk_to_processor_round_trip() {
     const COLS: usize = 12;
 
     let root = workspace_root();
-    let keymap_path = root.join("keyboards/planck/keymaps/default/keymap.c");
-    if !keymap_path.exists() {
-        #[expect(clippy::print_stderr, reason = "test diagnostic for skipped test")]
-        {
-            eprintln!("skipping: keyboards/ not present");
-        }
-        return;
-    }
+    let keymap_path = root.join("keyboards/keyboards/planck/keymaps/default/keymap.c");
+    assert!(
+        keymap_path.exists(),
+        "planck keymap not found at {keymap_path:?} — run `git submodule update --init`"
+    );
 
     let source = std::fs::read_to_string(&keymap_path).unwrap();
     let shared = load_shared_defines();

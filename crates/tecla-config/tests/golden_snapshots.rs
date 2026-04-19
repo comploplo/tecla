@@ -6,7 +6,7 @@
 #![expect(clippy::unwrap_used, reason = "tests use unwrap for brevity")]
 
 use std::path::Path;
-use tecla_config::keymap;
+use tecla_config::qmk::keymap;
 
 fn quantum_defines() -> keymap::QmkDefines {
     let kb = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../keyboards/quantum");

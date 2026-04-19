@@ -1,0 +1,17 @@
+---
+source: crates/tecla-config/tests/zmk_transpile_coverage.rs
+assertion_line: 127
+expression: report
+---
+shields with keymaps: 61
+total bindings: 8249
+successful: 8189
+failed: 60
+coverage: 99.3%
+
+unknown behaviors:
+  &studio_unlock: 6
+  &bl: 1
+  &fofunc: 1
+  &fright: 1
+  &sleft: 1

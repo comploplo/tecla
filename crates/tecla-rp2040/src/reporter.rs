@@ -11,8 +11,8 @@
 
 use embassy_usb::class::hid::HidWriter;
 use embassy_usb::driver::Driver;
-use tecla::hid::{AsyncReporter, ReportError};
-use tecla::report::HidReport;
+use tecla::pipeline::hid::{AsyncReporter, ReportError};
+use tecla::pipeline::report::HidReport;
 
 /// USB HID reporter backed by an embassy-usb [`HidWriter`].
 ///

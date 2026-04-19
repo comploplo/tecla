@@ -29,7 +29,7 @@ use static_cell::StaticCell;
 use tecla::debounce::AsymEagerDefer;
 use tecla::keyboard::KeyboardProcessor;
 use tecla::task::{EventChannel, ReportChannel};
-use tecla::tapping::TapHoldConfig;
+use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla_macros::{keyboard_main, keymap};
 use tecla_esp32s3::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
 

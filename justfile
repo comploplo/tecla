@@ -76,13 +76,12 @@ hil-matrix-nrf52840:
 # Run all HIL tests
 hil: hil-rp2040 hil-nrf52840 hil-matrix-rp2040 hil-matrix-nrf52840
 
-# Build an RP2040 example and convert to UF2 for drag-and-drop flashing
-# Requires: cargo install elf2uf2-rs
-# Usage: just uf2 planck
-uf2 example="planck":
-    cargo build -p tecla-rp2040 --example {{example}} --target {{_rp2040_target}} --release
-    elf2uf2-rs target/{{_rp2040_target}}/release/examples/{{example}} target/{{example}}.uf2
-    @echo "UF2 ready: target/{{example}}.uf2"
+# Flash a board using the central Rust flash coordinator.
+# Usage:
+#   just flash --device <usb-target> --qmk-keyboard <keyboard_name>
+#   just flash --device <usb-target> --tecla-config <profile>
+flash *args:
+    cargo run -p tecla-config --bin flash -- {{args}}
 
 # Check for outdated dependencies
 # Requires: cargo install cargo-outdated

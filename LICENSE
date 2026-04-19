@@ -226,9 +226,16 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 
-The keyboards/ directory contains keyboard definitions vendored from the
-QMK Firmware project (https://github.com/qmk/qmk_firmware).
-Those files are licensed under the GNU General Public License v2.0:
+The `.vendor/zmk` submodule vendors board and shield definitions from the ZMK
+Firmware project (https://github.com/zmkfirmware/zmk), licensed under the MIT
+License. Copyright (c) 2020 The ZMK Contributors.
+
+The `.vendor/qmk_firmware` submodule vendors keyboard definitions from the QMK
+Firmware project (https://github.com/qmk/qmk_firmware).
+The `.vendor/plover-lapwing-aio` submodule vendors Lapwing dictionary assets
+from plover-lapwing-aio (https://github.com/aerickt/plover-lapwing-aio).
+Those vendored files are licensed under the GNU General Public License v2.0 or
+later:
 
                     GNU GENERAL PUBLIC LICENSE
                        Version 2, June 1991

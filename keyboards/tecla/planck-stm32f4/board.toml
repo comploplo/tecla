@@ -1,0 +1,6 @@
+name = "planck-stm32f4"
+crate = "tecla-stm32f4"
+example = "planck"
+target = "thumbv7em-none-eabihf"
+flash = "probe-rs"
+

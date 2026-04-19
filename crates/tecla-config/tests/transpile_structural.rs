@@ -7,8 +7,8 @@
 #![allow(missing_docs, reason = "test module")]
 
 use std::path::Path;
-use tecla_config::keymap;
-use tecla_config::keymap::ResolvedKeycode;
+use tecla_config::qmk::keymap;
+use tecla_config::qmk::keymap::ResolvedKeycode;
 
 fn quantum_defines() -> keymap::QmkDefines {
     let kb = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../keyboards/quantum");

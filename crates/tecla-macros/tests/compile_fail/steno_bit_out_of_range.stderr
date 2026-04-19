@@ -1,0 +1,5 @@
+error: steno bit index must be in the range 0..=63, got 64
+ --> tests/compile_fail/steno_bit_out_of_range.rs:5:28
+  |
+5 |         layer!(Base, STENO(64)),
+  |                            ^^

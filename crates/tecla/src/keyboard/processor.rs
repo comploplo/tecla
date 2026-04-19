@@ -1,0 +1,1235 @@
+//! Keyboard event pipeline.
+//!
+//! [`KeyboardProcessor`] is the synchronous core of the keyboard pipeline. It
+//! accepts raw [`KeyEvent`]s one at a time and invokes a caller-supplied
+//! callback with each [`HidReport`] that should be sent to the host.
+//!
+//! The processor is MCU-agnostic and has no Embassy dependency — async
+//! integration (task topology, channels, timers) lives in the board crates
+//! that call into this type.
+//!
+//! # Pipeline
+//!
+//! ```text
+//! KeyEvent
+//!   → tap-hold recognizer (if active)
+//!   → layer resolution
+//!   → modifier state
+//!   → HidReport callback
+//! ```
+//!
+//! # Tap-hold lifecycle
+//!
+//! When a tap-hold key is pressed a [`TapHoldRecognizer`] is created and all
+//! subsequent events are fed to it until it resolves. Events that arrive
+//! during disambiguation are buffered in the recognizer and replayed through
+//! the pipeline after resolution via [`TapHoldRecognizer::drain_pending`].
+
+use heapless::{Deque, Vec};
+
+use crate::accessibility::{AccessibilityConfig, AccessibilityState, SlowKeyResult};
+use crate::action::{
+    Action, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction,
+    TriLayerDef,
+};
+use crate::autocomplete::AutocompleteEngine;
+use crate::autocorrect::AutocorrectEngine;
+use crate::devices::gamepad::GamepadState;
+use crate::devices::keyboard::tapping::{TapHoldConfig, TapHoldDecision, TapHoldRecognizer};
+use crate::pipeline::event::{KeyEvent, KeyPos};
+use crate::pipeline::keymap::LayerStack;
+use crate::pipeline::modifier::ModifierState;
+use crate::pipeline::recognizer::{Recognition, Recognizer};
+use crate::pipeline::report::{
+    ConsumerReport, HidReport, KeyboardReport, MidiEvent, MouseReport,
+    NkroKeyboardReport,
+};
+use crate::telemetry::accessibility::AccessibilityTelemetry;
+use crate::telemetry::encoder::EncoderTelemetry;
+use crate::telemetry::gamepad::GamepadTelemetry;
+use crate::telemetry::midi::MidiTelemetry;
+use crate::telemetry::pointing::PointingTelemetry;
+use crate::telemetry::steno::StenoTelemetry;
+use crate::telemetry::CoreTelemetry;
+
+use super::steno_playback;
+
+#[cfg(test)]
+mod tests;
+
+/// Bundled telemetry collectors for all modalities handled by the processor.
+pub struct ProcessorTelemetry<const KEYS: usize, const ENCODERS: usize = 0> {
+    /// Core keystroke dynamics (always active when telemetry is enabled).
+    pub core: CoreTelemetry<KEYS>,
+    /// Steno chord accuracy and dictionary metrics.
+    pub steno: StenoTelemetry,
+    /// Accessibility filter rejection rates and fatigue tracking.
+    pub accessibility: AccessibilityTelemetry,
+    /// MIDI velocity distributions and polyphony.
+    pub midi: MidiTelemetry,
+    /// Gamepad axis range and button combinations.
+    pub gamepad: GamepadTelemetry,
+    /// Pointing device velocity and click patterns.
+    pub pointing: PointingTelemetry,
+    /// Rotary encoder rotation and reversal tracking.
+    pub encoder: EncoderTelemetry<ENCODERS>,
+}
+
+impl<const KEYS: usize, const ENCODERS: usize> ProcessorTelemetry<KEYS, ENCODERS> {
+    pub(crate) fn new() -> Self {
+        Self {
+            core: CoreTelemetry::new(),
+            steno: StenoTelemetry::default(),
+            accessibility: AccessibilityTelemetry::default(),
+            midi: MidiTelemetry::default(),
+            gamepad: GamepadTelemetry::default(),
+            pointing: PointingTelemetry::default(),
+            encoder: EncoderTelemetry::new(),
+        }
+    }
+}
+
+/// Controls whether the keyboard emits 6KRO or NKRO HID reports.
+///
+/// The default is [`Kro6`](RolloverMode::Kro6) for maximum OS compatibility.
+/// Switch to [`Nkro`](RolloverMode::Nkro) if you need more than six simultaneous
+/// keys — gaming keyboards, chord-heavy layouts, or steno practice.
+///
+/// Note that some BIOS / boot environments only recognise the boot-protocol
+/// 6KRO report. A production board crate may want to expose a key combo that
+/// toggles this at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RolloverMode {
+    /// Six-key rollover: standard HID boot-protocol report.
+    ///
+    /// Compatible with every OS and BIOS. Supports up to 6 non-modifier keys
+    /// simultaneously plus all 8 modifier bits.
+    #[default]
+    Kro6,
+    /// N-key rollover: 16-byte bitmap report, up to 128 simultaneous keys.
+    ///
+    /// Requires a host driver that understands the NKRO HID report descriptor.
+    /// Modern Linux, macOS, and Windows all support it; older BIOSes may not.
+    Nkro,
+}
+
+// ── ActiveHold ────────────────────────────────────────────────────────────────
+
+/// The held outcome of a tap-hold key — only the hold variants.
+///
+/// `TapHoldDecision::Tap` is never stored here because tap decisions are fully
+/// handled (press + release emitted) at resolution time and require no cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldDecision {
+    Mod(ModifierKey),
+    Layer(u8),
+}
+
+/// A resolved tap-hold that is still physically held down.
+///
+/// Stored so that when the physical key is released the correct cleanup action
+/// (modifier release or layer deactivation) can be applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveHold {
+    pos: KeyPos,
+    decision: HoldDecision,
+}
+
+// ── KeyboardProcessor ─────────────────────────────────────────────────────────
+
+/// Synchronous keyboard event pipeline.
+///
+/// # Type parameters
+///
+/// - `ROWS`, `COLS` — matrix dimensions
+/// - `LAYERS` — maximum number of layers
+/// - `KEYS` — total key count (`ROWS * COLS`); used by the layer press cache
+/// - `Ext` — extension action type (default `()`)
+pub struct KeyboardProcessor<
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext = (),
+> where
+    Ext: Copy + PartialEq + 'static,
+{
+    layer_stack: LayerStack<LAYERS, KEYS, Ext>,
+    modifier_state: ModifierState,
+    tap_hold_config: TapHoldConfig,
+    active_tap_hold: Option<TapHoldRecognizer>,
+    active_holds: Vec<ActiveHold, 8>,
+    pressed_keys: Vec<u8, 16>,
+    pending: Deque<KeyEvent, 32>,
+    rollover_mode: RolloverMode,
+    caps_word_active: bool,
+    locked_layers: u32,
+    last_keycode: Option<KeyCode>,
+    repeat_active: bool,
+    tri_layers: &'static [TriLayerDef],
+    overrides: &'static [KeyOverride<Ext>],
+    macro_slots: [Deque<KeyCode, 64>; 4],
+    macro_recording: Option<u8>,
+    playback_queue: Deque<KeyCode, 64>,
+    steno_playback: steno_playback::StenoPlayback,
+    mouse_buttons: u8,
+    gamepad: GamepadState,
+    bootmagic_triggered: bool,
+    last_any_press_ms: u64,
+    last_tap_hold_tap: Option<(KeyPos, u64)>,
+    pending_ble: Option<crate::transport::ble::BleCommand>,
+    autocorrect: Option<AutocorrectEngine>,
+    autocomplete: Option<AutocompleteEngine>,
+    steno_engine: Option<crate::devices::steno::StenoEngine>,
+    steno_chord: u64,
+    steno_held_count: u32,
+    accessibility: Option<AccessibilityState<KEYS>>,
+    telemetry: Option<ProcessorTelemetry<KEYS>>,
+}
+
+impl<const ROWS: usize, const COLS: usize, const LAYERS: usize, const KEYS: usize, Ext>
+    KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>
+where
+    Ext: Copy + PartialEq + 'static,
+{
+    /// Creates a new processor with the given layer stack and tap-hold config.
+    #[must_use]
+    pub fn new(layer_stack: LayerStack<LAYERS, KEYS, Ext>, tap_hold_config: TapHoldConfig) -> Self {
+        Self {
+            layer_stack,
+            modifier_state: ModifierState::new(),
+            tap_hold_config,
+            active_tap_hold: None,
+            active_holds: Vec::new(),
+            pressed_keys: Vec::new(),
+            pending: Deque::new(),
+            rollover_mode: RolloverMode::Kro6,
+            caps_word_active: false,
+            locked_layers: 0,
+            last_keycode: None,
+            repeat_active: false,
+            tri_layers: &[],
+            overrides: &[],
+            macro_slots: [Deque::new(), Deque::new(), Deque::new(), Deque::new()],
+            macro_recording: None,
+            playback_queue: Deque::new(),
+            steno_playback: steno_playback::StenoPlayback::new(),
+            mouse_buttons: 0,
+            gamepad: GamepadState::new(),
+            bootmagic_triggered: false,
+            last_any_press_ms: 0,
+            last_tap_hold_tap: None,
+            pending_ble: None,
+            autocorrect: None,
+            autocomplete: None,
+            steno_engine: None,
+            steno_chord: 0,
+            steno_held_count: 0,
+            accessibility: None,
+            telemetry: None,
+        }
+    }
+
+    /// Sets the rollover mode, consuming and returning `self` for builder chaining.
+    #[must_use]
+    pub fn with_rollover_mode(mut self, mode: RolloverMode) -> Self {
+        self.rollover_mode = mode;
+        self
+    }
+
+    /// Sets the tri-layer definitions for automatic layer activation.
+    #[must_use]
+    pub fn with_tri_layers(mut self, defs: &'static [TriLayerDef]) -> Self {
+        self.tri_layers = defs;
+        self
+    }
+
+    /// Sets the key override table for modifier-aware key remapping.
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: &'static [KeyOverride<Ext>]) -> Self {
+        self.overrides = overrides;
+        self
+    }
+
+    /// Attaches an autocorrect engine, consuming and returning `self`.
+    #[must_use]
+    pub fn with_autocorrect(mut self, engine: AutocorrectEngine) -> Self {
+        self.autocorrect = Some(engine);
+        self
+    }
+
+    /// Attaches an autocomplete engine, consuming and returning `self`.
+    #[must_use]
+    pub fn with_autocomplete(mut self, engine: AutocompleteEngine) -> Self {
+        self.autocomplete = Some(engine);
+        self
+    }
+
+    /// Attaches a steno engine, consuming and returning `self`.
+    #[must_use]
+    pub fn with_steno(mut self, engine: crate::devices::steno::StenoEngine) -> Self {
+        self.steno_engine = Some(engine);
+        self
+    }
+
+    /// Attaches accessibility features (slow keys, bounce keys, sticky keys).
+    #[must_use]
+    pub fn with_accessibility(mut self, config: AccessibilityConfig) -> Self {
+        self.accessibility = Some(AccessibilityState::new(config));
+        self
+    }
+
+    /// Enables telemetry collection, consuming and returning `self`.
+    #[must_use]
+    pub fn with_telemetry(mut self) -> Self {
+        self.telemetry = Some(ProcessorTelemetry::new());
+        self
+    }
+
+    /// Returns a reference to the telemetry state, if enabled.
+    #[must_use]
+    pub fn telemetry(&self) -> Option<&ProcessorTelemetry<KEYS>> {
+        self.telemetry.as_ref()
+    }
+
+    /// Returns a mutable reference to the telemetry state, if enabled.
+    pub fn telemetry_mut(&mut self) -> Option<&mut ProcessorTelemetry<KEYS>> {
+        self.telemetry.as_mut()
+    }
+
+    /// Returns `true` if a [`Action::Bootmagic`] key was pressed.
+    ///
+    /// Board crates check this at startup to decide whether to jump to the
+    /// bootloader or wipe configuration.
+    #[must_use]
+    pub fn bootmagic_triggered(&self) -> bool {
+        self.bootmagic_triggered
+    }
+
+    /// Returns and clears the pending BLE command, if any.
+    #[must_use]
+    pub fn pending_ble_command(&mut self) -> Option<crate::transport::ble::BleCommand> {
+        self.pending_ble.take()
+    }
+
+    /// Returns the default layer bitmask.
+    #[must_use]
+    pub fn default_state(&self) -> u32 {
+        self.layer_stack.default_state()
+    }
+
+    /// Returns the locked-layers bitmask.
+    #[must_use]
+    pub fn locked_layers(&self) -> u32 {
+        self.locked_layers
+    }
+
+    /// Returns the current rollover mode.
+    #[must_use]
+    pub fn rollover_mode(&self) -> RolloverMode {
+        self.rollover_mode
+    }
+
+    /// Returns a reference to a dynamic macro slot, or `None` if out of range.
+    #[must_use]
+    pub fn macro_slot(&self, idx: u8) -> Option<&Deque<KeyCode, 64>> {
+        self.macro_slots.get(usize::from(idx))
+    }
+
+    /// Restores previously persisted state at boot.
+    ///
+    /// Call this once after construction, before processing any events.
+    pub fn restore_state(
+        &mut self,
+        default_state: u32,
+        locked_layers: u32,
+        rollover_mode: RolloverMode,
+        macros: [Deque<KeyCode, 64>; 4],
+    ) {
+        self.layer_stack.apply(LayerOp::SetDefault(0));
+        for bit in 0..32u8 {
+            if default_state & (1 << u32::from(bit)) != 0 {
+                self.layer_stack.apply(LayerOp::SetDefault(bit));
+                break;
+            }
+        }
+        self.locked_layers = locked_layers;
+        for bit in 0..32u8 {
+            if locked_layers & (1 << u32::from(bit)) != 0 {
+                self.layer_stack.apply(LayerOp::On(bit));
+            }
+        }
+        self.rollover_mode = rollover_mode;
+        self.macro_slots = macros;
+    }
+
+    /// Processes a key event, calling `emit` for each HID report produced.
+    ///
+    /// Events are queued internally and replayed after tap-hold resolution,
+    /// so `emit` may be called zero or more times per call.
+    pub fn process_event<F: FnMut(HidReport) + ?Sized>(
+        &mut self,
+        event: KeyEvent,
+        now_ms: u64,
+        emit: &mut F,
+    ) {
+        if let Some(ref mut acc) = self.accessibility {
+            if event.pressed {
+                match acc.should_accept_press(event.pos, now_ms, COLS) {
+                    SlowKeyResult::Accept => {
+                        if let Some(ref mut t) = self.telemetry {
+                            t.accessibility.record_slow_accept();
+                        }
+                    }
+                    SlowKeyResult::Defer(_) => return,
+                    SlowKeyResult::Reject => {
+                        if let Some(ref mut t) = self.telemetry {
+                            t.accessibility.record_bounce_reject();
+                        }
+                        return;
+                    }
+                }
+            } else {
+                let was_pending_slow = acc.is_pending_slow(event.pos);
+                acc.record_release(event.pos, now_ms, COLS);
+                if was_pending_slow {
+                    if let Some(ref mut t) = self.telemetry {
+                        t.accessibility.record_slow_reject();
+                    }
+                }
+            }
+        }
+        let _ = self.pending.push_back(event);
+        self.drain_pending(now_ms, emit);
+    }
+
+    /// Drives the tap-hold timer.
+    ///
+    /// Call this when the Embassy timer fires at [`next_deadline_ms`]. Emits
+    /// a hold-resolved report if the tapping term has expired.
+    ///
+    /// [`next_deadline_ms`]: KeyboardProcessor::next_deadline_ms
+    pub fn tick<F>(&mut self, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let Some(ref mut acc) = self.accessibility {
+            let ready = acc.tick_slow_keys(now_ms);
+            for pos in ready {
+                let event = KeyEvent::press(pos, now_ms);
+                let _ = self.pending.push_back(event);
+            }
+        }
+
+        if let Some(rec) = self.active_tap_hold.as_mut() {
+            let result = rec.tick(now_ms);
+            if result.is_pending() {
+                return;
+            }
+            if let Some(rec) = self.active_tap_hold.take() {
+                if let Recognition::Matched(decision) = result {
+                    self.handle_tap_hold_result(decision, rec, now_ms, emit);
+                }
+            }
+        }
+        self.drain_pending(now_ms, emit);
+    }
+
+    /// Returns the next timer deadline the caller must wake at.
+    ///
+    /// `None` when no tap-hold is in flight.
+    #[must_use]
+    pub fn next_deadline_ms(&self) -> Option<u64> {
+        let tap_hold = self
+            .active_tap_hold
+            .as_ref()
+            .and_then(|r| r.next_deadline_ms());
+        let slow_key = self
+            .accessibility
+            .as_ref()
+            .and_then(|a| a.next_slow_key_deadline());
+        match (tap_hold, slow_key) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Replaces a single action in the keymap at runtime.
+    ///
+    /// Returns `true` if both the layer and key indices were valid.
+    pub fn set_action(&mut self, layer: usize, key: usize, action: Action<Ext>) -> bool {
+        self.layer_stack.set_action(layer, key, action)
+    }
+
+    /// Returns the action at `(layer, key)`, or `None` if out of bounds.
+    #[must_use]
+    pub fn get_action(&self, layer: usize, key: usize) -> Option<Action<Ext>> {
+        self.layer_stack.get_action(layer, key)
+    }
+
+    // ── internal ─────────────────────────────────────────────────────────────
+
+    fn drain_pending<F>(&mut self, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        while let Some(event) = self.pending.pop_front() {
+            self.process_one(event, now_ms, emit);
+        }
+    }
+
+    fn process_one<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let Some(rec) = self.active_tap_hold.as_mut() {
+            let result = rec.observe(event, now_ms);
+            if result.is_pending() {
+                return;
+            }
+            if let Some(rec) = self.active_tap_hold.take() {
+                if let Recognition::Matched(decision) = result {
+                    self.handle_tap_hold_result(decision, rec, now_ms, emit);
+                }
+            }
+            return;
+        }
+
+        if event.pressed {
+            self.last_any_press_ms = event.timestamp_ms;
+            if let Some(ref mut t) = self.telemetry {
+                t.core.record_press(event.pos, now_ms, COLS);
+            }
+            self.handle_press(event, now_ms, emit);
+        } else {
+            if let Some(ref mut t) = self.telemetry {
+                let hold_ms = t.core.last_hold_time(event.pos, now_ms, COLS);
+                t.core.record_release(event.pos, now_ms, COLS);
+                if let Some(ms) = hold_ms {
+                    t.accessibility.record_hold_time(ms);
+                }
+            }
+            self.handle_release(event, emit);
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "central dispatch over all Action variants"
+    )]
+    fn handle_press<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        self.layer_stack.cache_press(event.pos, COLS);
+        let resolved = self.layer_stack.resolve(event.pos, COLS);
+
+        let action = match resolved {
+            Action::Key(kc) => self.apply_override(kc).unwrap_or(resolved),
+            other => other,
+        };
+
+        match action {
+            Action::Key(kc) => {
+                self.press_keycode(kc, emit);
+            }
+            Action::Modifier(m) => {
+                let sticky = self
+                    .accessibility
+                    .as_ref()
+                    .is_some_and(|a| a.config.sticky_keys);
+                if sticky {
+                    self.modifier_state.register_oneshot(m);
+                    if let Some(ref mut t) = self.telemetry {
+                        t.accessibility.record_sticky_use();
+                    }
+                } else {
+                    self.modifier_state.press(m);
+                }
+                self.emit_keyboard(emit);
+            }
+            Action::Consumer(cc) => {
+                emit(HidReport::Consumer(ConsumerReport { keycode: Some(cc) }));
+            }
+            Action::Layer(op) => {
+                self.layer_stack.apply(op);
+                self.check_tri_layers();
+            }
+            Action::LayerLock(n) => {
+                let bit = 1 << u32::from(n);
+                self.locked_layers ^= bit;
+                if self.locked_layers & bit != 0 {
+                    self.layer_stack.apply(LayerOp::On(n));
+                } else {
+                    self.layer_stack.apply(LayerOp::Off(n));
+                }
+                self.check_tri_layers();
+            }
+            Action::ModTap { .. } | Action::LayerTap { .. } | Action::TapToggle(_) => {
+                if let Some(mut rec) =
+                    TapHoldRecognizer::from_action(self.tap_hold_config, action, event)
+                {
+                    let cfg = &self.tap_hold_config;
+                    let quick_tap_hit = cfg.quick_tap_ms > 0
+                        && self
+                            .last_tap_hold_tap
+                            .is_some_and(|(pos, ts)| {
+                                pos == event.pos
+                                    && event.timestamp_ms.wrapping_sub(ts) < cfg.quick_tap_ms
+                            });
+                    let idle_too_short = cfg.require_prior_idle_ms > 0
+                        && self.last_any_press_ms > 0
+                        && event
+                            .timestamp_ms
+                            .wrapping_sub(self.last_any_press_ms)
+                            < cfg.require_prior_idle_ms;
+                    if quick_tap_hit || idle_too_short {
+                        rec.set_force_tap(true);
+                    }
+                    self.active_tap_hold = Some(rec);
+                }
+            }
+            Action::OneShotMod(m) => {
+                self.modifier_state.register_oneshot(m);
+            }
+            Action::OneShotLayer(n) => {
+                self.layer_stack.apply(LayerOp::On(n));
+                self.check_tri_layers();
+            }
+            Action::CapsWord => {
+                self.caps_word_active = true;
+            }
+            Action::RepeatKey => {
+                if let Some(kc) = self.last_keycode {
+                    self.repeat_active = true;
+                    self.press_keycode(kc, emit);
+                    self.repeat_active = false;
+                }
+            }
+            Action::MacroRecord(slot) => {
+                if let Some(buf) = self.macro_slots.get_mut(usize::from(slot)) {
+                    buf.clear();
+                    self.macro_recording = Some(slot);
+                }
+            }
+            Action::MacroStop => {
+                self.macro_recording = None;
+            }
+            Action::MacroPlay(slot) => {
+                if let Some(buf) = self.macro_slots.get(usize::from(slot)) {
+                    self.playback_queue.clear();
+                    for kc in buf {
+                        let _ = self.playback_queue.push_back(*kc);
+                    }
+                }
+                self.drain_playback(emit);
+            }
+            Action::SendString(codes) => {
+                self.playback_queue.clear();
+                for kc in codes {
+                    let _ = self.playback_queue.push_back(*kc);
+                }
+                self.drain_playback(emit);
+            }
+            Action::LayerMod { layer, modifier } => {
+                self.layer_stack.apply(LayerOp::On(layer));
+                self.check_tri_layers();
+                self.modifier_state.press(modifier);
+                self.emit_keyboard(emit);
+            }
+            Action::ModifiedKey { modifier, key } => {
+                self.modifier_state.press(modifier);
+                self.press_keycode(key, emit);
+            }
+            Action::Mouse(ma) => {
+                if let Some(ref mut t) = self.telemetry {
+                    match ma {
+                        MouseAction::Move { dx, dy } => t.pointing.record_movement(dx, dy),
+                        MouseAction::Click(_) => t.pointing.record_click(false),
+                        MouseAction::Scroll(_) => t.pointing.record_scroll(),
+                    }
+                }
+                self.handle_mouse_press(ma, emit);
+            }
+            Action::Midi(ma) => {
+                if let Some(ref mut t) = self.telemetry {
+                    match ma {
+                        MidiAction::NoteOn { velocity, .. } => t.midi.record_note_on(velocity),
+                        MidiAction::NoteOff { .. } => t.midi.record_note_off(),
+                        MidiAction::Cc { .. } => t.midi.record_cc(),
+                    }
+                }
+                Self::emit_midi_press(ma, emit);
+            }
+            Action::Gamepad(ga) => {
+                if let Some(ref mut t) = self.telemetry {
+                    if let GamepadAction::ButtonPress(btn) = ga {
+                        t.gamepad.record_button_press(btn);
+                    }
+                    if let GamepadAction::AxisSet { axis, value } = ga {
+                        t.gamepad.record_axis(axis, value);
+                    }
+                }
+                self.handle_gamepad_press(ga, emit);
+            }
+            Action::AutocorrectToggle => {
+                if let Some(ref mut e) = self.autocorrect {
+                    e.set_enabled(!e.enabled());
+                }
+            }
+            Action::AutocompleteToggle => {
+                if let Some(ref mut e) = self.autocomplete {
+                    e.set_enabled(!e.enabled());
+                }
+            }
+            Action::AutocompleteAccept => {
+                if let Some(ref mut e) = self.autocomplete {
+                    if let Some(codes) = e.accept() {
+                        for &uid in codes.as_slice() {
+                            if let Some(kc) = KeyCode::from_usage_id(uid) {
+                                let _ = self.playback_queue.push_back(kc);
+                            }
+                        }
+                    }
+                }
+                self.drain_playback(emit);
+            }
+            Action::BounceKeysToggle => {
+                if let Some(ref mut a) = self.accessibility {
+                    a.config.bounce_keys_ms = if a.config.bounce_keys_ms.is_some() {
+                        None
+                    } else {
+                        Some(100)
+                    };
+                }
+            }
+            Action::SlowKeysToggle => {
+                if let Some(ref mut a) = self.accessibility {
+                    a.config.slow_keys_ms = if a.config.slow_keys_ms.is_some() {
+                        None
+                    } else {
+                        Some(300)
+                    };
+                }
+            }
+            Action::StickyKeysToggle => {
+                if let Some(ref mut a) = self.accessibility {
+                    a.config.sticky_keys = !a.config.sticky_keys;
+                }
+            }
+            Action::Bootmagic => {
+                self.bootmagic_triggered = true;
+            }
+            Action::BleAdvertise => {
+                self.pending_ble = Some(crate::transport::ble::BleCommand::Advertise);
+            }
+            Action::BleDisconnect => {
+                self.pending_ble = Some(crate::transport::ble::BleCommand::Disconnect);
+            }
+            Action::BleHostSwitch(n) => {
+                self.pending_ble = Some(crate::transport::ble::BleCommand::SwitchHost(n));
+            }
+            Action::Steno(bit) => {
+                self.steno_chord |= 1u64 << bit.min(63);
+                self.steno_held_count = self.steno_held_count.saturating_add(1);
+            }
+            Action::Audio(_)
+            | Action::Haptic(_)
+            | Action::OutputSelect(_)
+            | Action::Rgb(_)
+            | Action::Sleep
+            | Action::Transparent
+            | Action::NoOp
+            | Action::Ext(_) => {}
+        }
+
+        if let Some(slot) = self.macro_recording {
+            if let Action::Key(kc) = action {
+                if let Some(buf) = self.macro_slots.get_mut(usize::from(slot)) {
+                    let _ = buf.push_back(kc);
+                }
+            }
+        }
+
+        let _ = now_ms;
+    }
+
+    fn handle_release<F>(&mut self, event: KeyEvent, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let action = self.layer_stack.release_action(event.pos, COLS);
+        self.layer_stack.clear_cache(event.pos, COLS);
+
+        match action {
+            Action::Key(kc) => {
+                self.release_keycode(kc, emit);
+            }
+            Action::Modifier(m) => {
+                self.modifier_state.release(m);
+                self.emit_keyboard(emit);
+            }
+            Action::Consumer(_) => {
+                emit(HidReport::Consumer(ConsumerReport { keycode: None }));
+            }
+            Action::Layer(LayerOp::Momentary(n)) => {
+                self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
+            }
+            Action::OneShotLayer(n) => {
+                self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
+            }
+            Action::RepeatKey => {
+                if let Some(kc) = self.last_keycode {
+                    self.release_keycode(kc, emit);
+                }
+            }
+            Action::LayerMod { layer, modifier } => {
+                self.modifier_state.release(modifier);
+                self.emit_keyboard(emit);
+                self.layer_stack.apply(LayerOp::Off(layer));
+                self.check_tri_layers();
+            }
+            Action::ModifiedKey { modifier, key } => {
+                self.release_keycode(key, emit);
+                self.modifier_state.release(modifier);
+                self.emit_keyboard(emit);
+            }
+            Action::Mouse(ma) => {
+                self.handle_mouse_release(ma, emit);
+            }
+            Action::Midi(ma) => {
+                if let Some(ref mut t) = self.telemetry {
+                    if matches!(ma, MidiAction::NoteOn { .. }) {
+                        t.midi.record_note_off();
+                    }
+                }
+                Self::emit_midi_release(ma, emit);
+            }
+            Action::Gamepad(ga) => {
+                if let Some(ref mut t) = self.telemetry {
+                    if let GamepadAction::ButtonPress(btn) = ga {
+                        t.gamepad.record_button_release(btn);
+                    }
+                }
+                self.handle_gamepad_release(ga, emit);
+            }
+            Action::Steno(_) => {
+                self.steno_held_count = self.steno_held_count.saturating_sub(1);
+                if self.steno_held_count == 0 && self.steno_chord != 0 {
+                    let chord = crate::devices::steno::StenoChord {
+                        keys: self.steno_chord,
+                    };
+                    let was_pending = self
+                        .steno_engine
+                        .as_ref()
+                        .is_some_and(|e| e.pending_stroke_count() > 0);
+                    let hit = self
+                        .steno_engine
+                        .as_mut()
+                        .and_then(|engine| engine.process_stroke(chord));
+                    if let Some(translation) = hit {
+                        if let Some(ref mut t) = self.telemetry {
+                            t.steno.record_hit();
+                            t.steno.record_stroke_time(event.timestamp_ms);
+                            if was_pending {
+                                t.steno.record_multi_stroke_complete();
+                            }
+                        }
+                        let mut owned: Vec<u8, 512> = Vec::new();
+                        if owned.extend_from_slice(translation).is_ok() {
+                            self.playback_steno_translation(owned.as_slice(), emit);
+                        }
+                    } else if self.steno_engine.is_some() {
+                        let now_pending = self
+                            .steno_engine
+                            .as_ref()
+                            .is_some_and(|e| e.pending_stroke_count() > 0);
+                        if let Some(ref mut t) = self.telemetry {
+                            if now_pending && !was_pending {
+                                t.steno.record_multi_stroke_start();
+                            } else if !now_pending {
+                                t.steno.record_miss();
+                            }
+                            t.steno.record_stroke_time(event.timestamp_ms);
+                        }
+                    }
+                    self.steno_chord = 0;
+                }
+            }
+            Action::Audio(_)
+            | Action::AutocompleteAccept
+            | Action::AutocompleteToggle
+            | Action::AutocorrectToggle
+            | Action::BleAdvertise
+            | Action::BounceKeysToggle
+            | Action::BleDisconnect
+            | Action::BleHostSwitch(_)
+            | Action::Bootmagic
+            | Action::CapsWord
+            | Action::Haptic(_)
+            | Action::LayerLock(_)
+            | Action::MacroRecord(_)
+            | Action::MacroStop
+            | Action::MacroPlay(_)
+            | Action::OutputSelect(_)
+            | Action::Rgb(_)
+            | Action::SendString(_)
+            | Action::Sleep
+            | Action::SlowKeysToggle
+            | Action::StickyKeysToggle => {}
+            _ => {
+                if let Some(idx) = self.active_holds.iter().position(|h| h.pos == event.pos) {
+                    let hold = self.active_holds.swap_remove(idx);
+                    self.apply_hold_release(hold.decision, emit);
+                }
+            }
+        }
+    }
+
+    fn handle_tap_hold_result<F>(
+        &mut self,
+        decision: TapHoldDecision,
+        mut rec: TapHoldRecognizer,
+        now_ms: u64,
+        emit: &mut F,
+    ) where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match decision {
+            TapHoldDecision::Tap(kc) => {
+                self.last_tap_hold_tap = Some((rec.tap_pos(), now_ms));
+                self.press_keycode(kc, emit);
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
+                self.drain_pending(now_ms, emit);
+                self.release_keycode(kc, emit);
+            }
+            TapHoldDecision::HoldMod(m) => {
+                let pos = rec.tap_pos();
+                self.modifier_state.press(m);
+                self.emit_keyboard(emit);
+                let _ = self.active_holds.push(ActiveHold {
+                    pos,
+                    decision: HoldDecision::Mod(m),
+                });
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
+            }
+            TapHoldDecision::TapToggleLayer(n) => {
+                self.layer_stack.apply(LayerOp::Toggle(n));
+                self.check_tri_layers();
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
+                self.drain_pending(now_ms, emit);
+            }
+            TapHoldDecision::HoldLayer(n) => {
+                let pos = rec.tap_pos();
+                self.layer_stack.apply(LayerOp::On(n));
+                let _ = self.active_holds.push(ActiveHold {
+                    pos,
+                    decision: HoldDecision::Layer(n),
+                });
+                rec.drain_pending(|e| {
+                    let _ = self.pending.push_back(e);
+                });
+            }
+        }
+    }
+
+    fn apply_hold_release<F>(&mut self, decision: HoldDecision, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match decision {
+            HoldDecision::Mod(m) => {
+                self.modifier_state.release(m);
+                self.emit_keyboard(emit);
+            }
+            HoldDecision::Layer(n) => {
+                self.layer_stack.apply(LayerOp::Off(n));
+                self.check_tri_layers();
+            }
+        }
+    }
+
+    fn press_keycode<F>(&mut self, kc: KeyCode, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if kc == KeyCode::Backspace {
+            if let Some(ref mut t) = self.telemetry {
+                t.core.record_error();
+            }
+        }
+
+        if !self.repeat_active {
+            self.last_keycode = Some(kc);
+        }
+
+        let mut caps_shift_applied = false;
+        if self.caps_word_active {
+            if Self::is_caps_word_shift(kc) {
+                self.modifier_state.press(ModifierKey::LSHIFT);
+                caps_shift_applied = true;
+            } else if !Self::is_caps_word_continue(kc) {
+                self.caps_word_active = false;
+            }
+        }
+
+        if let Some(ref mut engine) = self.autocorrect {
+            if let Some(correction) = engine.process_keycode(kc, 0) {
+                for _ in 0..correction.backspaces {
+                    let _ = self.playback_queue.push_back(KeyCode::Backspace);
+                }
+                for &uid in correction.replacement_slice() {
+                    if let Some(rkc) = KeyCode::from_usage_id(uid) {
+                        let _ = self.playback_queue.push_back(rkc);
+                    }
+                }
+                self.drain_playback(emit);
+            }
+        }
+
+        if let Some(ref mut engine) = self.autocomplete {
+            engine.process_keycode(kc);
+        }
+
+        let uid = kc.usage_id();
+        if uid != 0 && !self.pressed_keys.contains(&uid) {
+            let _ = self.pressed_keys.push(uid);
+        }
+        self.emit_keyboard(emit);
+        self.modifier_state.consume_oneshot();
+
+        if caps_shift_applied {
+            self.modifier_state.release(ModifierKey::LSHIFT);
+        }
+    }
+
+    fn release_keycode<F>(&mut self, kc: KeyCode, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let uid = kc.usage_id();
+        if let Some(idx) = self.pressed_keys.iter().position(|&k| k == uid) {
+            self.pressed_keys.swap_remove(idx);
+        }
+        self.modifier_state.clear_weak();
+        self.emit_keyboard(emit);
+    }
+
+    fn is_caps_word_shift(kc: KeyCode) -> bool {
+        let uid = kc.usage_id();
+        (0x04..=0x1D).contains(&uid)
+    }
+
+    fn is_caps_word_continue(kc: KeyCode) -> bool {
+        let uid = kc.usage_id();
+        (0x04..=0x1D).contains(&uid)
+            || (0x1E..=0x27).contains(&uid)
+            || uid == 0x2D
+            || uid == 0x2A
+            || uid == 0x4C
+    }
+
+    fn check_tri_layers(&mut self) {
+        for def in self.tri_layers {
+            let both = (1 << u32::from(def.layer1)) | (1 << u32::from(def.layer2));
+            if self.layer_stack.state() & both == both {
+                self.layer_stack.apply(LayerOp::On(def.target));
+            } else {
+                self.layer_stack.apply(LayerOp::Off(def.target));
+            }
+        }
+    }
+
+    fn drain_playback<F>(&mut self, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        while let Some(kc) = self.playback_queue.pop_front() {
+            self.press_keycode(kc, emit);
+            self.release_keycode(kc, emit);
+        }
+    }
+
+    fn playback_steno_translation<F: FnMut(HidReport) + ?Sized>(
+        &mut self,
+        translation: &[u8],
+        emit: &mut F,
+    ) {
+        let mut playback = core::mem::take(&mut self.steno_playback);
+        let mut steno_telem = self
+            .telemetry
+            .as_mut()
+            .map(|t| core::mem::take(&mut t.steno));
+        playback.play_translation(translation, steno_telem.as_mut(), self, emit);
+        if let (Some(ref mut t), Some(telem)) = (&mut self.telemetry, steno_telem) {
+            t.steno = telem;
+        }
+        self.steno_playback = playback;
+    }
+
+    fn handle_mouse_press<F>(&mut self, action: MouseAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match action {
+            MouseAction::Move { dx, dy } => {
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx,
+                    dy,
+                    scroll: 0,
+                }));
+            }
+            MouseAction::Click(btn) => {
+                self.mouse_buttons |= 1 << btn.saturating_sub(1);
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx: 0,
+                    dy: 0,
+                    scroll: 0,
+                }));
+            }
+            MouseAction::Scroll(amount) => {
+                emit(HidReport::Mouse(MouseReport {
+                    buttons: self.mouse_buttons,
+                    dx: 0,
+                    dy: 0,
+                    scroll: amount,
+                }));
+            }
+        }
+    }
+
+    fn handle_mouse_release<F>(&mut self, action: MouseAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let MouseAction::Click(btn) = action {
+            self.mouse_buttons &= !(1 << btn.saturating_sub(1));
+            emit(HidReport::Mouse(MouseReport {
+                buttons: self.mouse_buttons,
+                dx: 0,
+                dy: 0,
+                scroll: 0,
+            }));
+        }
+    }
+
+    fn emit_midi_press<F>(action: MidiAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let event = match action {
+            MidiAction::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => MidiEvent::NoteOn {
+                channel,
+                note,
+                velocity,
+            },
+            MidiAction::NoteOff { channel, note } => MidiEvent::NoteOff { channel, note },
+            MidiAction::Cc {
+                channel,
+                controller,
+                value,
+            } => MidiEvent::Cc {
+                channel,
+                controller,
+                value,
+            },
+        };
+        emit(HidReport::Midi(event));
+    }
+
+    fn emit_midi_release<F>(action: MidiAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let MidiAction::NoteOn { channel, note, .. } = action {
+            emit(HidReport::Midi(MidiEvent::NoteOff { channel, note }));
+        }
+    }
+
+    fn handle_gamepad_press<F>(&mut self, action: GamepadAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let report = self.gamepad.press(action);
+        emit(HidReport::Gamepad(report));
+    }
+
+    fn handle_gamepad_release<F>(&mut self, action: GamepadAction, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if let Some(report) = self.gamepad.release(action) {
+            emit(HidReport::Gamepad(report));
+        }
+    }
+
+    fn apply_override(&self, kc: KeyCode) -> Option<Action<Ext>> {
+        for ov in self.overrides {
+            if ov.trigger == kc && self.modifier_state.contains(ov.required_mods) {
+                return Some(ov.replacement);
+            }
+        }
+        None
+    }
+
+    fn emit_keyboard<F>(&self, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match self.rollover_mode {
+            RolloverMode::Kro6 => emit(HidReport::Keyboard(KeyboardReport::from_state(
+                &self.modifier_state,
+                &self.pressed_keys,
+            ))),
+            RolloverMode::Nkro => emit(HidReport::NkroKeyboard(NkroKeyboardReport::from_state(
+                &self.modifier_state,
+                &self.pressed_keys,
+            ))),
+        }
+    }
+}
+
+impl<const ROWS: usize, const COLS: usize, const LAYERS: usize, const KEYS: usize, Ext, F>
+    steno_playback::KeyOutput<F> for KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>
+where
+    Ext: Copy + PartialEq + 'static,
+    F: FnMut(HidReport) + ?Sized,
+{
+    fn press_keycode(&mut self, kc: KeyCode, emit: &mut F) {
+        KeyboardProcessor::press_keycode(self, kc, emit);
+    }
+
+    fn release_keycode(&mut self, kc: KeyCode, emit: &mut F) {
+        KeyboardProcessor::release_keycode(self, kc, emit);
+    }
+
+    fn press_modifier(&mut self, m: ModifierKey) {
+        self.modifier_state.press(m);
+    }
+
+    fn release_modifier(&mut self, m: ModifierKey) {
+        self.modifier_state.release(m);
+    }
+
+    fn flush_keyboard(&self, emit: &mut F) {
+        KeyboardProcessor::emit_keyboard(self, emit);
+    }
+
+    fn drain_playback_queue(&mut self, emit: &mut F) {
+        KeyboardProcessor::drain_playback(self, emit);
+    }
+}

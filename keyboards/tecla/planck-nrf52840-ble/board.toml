@@ -1,0 +1,7 @@
+name = "planck-nrf52840-ble"
+crate = "tecla-nrf52840"
+example = "planck_ble"
+target = "thumbv7em-none-eabihf"
+flash = "probe-rs"
+features = ["ble"]
+

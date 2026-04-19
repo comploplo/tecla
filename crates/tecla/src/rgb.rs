@@ -3,7 +3,7 @@
 //! Provides color types, an [`Animation`] trait, four built-in animations,
 //! and an [`RgbController`] that board crates own and tick on a timer.
 
-use crate::event::KeyEvent;
+use crate::pipeline::event::KeyEvent;
 
 /// An RGB color value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -459,7 +459,7 @@ pub trait LedDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::KeyPos;
+    use crate::pipeline::event::KeyPos;
 
     #[test]
     fn hsv_pure_red() {

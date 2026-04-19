@@ -9,7 +9,7 @@
 //! - [`scanner::GpioMatrixScanner`] — row-strobe / column-read GPIO matrix
 //!   scanner that implements [`tecla::matrix::AsyncMatrixScanner`].
 //! - [`reporter::UsbHidReporter`] — embassy-usb HID writer wrapper that
-//!   implements [`tecla::hid::AsyncReporter`].
+//!   implements [`tecla::pipeline::hid::AsyncReporter`].
 //!
 //! # Wiring convention
 //!

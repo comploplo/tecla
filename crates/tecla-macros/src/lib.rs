@@ -1,11 +1,12 @@
 //! Proc macros for tecla keyboard firmware.
 //!
-//! This crate exposes five macros for declaring keymaps at compile time with
+//! This crate exposes six macros for declaring keymaps at compile time with
 //! no runtime allocation and full compile-time validation.
 //!
 //! | Macro | Purpose |
 //! |-------|---------|
 //! | [`keymap!`] | Build a complete [`LayerStack`] from named layer declarations. |
+//! | [`steno!`] | Build a complete [`LayerStack`] from steno bit-index declarations. |
 //! | [`layer!`] | Build a single [`Layer`] from a key identifier list. |
 //! | [`MT!`] | Mod-tap shorthand: hold = modifier, tap = key. |
 //! | [`LT!`] | Layer-tap shorthand: hold = momentary layer, tap = key. |
@@ -488,6 +489,11 @@ struct LayerInput {
     keys: Vec<KeyExpr>,
 }
 
+struct StenoLayerInput {
+    name: Ident,
+    bits: Vec<LitInt>,
+}
+
 fn parse_call_expr(name: &str, span: Span, content: ParseStream<'_>) -> Result<KeyExpr, Error> {
     match name {
         "MO" | "TG" | "TO" | "DF" => {
@@ -539,6 +545,22 @@ fn parse_call_expr(name: &str, span: Span, content: ParseStream<'_>) -> Result<K
                 ::tecla::action::Action::<()>::OneShotMod(#modifier)
             }))
         }
+        "STENO" => {
+            let n: LitInt = content.parse()?;
+            let val: u16 = n
+                .base10_parse()
+                .map_err(|e| Error::new(n.span(), format!("invalid steno bit index: {e}")))?;
+            if val > 63 {
+                return Err(Error::new(
+                    n.span(),
+                    format!("steno bit index must be in the range 0..=63, got {val}"),
+                ));
+            }
+            let lit = Literal::u8_suffixed(val as u8);
+            Ok(KeyExpr::Direct(quote! {
+                ::tecla::action::Action::<()>::Steno(#lit)
+            }))
+        }
         "HID" => {
             let n: LitInt = content.parse()?;
             let val: u8 = n
@@ -585,7 +607,7 @@ fn parse_key_expr(input: ParseStream<'_>) -> Result<KeyExpr, Error> {
 
     if (matches!(
         name.as_str(),
-        "MO" | "TG" | "TO" | "DF" | "TT" | "OSL" | "OSM" | "HID"
+        "MO" | "TG" | "TO" | "DF" | "TT" | "OSL" | "OSM" | "STENO" | "HID"
     ) || is_modifier_prefix(&name))
         && input.peek(syn::token::Paren)
     {
@@ -645,6 +667,23 @@ impl Parse for LayerInput {
     }
 }
 
+impl Parse for StenoLayerInput {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let name: Ident = input.parse()?;
+        let _comma: Token![,] = input.parse()?;
+
+        let mut bits = Vec::new();
+        while !input.is_empty() {
+            bits.push(input.parse()?);
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(Self { name, bits })
+    }
+}
+
 fn emit_layer(
     layer_input: &LayerInput,
     name_map: &HashMap<String, u8>,
@@ -654,7 +693,31 @@ fn emit_layer(
         action_tokens.push(key.to_tokens(name_map)?);
     }
     Ok(quote! {
-        ::tecla::keymap::Layer::new(&[
+        ::tecla::pipeline::keymap::Layer::new(&[
+            #(#action_tokens),*
+        ])
+    })
+}
+
+fn emit_steno_layer(layer_input: &StenoLayerInput) -> Result<TokenStream2, Error> {
+    let mut action_tokens = Vec::new();
+    for bit in &layer_input.bits {
+        let val: u16 = bit
+            .base10_parse()
+            .map_err(|e| Error::new(bit.span(), format!("invalid steno bit index: {e}")))?;
+        if val > 63 {
+            return Err(Error::new(
+                bit.span(),
+                format!("steno bit index must be in the range 0..=63, got {val}"),
+            ));
+        }
+        let lit = Literal::u8_suffixed(val as u8);
+        action_tokens.push(quote! {
+            ::tecla::action::Action::<()>::Steno(#lit)
+        });
+    }
+    Ok(quote! {
+        ::tecla::pipeline::keymap::Layer::new(&[
             #(#action_tokens),*
         ])
     })
@@ -679,6 +742,35 @@ impl Parse for KeymapInput {
             let content;
             syn::parenthesized!(content in input);
             let layer_input: LayerInput = content.parse()?;
+            layers.push(layer_input);
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+        Ok(Self { layers })
+    }
+}
+
+struct StenoInput {
+    layers: Vec<StenoLayerInput>,
+}
+
+impl Parse for StenoInput {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut layers = Vec::new();
+        while !input.is_empty() {
+            let mac_name: Ident = input.parse()?;
+            if mac_name != "layer" {
+                return Err(Error::new(
+                    mac_name.span(),
+                    "expected `layer!(...)` invocation",
+                ));
+            }
+            let _bang: Token![!] = input.parse()?;
+            let content;
+            syn::parenthesized!(content in input);
+            let layer_input: StenoLayerInput = content.parse()?;
             layers.push(layer_input);
 
             if input.peek(Token![,]) {
@@ -777,11 +869,83 @@ pub fn keymap(input: TokenStream) -> TokenStream {
     quote! {
         {
             let mut _layers: ::heapless::Vec<
-                ::tecla::keymap::Layer<()>,
+                ::tecla::pipeline::keymap::Layer<()>,
                 #num_layers
             > = ::heapless::Vec::new();
             #(#layer_pushes)*
-            ::tecla::keymap::LayerStack::<#num_layers, #num_keys, ()>::new(_layers)
+            ::tecla::pipeline::keymap::LayerStack::<#num_layers, #num_keys, ()>::new(_layers)
+        }
+    }
+    .into()
+}
+
+/// Build a complete [`LayerStack`] for steno keyboards from bit-index layers.
+///
+/// The syntax mirrors [`keymap!`], but each layer uses numeric bit positions
+/// instead of key identifiers. Each number becomes [`Action::Steno`] at the
+/// matching key position.
+///
+/// # Example
+///
+/// ```ignore
+/// let stack: LayerStack<1, 12, ()> = steno! {
+///     layer!(Base, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+/// };
+/// ```
+#[proc_macro]
+pub fn steno(input: TokenStream) -> TokenStream {
+    let steno_input = match syn::parse::<StenoInput>(input) {
+        Ok(k) => k,
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    let num_layers = steno_input.layers.len();
+    let Some(first_layer) = steno_input.layers.first() else {
+        return Error::new(Span::call_site(), "steno! requires at least one layer")
+            .to_compile_error()
+            .into();
+    };
+
+    let first_key_count = first_layer.bits.len();
+    for layer in steno_input.layers.iter().skip(1) {
+        if layer.bits.len() != first_key_count {
+            return Error::new(
+                layer.name.span(),
+                format!(
+                    "layer `{}` has {} keys but layer `{}` has {}; \
+                     all layers must have the same key count",
+                    layer.name,
+                    layer.bits.len(),
+                    first_layer.name,
+                    first_key_count
+                ),
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+
+    let num_keys = first_key_count;
+
+    let mut layer_pushes = Vec::new();
+    for layer_input in &steno_input.layers {
+        let layer_ts = match emit_steno_layer(layer_input) {
+            Ok(ts) => ts,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        layer_pushes.push(quote! {
+            _layers.push(#layer_ts).ok();
+        });
+    }
+
+    quote! {
+        {
+            let mut _layers: ::heapless::Vec<
+                ::tecla::pipeline::keymap::Layer<()>,
+                #num_layers
+            > = ::heapless::Vec::new();
+            #(#layer_pushes)*
+            ::tecla::pipeline::keymap::LayerStack::<#num_layers, #num_keys, ()>::new(_layers)
         }
     }
     .into()

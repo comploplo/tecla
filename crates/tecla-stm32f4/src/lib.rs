@@ -14,7 +14,7 @@
 //! - [`scanner::GpioMatrixScanner`] — row-strobe / column-read GPIO matrix
 //!   scanner that implements [`tecla::matrix::AsyncMatrixScanner`].
 //! - [`reporter::UsbHidReporter`] — embassy-usb HID writer wrapper that
-//!   implements [`tecla::hid::AsyncReporter`].
+//!   implements [`tecla::pipeline::hid::AsyncReporter`].
 //!
 //! # Wiring convention
 //!
@@ -36,4 +36,4 @@ pub mod scanner;
 pub use reporter::UsbHidReporter;
 pub use scanner::{DirectPinScanner, GpioMatrixScanner};
 
-pub use tecla::report::KEYBOARD_REPORT_DESCRIPTOR;
+pub use tecla::pipeline::report::KEYBOARD_REPORT_DESCRIPTOR;

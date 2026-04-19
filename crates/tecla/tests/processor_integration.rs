@@ -7,32 +7,23 @@
 #![expect(clippy::expect_used, reason = "test code")]
 #![expect(clippy::panic, reason = "test assertions")]
 
+mod common;
+use common::{collect, pos, press, release};
+
 use heapless::Vec as HVec;
 use tecla::action::{Action, KeyCode, LayerOp, ModifierKey};
-use tecla::encoder::encoder_key_pos;
-use tecla::event::{EncoderDirection, KeyEvent, KeyPos};
+use tecla::devices::encoder::encoder_key_pos;
+use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::keymap::{Layer, LayerStack};
-use tecla::report::HidReport;
-use tecla::split::SplitConfig;
-use tecla::tapping::TapHoldConfig;
+use tecla::matrix::split::SplitConfig;
+use tecla::pipeline::event::{EncoderDirection, KeyEvent, KeyPos};
+use tecla::pipeline::keymap::{Layer, LayerStack};
+use tecla::pipeline::report::HidReport;
 
 const ROWS: usize = 2;
 const COLS: usize = 6;
 const LAYERS: usize = 2;
 const KEYS: usize = 12;
-
-fn pos(row: u8, col: u8) -> KeyPos {
-    KeyPos::new(row, col)
-}
-
-fn press(pos: KeyPos, ms: u64) -> KeyEvent {
-    KeyEvent::press(pos, ms)
-}
-
-fn release(pos: KeyPos, ms: u64) -> KeyEvent {
-    KeyEvent::release(pos, ms)
-}
 
 fn make_two_layer(
     base: &[Action<()>],
@@ -42,16 +33,6 @@ fn make_two_layer(
     layers.push(Layer::new(base)).ok();
     layers.push(Layer::new(overlay)).ok();
     KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
-}
-
-fn collect(
-    proc: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>,
-    event: KeyEvent,
-    now: u64,
-) -> std::vec::Vec<HidReport> {
-    let mut out = std::vec::Vec::new();
-    proc.process_event(event, now, &mut |r| out.push(r));
-    out
 }
 
 fn first(reports: &[HidReport]) -> &HidReport {
@@ -584,7 +565,7 @@ const PLANCK_KEYS: usize = 48;
 
 #[expect(clippy::too_many_lines, reason = "exhaustive keymap definition")]
 fn planck_processor() -> KeyboardProcessor<PLANCK_ROWS, PLANCK_COLS, PLANCK_LAYERS, PLANCK_KEYS> {
-    use tecla::keymap::Layer as KLayer;
+    use tecla::pipeline::keymap::Layer as KLayer;
     let k = |kc| Action::<()>::Key(kc);
     let m = |mk| Action::<()>::Modifier(mk);
     let tr = Action::<()>::Transparent;

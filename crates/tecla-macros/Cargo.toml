@@ -2,7 +2,7 @@
 name = "tecla-macros"
 version = "0.1.0"
 edition = "2021"
-description = "Proc macros for tecla — keymap!, layer!, MT!, LT!, and #[keyboard_main]"
+description = "Proc macros for tecla — keymap!, steno!, layer!, MT!, LT!, and #[keyboard_main]"
 authors.workspace = true
 license.workspace = true
 

@@ -2,14 +2,15 @@
 //!
 //! [`generate_proximity_table`] computes a 26x26 Euclidean distance matrix
 //! for letter keys (A-Z) based on their physical `(x, y)` coordinates in a
-//! [`LayoutConfig`]. The resulting table can be fed to the autocorrect engine
-//! so that nearby-key typos score lower cost than distant-key typos.
+//! [`Layout`](crate::board::Layout). The resulting table can be fed to the
+//! autocorrect engine so that nearby-key typos score lower cost than
+//! distant-key typos.
 //!
 //! [`keymap_from_qmk_names`] is a helper that converts a flat slice of QMK
 //! key name strings (e.g. from a parsed `keymap.c`) into the
 //! `(row, col, usage_id)` triples that [`generate_proximity_table`] expects.
 
-use crate::info_json::LayoutConfig;
+use crate::board::Layout;
 
 const HID_A: u8 = 0x04;
 const LETTER_COUNT: usize = 26;
@@ -38,14 +39,14 @@ const LETTER_COUNT: usize = 26;
     reason = "indices are bounded by LETTER_COUNT constant"
 )]
 pub fn generate_proximity_table(
-    layout: &LayoutConfig,
+    layout: &Layout,
     keymap_layer0: &[(usize, usize, u8)],
 ) -> [[u8; LETTER_COUNT]; LETTER_COUNT] {
     let mut positions: [Option<(f64, f64)>; LETTER_COUNT] = [None; LETTER_COUNT];
 
-    for key in &layout.layout {
-        let row = key.matrix[0];
-        let col = key.matrix[1];
+    for key in &layout.keys {
+        let row = key.row;
+        let col = key.col;
         for &(kr, kc, usage_id) in keymap_layer0 {
             if kr == row && kc == col && is_letter(usage_id) {
                 let idx = usize::from(usage_id - HID_A);
@@ -57,9 +58,9 @@ pub fn generate_proximity_table(
     let mut max_dist: f64 = 0.0;
     let mut raw = [[0.0f64; LETTER_COUNT]; LETTER_COUNT];
 
-    for i in 0..LETTER_COUNT {
-        for j in (i + 1)..LETTER_COUNT {
-            if let (Some((x1, y1)), Some((x2, y2))) = (positions[i], positions[j]) {
+    for (i, pos_i) in positions.iter().enumerate() {
+        for (j, pos_j) in positions.iter().enumerate().skip(i + 1) {
+            if let (Some((x1, y1)), Some((x2, y2))) = (*pos_i, *pos_j) {
                 let d = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
                 raw[i][j] = d;
                 raw[j][i] = d;
@@ -71,15 +72,15 @@ pub fn generate_proximity_table(
     }
 
     let mut table = [[255u8; LETTER_COUNT]; LETTER_COUNT];
-    for i in 0..LETTER_COUNT {
-        table[i][i] = 0;
+    for (i, row) in table.iter_mut().enumerate() {
+        row[i] = 0;
     }
 
     if max_dist > 0.0 {
-        for i in 0..LETTER_COUNT {
-            for j in (i + 1)..LETTER_COUNT {
+        for (i, row) in raw.iter().enumerate() {
+            for (j, &distance) in row.iter().enumerate().skip(i + 1) {
                 if positions[i].is_some() && positions[j].is_some() {
-                    let normalized = (raw[i][j] / max_dist * 255.0).round().clamp(0.0, 255.0) as u8;
+                    let normalized = (distance / max_dist * 255.0).round().clamp(0.0, 255.0) as u8;
                     table[i][j] = normalized;
                     table[j][i] = normalized;
                 }
@@ -157,44 +158,50 @@ pub fn keymap_from_qmk_names(names: &[&str], cols: usize) -> Vec<(usize, usize, 
 #[expect(clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::info_json::{LayoutConfig, LayoutKey};
+    use crate::board::{Layout, LayoutKey};
 
     #[test]
     fn simple_2x3_layout() {
-        let layout = LayoutConfig {
-            layout: vec![
+        let layout = Layout {
+            keys: vec![
                 LayoutKey {
-                    matrix: [0, 0],
+                    row: 0,
+                    col: 0,
                     x: 0.0,
                     y: 0.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [0, 1],
+                    row: 0,
+                    col: 1,
                     x: 1.0,
                     y: 0.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [0, 2],
+                    row: 0,
+                    col: 2,
                     x: 2.0,
                     y: 0.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [1, 0],
+                    row: 1,
+                    col: 0,
                     x: 0.0,
                     y: 1.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [1, 1],
+                    row: 1,
+                    col: 1,
                     x: 1.0,
                     y: 1.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [1, 2],
+                    row: 1,
+                    col: 2,
                     x: 2.0,
                     y: 1.0,
                     w: 1.0,
@@ -226,16 +233,18 @@ mod tests {
 
     #[test]
     fn missing_letters_get_max_cost() {
-        let layout = LayoutConfig {
-            layout: vec![
+        let layout = Layout {
+            keys: vec![
                 LayoutKey {
-                    matrix: [0, 0],
+                    row: 0,
+                    col: 0,
                     x: 0.0,
                     y: 0.0,
                     w: 1.0,
                 },
                 LayoutKey {
-                    matrix: [0, 1],
+                    row: 0,
+                    col: 1,
                     x: 1.0,
                     y: 0.0,
                     w: 1.0,
@@ -253,7 +262,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::indexing_slicing, reason = "test code with known bounds")]
     #[expect(
         clippy::integer_division_remainder_used,
         reason = "grid arithmetic in test"
@@ -261,8 +269,9 @@ mod tests {
     fn planck_proximity_snapshot() {
         use std::fmt::Write as _;
 
-        let config = crate::info_json::parse(PLANCK_INFO_JSON).unwrap();
-        let Some(layout) = config.layouts.get("LAYOUT_planck_grid") else {
+        let config = crate::qmk::info_json::parse(PLANCK_INFO_JSON).unwrap();
+        let board = config.to_board_config();
+        let Some(layout) = board.layouts.get("LAYOUT_planck_grid") else {
             panic!("missing layout")
         };
 
@@ -290,15 +299,15 @@ mod tests {
             .unwrap();
         }
         display.push('\n');
-        for i in 0..LETTER_COUNT {
+        for (i, row) in table.iter().enumerate() {
             write!(
                 display,
                 "  {} ",
                 (b'a' + u8::try_from(i).unwrap_or(0)) as char
             )
             .unwrap();
-            for j in 0..LETTER_COUNT {
-                write!(display, "{:>4}", table[i][j]).unwrap();
+            for cell in row.iter() {
+                write!(display, "{:>4}", cell).unwrap();
             }
             display.push('\n');
         }

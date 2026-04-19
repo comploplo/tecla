@@ -69,48 +69,25 @@
 //! | `embassy` | off | Enables the `task` module and `AsyncReporter` / `AsyncMatrixScanner` re-exports. |
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod matrix;
+pub mod pipeline;
+pub mod storage;
+pub mod telemetry;
+pub mod transport;
+
+pub mod devices;
+
+pub mod accessibility;
 pub mod action;
 pub mod audio;
 pub mod autocomplete;
 pub mod autocorrect;
-pub mod ble;
-pub mod combo;
-pub mod debounce;
-pub mod encoder;
-pub mod event;
 pub mod haptic;
-pub mod hid;
 pub mod keyboard;
-pub mod keymap;
-pub mod leader;
-pub mod matrix;
-pub mod midi;
-pub mod modifier;
-pub mod pointing;
-pub mod power;
-pub mod recognizer;
-pub mod report;
 pub mod rgb;
-pub mod split;
-pub mod steno;
-pub mod tap_dance;
-pub mod tapping;
-pub mod transport;
-
-#[cfg(feature = "storage")]
-pub mod storage;
-
-#[cfg(feature = "storage")]
-pub mod eeprom;
-
-#[cfg(feature = "via")]
-pub mod via;
 
 #[cfg(feature = "embassy")]
 pub mod task;
-
-#[cfg(feature = "embassy")]
-pub mod uart_transport;
 
 #[cfg(feature = "hil")]
 pub mod hil;
@@ -126,33 +103,37 @@ pub mod prelude {
     pub use crate::audio::{AudioCommand, AudioController, Tone};
     pub use crate::autocomplete::AutocompleteEngine;
     pub use crate::autocorrect::{AutocorrectEngine, Correction};
-    pub use crate::ble::{BleHostManager, BondInfo};
-    pub use crate::debounce::Debouncer;
-    pub use crate::encoder::EncoderMapping;
-    pub use crate::event::{EncoderDirection, EncoderEvent, KeyEvent, KeyPos, PointingEvent};
+    pub use crate::devices::encoder::EncoderMapping;
+    pub use crate::devices::keyboard::tapping::{
+        TapHoldConfig, TapHoldDecision, TapHoldMode, TapHoldRecognizer,
+    };
     pub use crate::haptic::{HapticCommand, HapticController, HapticEffect};
-    pub use crate::hid::{OutputMode, Reporter};
     pub use crate::keyboard::{KeyboardProcessor, RolloverMode};
-    pub use crate::keymap::{Layer, LayerStack};
+    pub use crate::matrix::debounce::Debouncer;
     pub use crate::matrix::MatrixScanner;
-    pub use crate::modifier::ModifierState;
-    pub use crate::power::{BatteryLevel, WakeReason};
-    pub use crate::recognizer::{Recognition, Recognizer};
-    pub use crate::report::HidReport;
+    pub use crate::pipeline::event::{
+        EncoderDirection, EncoderEvent, KeyEvent, KeyPos, PointingEvent,
+    };
+    pub use crate::pipeline::hid::{OutputMode, Reporter};
+    pub use crate::pipeline::keymap::{Layer, LayerStack};
+    pub use crate::pipeline::modifier::ModifierState;
+    pub use crate::pipeline::power::{BatteryLevel, WakeReason};
+    pub use crate::pipeline::recognizer::{Recognition, Recognizer};
+    pub use crate::pipeline::report::HidReport;
     pub use crate::rgb::{Animation, Hsv, Rgb, RgbCommand, RgbController};
-    pub use crate::tapping::{TapHoldConfig, TapHoldDecision, TapHoldMode, TapHoldRecognizer};
+    pub use crate::transport::ble::{BleHostManager, BondInfo};
 
-    pub use crate::split::{SplitConfig, SplitRole};
+    pub use crate::matrix::split::{SplitConfig, SplitRole};
     pub use crate::transport::SplitTransport;
 
     #[cfg(feature = "embassy")]
-    pub use crate::ble::BleCommandChannel;
-    #[cfg(feature = "embassy")]
-    pub use crate::hid::{AsyncReporter, DualReporter};
-    #[cfg(feature = "embassy")]
     pub use crate::matrix::AsyncMatrixScanner;
     #[cfg(feature = "embassy")]
-    pub use crate::task::{EventChannel, ReportChannel};
+    pub use crate::pipeline::hid::{AsyncReporter, DualReporter};
     #[cfg(feature = "embassy")]
-    pub use crate::uart_transport::UartTransport;
+    pub use crate::task::{EventChannel, ReportChannel, TelemetryChannel};
+    #[cfg(feature = "embassy")]
+    pub use crate::transport::ble::BleCommandChannel;
+    #[cfg(feature = "embassy")]
+    pub use crate::transport::uart::UartTransport;
 }

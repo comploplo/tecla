@@ -53,7 +53,7 @@
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{AnyPin, Input, Level, Output, Pull};
+use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -61,9 +61,9 @@ use embassy_usb::class::hid::{HidWriter, State};
 use embassy_usb::{Builder, Config};
 use panic_probe as _;
 use static_cell::StaticCell;
-use tecla::debounce::AsymEagerDefer;
+use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::tapping::TapHoldConfig;
+use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, keymap};
 use tecla_rp2040::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
@@ -111,6 +111,8 @@ async fn main(spawner: Spawner) {
         request_handler: None,
         poll_ms: 1,
         max_packet_size: 8,
+        hid_subclass: embassy_usb::class::hid::HidSubclass::Boot,
+        hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::Keyboard,
     };
     let hid_writer: HidWriter<'_, _, 8> =
         HidWriter::new(&mut builder, HID_STATE.init(State::new()), hid_config);
@@ -118,24 +120,24 @@ async fn main(spawner: Spawner) {
     let usb = builder.build();
 
     let rows: [Output<'_>; ROWS] = [
-        Output::new(AnyPin::from(p.PIN_0), Level::High),
-        Output::new(AnyPin::from(p.PIN_1), Level::High),
-        Output::new(AnyPin::from(p.PIN_2), Level::High),
-        Output::new(AnyPin::from(p.PIN_3), Level::High),
+        Output::new(p.PIN_0, Level::High),
+        Output::new(p.PIN_1, Level::High),
+        Output::new(p.PIN_2, Level::High),
+        Output::new(p.PIN_3, Level::High),
     ];
     let cols: [Input<'_>; COLS] = [
-        Input::new(AnyPin::from(p.PIN_4), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_5), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_6), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_7), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_8), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_9), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_10), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_11), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_12), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_13), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_14), Pull::Up),
-        Input::new(AnyPin::from(p.PIN_15), Pull::Up),
+        Input::new(p.PIN_4, Pull::Up),
+        Input::new(p.PIN_5, Pull::Up),
+        Input::new(p.PIN_6, Pull::Up),
+        Input::new(p.PIN_7, Pull::Up),
+        Input::new(p.PIN_8, Pull::Up),
+        Input::new(p.PIN_9, Pull::Up),
+        Input::new(p.PIN_10, Pull::Up),
+        Input::new(p.PIN_11, Pull::Up),
+        Input::new(p.PIN_12, Pull::Up),
+        Input::new(p.PIN_13, Pull::Up),
+        Input::new(p.PIN_14, Pull::Up),
+        Input::new(p.PIN_15, Pull::Up),
     ];
 
     let scanner = GpioMatrixScanner::new(rows, cols);
@@ -162,13 +164,9 @@ async fn main(spawner: Spawner) {
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());
 
-    spawner.spawn(usb_device_task(usb)).unwrap();
-    spawner
-        .spawn(matrix_task(scanner, debouncer, event_ch))
-        .unwrap();
-    spawner
-        .spawn(keyboard_task(event_ch, processor, report_ch))
-        .unwrap();
+    spawner.spawn(usb_device_task(usb).unwrap());
+    spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
+    spawner.spawn(keyboard_task(event_ch, processor, report_ch).unwrap());
     tecla::task::usb_task(report_ch.receiver(), reporter).await;
 }
 

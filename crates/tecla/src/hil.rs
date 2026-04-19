@@ -19,8 +19,11 @@
 //! ```
 
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Supported Renode target platforms.
 #[derive(Debug, Clone, Copy)]
@@ -147,6 +150,85 @@ impl fmt::Display for HilOutput {
 
 const RENODE_IMAGE: &str = "docker.io/antmicro/renode:latest";
 
+/// Runs a command with a hard timeout and a cleanup callback.
+///
+/// The command's stdout and stderr are captured. If the command does not exit
+/// before the timeout, it is killed, reaped, and then `cleanup` runs.
+pub fn run_with_timeout_and_cleanup<F>(
+    mut command: Command,
+    timeout_secs: u32,
+    cleanup: F,
+) -> Output
+where
+    F: FnOnce(),
+{
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .unwrap_or_else(|e| panic!("failed to spawn container runtime: {e}"));
+    let mut stdout = child.stdout.take().expect("child stdout not captured");
+    let mut stderr = child.stderr.take().expect("child stderr not captured");
+
+    let stdout_thread = thread::spawn(move || {
+        let mut buf = Vec::new();
+        stdout
+            .read_to_end(&mut buf)
+            .unwrap_or_else(|e| panic!("failed to read child stdout: {e}"));
+        buf
+    });
+    let stderr_thread = thread::spawn(move || {
+        let mut buf = Vec::new();
+        stderr
+            .read_to_end(&mut buf)
+            .unwrap_or_else(|e| panic!("failed to read child stderr: {e}"));
+        buf
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs.into());
+    let status = loop {
+        match child
+            .try_wait()
+            .unwrap_or_else(|e| panic!("failed to poll container runtime: {e}"))
+        {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                break child
+                    .wait()
+                    .unwrap_or_else(|e| panic!("failed to reap timed-out container runtime: {e}"));
+            }
+            None => thread::sleep(Duration::from_millis(100)),
+        }
+    };
+
+    cleanup();
+
+    let stdout = stdout_thread
+        .join()
+        .unwrap_or_else(|_| panic!("failed to join stdout reader"));
+    let stderr = stderr_thread
+        .join()
+        .unwrap_or_else(|_| panic!("failed to join stderr reader"));
+
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
+/// Runs a Renode container with a platform-appropriate timeout and cleanup.
+///
+/// This keeps the timeout policy in the HIL module instead of each test.
+pub fn run_renode_container<F>(command: Command, platform: Platform, cleanup: F) -> Output
+where
+    F: FnOnce(),
+{
+    let timeout_secs = platform.default_timeout().saturating_add(50);
+    run_with_timeout_and_cleanup(command, timeout_secs, cleanup)
+}
+
 /// Runs firmware in a Renode simulation via Podman/Docker.
 ///
 /// The container is created, run, and removed automatically. Platform
@@ -198,27 +280,30 @@ impl RenodeRunner {
 
         let _guard = CleanupGuard(work_dir.clone());
 
-        let timeout_secs = self.config.timeout_secs + 15;
-        let output = Command::new("timeout")
-            .args(["--kill-after=5", &format!("{timeout_secs}")])
-            .arg(&runtime)
-            .args([
-                "run",
-                "--rm",
-                "--volume",
-                &format!("{}:{container_work}:ro", work_dir.display()),
-                "--volume",
-                &format!("{}:{}", firmware_elf.display(), firmware_elf.display()),
-                "--entrypoint",
-                "/opt/renode/renode",
-                RENODE_IMAGE,
-                "--disable-xwt",
-                "--plain",
-                "-e",
-                &format!("include @{container_work}/test.resc"),
-            ])
-            .output()
-            .unwrap_or_else(|e| panic!("failed to run {runtime}: {e}"));
+        let cidfile = work_dir.join("renode.cid");
+        let mut command = Command::new(&runtime);
+        command.args([
+            "run",
+            "--rm",
+            "--cidfile",
+            cidfile.to_str().expect("cidfile path not valid UTF-8"),
+            "--volume",
+            &format!("{}:{container_work}:ro", work_dir.display()),
+            "--volume",
+            &format!("{}:{}", firmware_elf.display(), firmware_elf.display()),
+            "--entrypoint",
+            "/opt/renode/renode",
+            RENODE_IMAGE,
+            "--disable-xwt",
+            "--plain",
+            "-e",
+            &format!("include @{container_work}/test.resc"),
+        ]);
+
+        let timeout_secs = self.config.timeout_secs.saturating_add(15);
+        let output = run_with_timeout_and_cleanup(command, timeout_secs, || {
+            cleanup_container(&runtime, &cidfile);
+        });
 
         HilOutput {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -403,6 +488,17 @@ fn detect_container_runtime() -> String {
         }
     }
     panic!("no container runtime found -- install podman or docker");
+}
+
+fn cleanup_container(runtime: &str, cidfile: &Path) {
+    let Ok(cid) = std::fs::read_to_string(cidfile) else {
+        return;
+    };
+    let cid = cid.trim();
+    if cid.is_empty() {
+        return;
+    }
+    let _ = Command::new(runtime).args(["rm", "-f", cid]).status();
 }
 
 /// A key in the matrix test plan: GPIO pin assignments and expected HID output.
