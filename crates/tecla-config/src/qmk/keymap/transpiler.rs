@@ -265,11 +265,7 @@ pub fn transpile(layers: &[ParsedLayer], cols: Option<usize>) -> Result<String, 
         Vec::new()
     };
 
-    #[expect(
-        clippy::integer_division_remainder_used,
-        reason = "grid layout arithmetic requires division"
-    )]
-    let rows = if c > 0 { expected / c } else { 0 };
+    let rows = expected.checked_div(c).unwrap_or(0);
 
     let mut out = String::new();
     if c > 0 {

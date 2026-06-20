@@ -238,13 +238,7 @@ mod tests {
     }
 
     fn run_async<F: core::future::Future>(f: F) -> F::Output {
-        struct Waker;
-        impl std::task::Wake for Waker {
-            fn wake(self: std::sync::Arc<Self>) {}
-            fn wake_by_ref(self: &std::sync::Arc<Self>) {}
-        }
-        let waker = std::sync::Arc::new(Waker).into();
-        let mut cx = core::task::Context::from_waker(&waker);
+        let mut cx = core::task::Context::from_waker(std::task::Waker::noop());
         let mut f = core::pin::pin!(f);
         match f.as_mut().poll(&mut cx) {
             core::task::Poll::Ready(v) => v,

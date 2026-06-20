@@ -74,11 +74,10 @@ impl MidiTelemetry {
     /// Produce a snapshot.
     #[must_use]
     pub fn snapshot(&self) -> MidiSnapshot {
-        let avg_velocity = if self.note_on_count > 0 {
-            (self.velocity_sum / self.note_on_count) as u8
-        } else {
-            0
-        };
+        let avg_velocity = self
+            .velocity_sum
+            .checked_div(self.note_on_count)
+            .unwrap_or(0) as u8;
         MidiSnapshot {
             avg_velocity,
             min_velocity: self.velocity_min,

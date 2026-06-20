@@ -101,7 +101,10 @@ mod tests {
     #[test]
     fn axis_set_writes_value() {
         let mut s = GamepadState::new();
-        let r = s.press(GamepadAction::AxisSet { axis: 1, value: -42 });
+        let r = s.press(GamepadAction::AxisSet {
+            axis: 1,
+            value: -42,
+        });
         assert_eq!(r.axes[1], -42);
     }
 
@@ -109,13 +112,18 @@ mod tests {
     fn axis_release_returns_none() {
         let mut s = GamepadState::new();
         s.press(GamepadAction::AxisSet { axis: 0, value: 64 });
-        assert!(s.release(GamepadAction::AxisSet { axis: 0, value: 64 }).is_none());
+        assert!(s
+            .release(GamepadAction::AxisSet { axis: 0, value: 64 })
+            .is_none());
     }
 
     #[test]
     fn axis_out_of_range_ignored() {
         let mut s = GamepadState::new();
-        let r = s.press(GamepadAction::AxisSet { axis: 9, value: 100 });
+        let r = s.press(GamepadAction::AxisSet {
+            axis: 9,
+            value: 100,
+        });
         assert_eq!(r.axes, [0; 6]);
     }
 

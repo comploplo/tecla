@@ -20,7 +20,8 @@ std = []
 testing = ["std"]
 
 # Hardware-in-the-loop test fixtures via Renode + Podman/Docker.
-hil = ["std"]
+# Provided by the shared `hilt` crate.
+hil = ["std", "dep:hilt"]
 
 # Enables the async Embassy orchestrator — task::run() and the async scanner /
 # reporter traits. Requires an Embassy time driver in the final binary.
@@ -47,6 +48,9 @@ serde = { workspace = true, optional = true }
 postcard               = { workspace = true, optional = true }
 embedded-storage-async = { workspace = true, optional = true }
 sequential-storage     = { workspace = true, optional = true }
+
+# Shared Renode HIL test fixtures (host-only; pulled in by the `hil` feature).
+hilt = { path = "../../../hilt", optional = true }
 
 
 [dev-dependencies]

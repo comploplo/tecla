@@ -92,6 +92,11 @@ pub mod task;
 #[cfg(feature = "hil")]
 pub mod hil;
 
+// Re-export `assert_hil_ok!` at the crate root so `tecla::assert_hil_ok` keeps
+// resolving after the move to the shared `hilt` crate.
+#[cfg(feature = "hil")]
+pub use hilt::assert_hil_ok;
+
 pub mod prelude {
     //! Convenience re-exports — `use tecla::prelude::*` gives you everything a
     //! board crate needs.

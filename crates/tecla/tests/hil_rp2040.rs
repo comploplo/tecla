@@ -21,7 +21,7 @@ fn firmware_path() -> PathBuf {
 #[test]
 #[ignore = "requires container runtime and cross-compiled firmware"]
 fn rp2040_keyboard_processor_boots() {
-    let config = HilConfig::new(Platform::Rp2040, firmware_path());
+    let config = HilConfig::new(Platform::rp2040(), firmware_path());
     let runner = RenodeRunner::new(config);
     let output = runner.run();
     assert_hil_ok!(output);

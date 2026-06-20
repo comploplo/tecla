@@ -54,11 +54,10 @@ impl PointingTelemetry {
     /// Produce a snapshot.
     #[must_use]
     pub fn snapshot(&self) -> PointingSnapshot {
-        let avg_velocity = if self.movement_samples > 0 {
-            (self.velocity_sum / self.movement_samples) as u16
-        } else {
-            0
-        };
+        let avg_velocity = self
+            .velocity_sum
+            .checked_div(self.movement_samples)
+            .unwrap_or(0) as u16;
         let click_while_moving_rate = if self.total_clicks > 0 {
             (u64::from(self.click_while_moving) * 255 / u64::from(self.total_clicks)) as u8
         } else {

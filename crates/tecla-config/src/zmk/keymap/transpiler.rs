@@ -49,10 +49,7 @@ impl std::fmt::Display for TranspileError {
                 layer,
                 expected,
                 got,
-            } => write!(
-                f,
-                "layer {layer} has {got} keys, expected {expected}"
-            ),
+            } => write!(f, "layer {layer} has {got} keys, expected {expected}"),
             Self::Fmt(e) => write!(f, "format error: {e}"),
         }
     }
@@ -65,11 +62,13 @@ impl From<std::fmt::Error> for TranspileError {
 }
 
 fn require_arg(binding: &Binding, idx: usize) -> Result<&str, TranspileError> {
-    binding.args.get(idx).map(|s| s.as_str()).ok_or_else(|| {
-        TranspileError::MissingArg {
+    binding
+        .args
+        .get(idx)
+        .map(|s| s.as_str())
+        .ok_or_else(|| TranspileError::MissingArg {
             behavior: binding.behavior.clone(),
-        }
-    })
+        })
 }
 
 fn parse_layer_num(s: &str) -> Result<u8, TranspileError> {
@@ -137,20 +136,12 @@ pub fn binding_to_tecla(binding: &Binding) -> Result<String, TranspileError> {
                 "BT_NXT" | "BT_NXT_CMD" => Ok("BT_NXT".to_owned()),
                 "BT_PRV" | "BT_PRV_CMD" => Ok("BT_PRV".to_owned()),
                 "BT_SEL" | "BT_SEL_CMD" => {
-                    let idx = binding
-                        .args
-                        .get(1)
-                        .map(|s| s.as_str())
-                        .unwrap_or("0");
+                    let idx = binding.args.get(1).map(|s| s.as_str()).unwrap_or("0");
                     Ok(format!("BT_SEL({idx})"))
                 }
                 "BT_CLR_ALL" | "BT_CLR_ALL_CMD" => Ok("BT_CLR_ALL".to_owned()),
                 "BT_DISC" | "BT_DISC_CMD" => {
-                    let idx = binding
-                        .args
-                        .get(1)
-                        .map(|s| s.as_str())
-                        .unwrap_or("0");
+                    let idx = binding.args.get(1).map(|s| s.as_str()).unwrap_or("0");
                     Ok(format!("BT_DISC({idx})"))
                 }
                 other => Ok(format!("BT_UNKNOWN({other})")),
@@ -195,10 +186,7 @@ pub fn binding_to_tecla(binding: &Binding) -> Result<String, TranspileError> {
 }
 
 /// Transpiles parsed ZMK layers into a complete tecla `keymap!` macro invocation.
-pub fn transpile(
-    layers: &[Vec<Binding>],
-    cols: Option<usize>,
-) -> Result<String, TranspileError> {
+pub fn transpile(layers: &[Vec<Binding>], cols: Option<usize>) -> Result<String, TranspileError> {
     if layers.is_empty() {
         return Err(TranspileError::NoLayers);
     }
@@ -217,12 +205,7 @@ pub fn transpile(
     let c = cols.unwrap_or(0);
 
     let mut out = String::new();
-    if c > 0 {
-        #[expect(
-            clippy::integer_division_remainder_used,
-            reason = "grid layout arithmetic"
-        )]
-        let rows = expected / c;
+    if let Some(rows) = expected.checked_div(c) {
         writeln!(
             out,
             "// {layer_count} layer(s), {expected} keys ({rows} rows x {c} cols)",
@@ -311,10 +294,7 @@ mod tests {
 
     #[test]
     fn sticky_keys() {
-        assert_eq!(
-            binding_to_tecla(&b("sk", &["LSHFT"])).unwrap(),
-            "OSM(LSFT)"
-        );
+        assert_eq!(binding_to_tecla(&b("sk", &["LSHFT"])).unwrap(), "OSM(LSFT)");
         assert_eq!(binding_to_tecla(&b("sl", &["1"])).unwrap(), "OSL(1)");
     }
 
@@ -324,10 +304,7 @@ mod tests {
             binding_to_tecla(&b("bt", &["BT_SEL", "0"])).unwrap(),
             "BT_SEL(0)"
         );
-        assert_eq!(
-            binding_to_tecla(&b("bt", &["BT_CLR"])).unwrap(),
-            "BT_CLR"
-        );
+        assert_eq!(binding_to_tecla(&b("bt", &["BT_CLR"])).unwrap(), "BT_CLR");
     }
 
     #[test]

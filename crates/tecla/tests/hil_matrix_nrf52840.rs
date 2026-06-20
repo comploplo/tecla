@@ -113,7 +113,7 @@ fn planck_keycode_verification() {
 
     std::fs::write(
         work_dir.join("platform.repl"),
-        Platform::Nrf52840.repl_content(),
+        Platform::nrf52840().repl_content(),
     )
     .unwrap();
 
@@ -154,7 +154,7 @@ fn planck_keycode_verification() {
         "include @/hil/test.resc",
     ]);
 
-    let cmd_output = run_renode_container(cmd, Platform::Nrf52840, || {
+    let cmd_output = run_renode_container(cmd, 10, || {
         let Ok(cid) = std::fs::read_to_string(&cidfile) else {
             return;
         };

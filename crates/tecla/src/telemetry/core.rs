@@ -271,11 +271,7 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
                 hold_count += 1;
             }
         }
-        let avg_hold_ms = if hold_count > 0 {
-            (hold_sum / hold_count) as u16
-        } else {
-            0
-        };
+        let avg_hold_ms = hold_sum.checked_div(hold_count).unwrap_or(0) as u16;
 
         let mut pp_sum = 0u32;
         let mut pp_count = 0u32;
@@ -285,18 +281,13 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
                 pp_count += 1;
             }
         }
-        let avg_pp_ms = if pp_count > 0 {
-            (pp_sum / pp_count) as u16
-        } else {
-            0
-        };
+        let avg_pp_ms = pp_sum.checked_div(pp_count).unwrap_or(0) as u16;
 
         let total_errors: u32 = self.error_count.iter().map(|&e| u32::from(e)).sum();
-        let error_rate = if self.total_presses > 0 {
-            (total_errors * 100 / self.total_presses).min(255) as u8
-        } else {
-            0
-        };
+        let error_rate = (total_errors * 100)
+            .checked_div(self.total_presses)
+            .unwrap_or(0)
+            .min(255) as u8;
 
         CoreSnapshot {
             wpm: self.wpm(),

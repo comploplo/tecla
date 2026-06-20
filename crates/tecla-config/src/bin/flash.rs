@@ -698,6 +698,8 @@ fn copy_with_progress(src: &Path, dst: &Path) -> io::Result<u64> {
     Ok(copied)
 }
 
+// Only used by the Linux `/proc/mounts` parsing in `find_uf2_mount`.
+#[cfg(target_os = "linux")]
 fn unescape_mount_path(path: &str) -> String {
     path.replace("\\040", " ")
         .replace("\\011", "\t")

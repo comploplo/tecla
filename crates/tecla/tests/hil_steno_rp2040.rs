@@ -27,7 +27,7 @@ fn steno_stitch_hil_sequence() {
         elf.display()
     );
 
-    let output = RenodeRunner::new(HilConfig::new(Platform::Rp2040, elf).timeout(10)).run();
+    let output = RenodeRunner::new(HilConfig::new(Platform::rp2040(), elf).timeout(10)).run();
 
     assert!(output.passed(), "firmware did not complete:\n{output}");
     assert!(

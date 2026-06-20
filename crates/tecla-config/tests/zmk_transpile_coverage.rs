@@ -100,7 +100,7 @@ fn zmk_transpile_coverage_gap() {
     if !unknown_behaviors.is_empty() {
         report.push_str("\nunknown behaviors:\n");
         let mut sorted: Vec<_> = unknown_behaviors.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         for (behavior, count) in &sorted {
             report.push_str(&format!("  &{behavior}: {count}\n"));
         }
@@ -109,7 +109,7 @@ fn zmk_transpile_coverage_gap() {
     if !unknown_keys.is_empty() {
         report.push_str("\nunknown keys:\n");
         let mut sorted: Vec<_> = unknown_keys.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         for (key, count) in &sorted {
             report.push_str(&format!("  {key}: {count}\n"));
         }
@@ -118,7 +118,7 @@ fn zmk_transpile_coverage_gap() {
     if !unknown_mods.is_empty() {
         report.push_str("\nunknown modifiers:\n");
         let mut sorted: Vec<_> = unknown_mods.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         for (modifier, count) in &sorted {
             report.push_str(&format!("  {modifier}: {count}\n"));
         }

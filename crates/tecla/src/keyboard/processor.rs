@@ -41,8 +41,7 @@ use crate::pipeline::keymap::LayerStack;
 use crate::pipeline::modifier::ModifierState;
 use crate::pipeline::recognizer::{Recognition, Recognizer};
 use crate::pipeline::report::{
-    ConsumerReport, HidReport, KeyboardReport, MidiEvent, MouseReport,
-    NkroKeyboardReport,
+    ConsumerReport, HidReport, KeyboardReport, MidiEvent, MouseReport, NkroKeyboardReport,
 };
 use crate::telemetry::accessibility::AccessibilityTelemetry;
 use crate::telemetry::encoder::EncoderTelemetry;
@@ -571,17 +570,13 @@ where
                 {
                     let cfg = &self.tap_hold_config;
                     let quick_tap_hit = cfg.quick_tap_ms > 0
-                        && self
-                            .last_tap_hold_tap
-                            .is_some_and(|(pos, ts)| {
-                                pos == event.pos
-                                    && event.timestamp_ms.wrapping_sub(ts) < cfg.quick_tap_ms
-                            });
+                        && self.last_tap_hold_tap.is_some_and(|(pos, ts)| {
+                            pos == event.pos
+                                && event.timestamp_ms.wrapping_sub(ts) < cfg.quick_tap_ms
+                        });
                     let idle_too_short = cfg.require_prior_idle_ms > 0
                         && self.last_any_press_ms > 0
-                        && event
-                            .timestamp_ms
-                            .wrapping_sub(self.last_any_press_ms)
+                        && event.timestamp_ms.wrapping_sub(self.last_any_press_ms)
                             < cfg.require_prior_idle_ms;
                     if quick_tap_hit || idle_too_short {
                         rec.set_force_tap(true);
