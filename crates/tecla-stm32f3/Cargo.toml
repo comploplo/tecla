@@ -1,0 +1,49 @@
+[package]
+name = "tecla-stm32f3"
+version = "0.1.0"
+edition = "2021"
+description = "Tecla keyboard firmware board support for STM32F3 (ZSA Voyager)"
+authors.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-stm32f3"
+
+[lints]
+workspace = true
+
+[dependencies]
+tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy"] }
+tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
+embedded-hal = { workspace = true }
+embedded-hal-async = { workspace = true }
+
+embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
+# NOTE: declared directly (not workspace=true) because the workspace dep pins
+# the F4 chip. QMK's Voyager linker script targets STM32F303xB. Cargo only
+# unifies features when the F3 and F4 board crates are built together, so build
+# this crate alone:
+#   cargo build -p tecla-stm32f3 --example voyager --target thumbv7em-none-eabihf
+embassy-stm32 = { version = "0.6", features = ["stm32f303cb", "time-driver-any", "exti", "unstable-pac"] }
+embassy-usb      = { workspace = true }
+embassy-time     = { workspace = true }
+embassy-sync     = { workspace = true }
+
+cortex-m     = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt  = { workspace = true }
+defmt        = { workspace = true }
+defmt-rtt    = { workspace = true }
+panic-probe  = { workspace = true }
+static_cell  = { workspace = true }
+heapless     = { workspace = true }
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+[[example]]
+name = "voyager"
+
+[[example]]
+name = "voyager_usbtest"
+
+[[example]]
+name = "voyager_matrix_test"

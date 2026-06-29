@@ -56,22 +56,22 @@ _cortex_m4_target := "thumbv7em-none-eabihf"
 # Run RP2040 HIL smoke test in Renode via Podman
 hil-rp2040:
     cargo build -p tecla-rp2040 --example hil_keyboard --features hil --target {{_rp2040_target}} --release
-    cargo test -p tecla --features hil --test hil_rp2040 -- --ignored
+    cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_rp2040 -- --ignored
 
 # Run nRF52840 HIL smoke test in Renode via Podman
 hil-nrf52840:
     cargo build -p tecla-nrf52840 --example hil_keyboard --features hil --target {{_cortex_m4_target}} --release
-    cargo test -p tecla --features hil --test hil_nrf52840 -- --ignored
+    cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_nrf52840 -- --ignored
 
 # Run RP2040 matrix integration test — presses every key via simulated GPIO
 hil-matrix-rp2040:
     cargo build -p tecla-rp2040 --example hil_matrix_test --features hil --target {{_rp2040_target}} --release
-    cargo test -p tecla --features hil --test hil_matrix_rp2040 --target x86_64-unknown-linux-gnu -- --ignored
+    cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_matrix_rp2040 --target x86_64-unknown-linux-gnu -- --ignored
 
 # Run nRF52840 matrix integration test — presses every key via simulated GPIO
 hil-matrix-nrf52840:
     cargo build -p tecla-nrf52840 --example hil_matrix_test --features hil --target {{_cortex_m4_target}} --release
-    cargo test -p tecla --features hil --test hil_matrix_nrf52840 --target x86_64-unknown-linux-gnu -- --ignored
+    cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_matrix_nrf52840 --target x86_64-unknown-linux-gnu -- --ignored
 
 # Run all HIL tests
 hil: hil-rp2040 hil-nrf52840 hil-matrix-rp2040 hil-matrix-nrf52840

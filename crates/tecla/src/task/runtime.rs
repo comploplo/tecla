@@ -13,7 +13,7 @@
 //!     let debouncer = AsymEagerDefer::new(5);
 //!     let processor = KeyboardProcessor::new(MY_LAYERS, TapHoldConfig::default());
 //!     let reporter  = MyUsbReporter::new(/* USB driver */);
-//!     tecla::task::run(scanner, debouncer, processor, reporter).await;
+//!     tecla::task::run(scanner, debouncer, &mut processor, reporter).await;
 //! }
 //! ```
 //!
@@ -29,6 +29,8 @@ use embassy_time::{with_timeout, Duration, Instant};
 use heapless::Vec;
 
 use crate::action::Action;
+#[cfg(feature = "autocorrect")]
+use crate::action::KeyCode;
 use crate::devices::encoder::{AsyncEncoderScanner, EncoderMapping};
 use crate::devices::mouse::pointing::AsyncPointingScanner;
 use crate::keyboard::KeyboardProcessor;
@@ -140,9 +142,11 @@ async fn receive_and_process<
             Err(_timeout) => {
                 let tick_ms = Instant::now().as_millis();
                 if deadline_ms.is_some_and(|d| tick_ms >= d) {
+                    let mut reports: Vec<HidReport, 64> = Vec::new();
                     processor.tick(tick_ms, &mut |r| {
-                        let _ = report_tx.try_send(r);
+                        let _ = reports.push(r);
                     });
+                    send_reports(report_tx, reports).await;
                 }
                 None
             }
@@ -153,9 +157,20 @@ async fn receive_and_process<
 
     if let Some(event) = event_opt {
         let ev_ms = Instant::now().as_millis();
+        let mut reports: Vec<HidReport, 64> = Vec::new();
         processor.process_event(event, ev_ms, &mut |r| {
-            let _ = report_tx.try_send(r);
+            let _ = reports.push(r);
         });
+        send_reports(report_tx, reports).await;
+    }
+}
+
+async fn send_reports<M: RawMutex, const N: usize>(
+    report_tx: &Sender<'_, M, HidReport, N>,
+    reports: Vec<HidReport, 64>,
+) {
+    for report in reports {
+        report_tx.send(report).await;
     }
 }
 
@@ -178,7 +193,7 @@ pub async fn keyboard_task<
     const RN: usize,
 >(
     event_rx: Receiver<'_, M, KeyEvent, EN>,
-    mut processor: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     report_tx: Sender<'_, M, HidReport, RN>,
 ) -> !
 where
@@ -186,7 +201,101 @@ where
     Ext: Copy + PartialEq,
 {
     loop {
-        receive_and_process(&event_rx, &mut processor, &report_tx, None).await;
+        receive_and_process(&event_rx, processor, &report_tx, None).await;
+    }
+}
+
+/// Runs an autocorrect engine off the keyboard's real-time path.
+///
+/// Receives typed [`KeyCode`]s on `kc_rx`, feeds them to `engine`, and sends any
+/// [`Correction`](crate::autocorrect::Correction) back on `corr_tx`. Pair with
+/// [`keyboard_task_autocorrect`] and
+/// [`KeyboardProcessor::with_autocorrect_offload`].
+///
+/// Spawn this on whichever executor you like: on a single-core target run it on
+/// the same executor as [`keyboard_task_autocorrect`] (use `NoopRawMutex`); on
+/// RP2040 spawn it on core1 via `embassy_rp::multicore::spawn_core1` (use
+/// `CriticalSectionRawMutex` for the channels). The task body is identical
+/// either way — the "core1 split" is purely a spawn-site choice.
+///
+/// This function never returns.
+#[cfg(feature = "autocorrect")]
+pub async fn autocorrect_task<M, const KN: usize, const CN: usize>(
+    kc_rx: Receiver<'_, M, KeyCode, KN>,
+    corr_tx: Sender<'_, M, crate::autocorrect::Correction, CN>,
+    mut engine: crate::autocorrect::AutocorrectEngine,
+) -> !
+where
+    M: RawMutex,
+{
+    loop {
+        let kc = kc_rx.receive().await;
+        if let Some(correction) = engine.process_keycode(kc, Instant::now().as_millis()) {
+            corr_tx.send(correction).await;
+        }
+    }
+}
+
+/// Like [`keyboard_task`] but offloads autocorrect to [`autocorrect_task`].
+///
+/// After processing each event it forwards any typed keycodes to `kc_tx` (the
+/// engine's input) and applies any pending corrections from `corr_rx`. The
+/// processor must be built with
+/// [`with_autocorrect_offload`](KeyboardProcessor::with_autocorrect_offload).
+///
+/// This function never returns.
+#[cfg(feature = "autocorrect")]
+pub async fn keyboard_task_autocorrect<
+    M,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+    const EN: usize,
+    const RN: usize,
+    const KN: usize,
+    const CN: usize,
+>(
+    event_rx: Receiver<'_, M, KeyEvent, EN>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    report_tx: Sender<'_, M, HidReport, RN>,
+    kc_tx: Sender<'_, M, KeyCode, KN>,
+    corr_rx: Receiver<'_, M, crate::autocorrect::Correction, CN>,
+) -> !
+where
+    M: RawMutex,
+    Ext: Copy + PartialEq,
+{
+    loop {
+        receive_and_process(&event_rx, processor, &report_tx, None).await;
+
+        // Forward typed keycodes to the (possibly cross-core) engine.
+        // ponytail: try_send on a bounded channel — overflow drops a feed char
+        // (a missed/false correction that self-heals on the next word boundary),
+        // but the real-time core0 path is never blocked. Widen KN if it matters.
+        while let Some(kc) = processor.pop_typed_keycode() {
+            let _ = kc_tx.try_send(kc);
+        }
+
+        // Apply any corrections the engine produced since the last event.
+        let mut reports: Vec<HidReport, 64> = Vec::new();
+        while let Ok(correction) = corr_rx.try_receive() {
+            let mut replacement: Vec<KeyCode, 32> = Vec::new();
+            for &uid in correction.replacement_slice() {
+                if let Some(kc) = KeyCode::from_usage_id(uid) {
+                    let _ = replacement.push(kc);
+                }
+            }
+            processor.inject_correction(
+                usize::from(correction.backspaces),
+                &replacement,
+                &mut |r| {
+                    let _ = reports.push(r);
+                },
+            );
+        }
+        send_reports(&report_tx, reports).await;
     }
 }
 
@@ -210,7 +319,7 @@ pub async fn keyboard_task_ble<
     const BN: usize,
 >(
     event_rx: Receiver<'_, M, KeyEvent, EN>,
-    mut processor: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     report_tx: Sender<'_, M, HidReport, RN>,
     ble_tx: Sender<'_, M, crate::transport::ble::BleCommand, BN>,
 ) -> !
@@ -219,7 +328,7 @@ where
     Ext: Copy + PartialEq,
 {
     loop {
-        receive_and_process(&event_rx, &mut processor, &report_tx, None).await;
+        receive_and_process(&event_rx, processor, &report_tx, None).await;
         if let Some(cmd) = processor.pending_ble_command() {
             let _ = ble_tx.try_send(cmd);
         }
@@ -247,7 +356,7 @@ pub async fn keyboard_task_telemetry<
     const TN: usize,
 >(
     event_rx: Receiver<'_, M, KeyEvent, EN>,
-    mut processor: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     report_tx: Sender<'_, M, HidReport, RN>,
     telem_tx: Sender<'_, M, crate::telemetry::transport::TelemetryFrame, TN>,
 ) -> !
@@ -262,7 +371,7 @@ where
         let now_ms = Instant::now().as_millis();
         let telem_remaining =
             TELEM_INTERVAL_MS.saturating_sub(now_ms.saturating_sub(last_telem_ms));
-        receive_and_process(&event_rx, &mut processor, &report_tx, Some(telem_remaining)).await;
+        receive_and_process(&event_rx, processor, &report_tx, Some(telem_remaining)).await;
 
         let now = Instant::now().as_millis();
         if now.saturating_sub(last_telem_ms) >= TELEM_INTERVAL_MS {
@@ -347,7 +456,7 @@ pub async fn run<
 >(
     mut scanner: S,
     mut debouncer: Db,
-    mut processor: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     mut reporter: R,
 ) -> !
 where
@@ -385,7 +494,7 @@ where
                 &mut prev,
                 now_ms,
                 &mut debouncer,
-                &mut processor,
+                processor,
                 &mut reports,
             );
         }

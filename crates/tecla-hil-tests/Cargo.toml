@@ -1,0 +1,16 @@
+[package]
+name = "tecla-hil-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Repository-local hardware-in-the-loop tests for Tecla"
+authors = ["Gabe Oppenheimer"]
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[features]
+hil = []
+
+[dependencies]
+hilt = { path = "../../../hilt" }

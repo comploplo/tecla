@@ -5,13 +5,17 @@ edition = "2021"
 description = "Tecla keyboard firmware board support for RP2040"
 authors.workspace = true
 license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-rp2040"
 
 [lints]
 workspace = true
 
 [dependencies]
-tecla        = { path = "../tecla", features = ["embassy"] }
-tecla-macros = { path = "../tecla-macros" }
+tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "autocomplete"] }
+tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
 embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
 embassy-rp       = { workspace = true }
@@ -31,11 +35,17 @@ portable-atomic = { version = "1", features = ["critical-section"] }
 cortex-m-semihosting = { version = "0.5", optional = true }
 
 [build-dependencies]
-tecla-config = { path = "../tecla-config" }
+tecla-config = { version = "0.1.0", path = "../tecla-config" }
 
 [features]
 hil = ["dep:cortex-m-semihosting"]
 steno-dictionary = []
+# Demonstrates running autocorrect on core1 (build.rs emits a small demo trie).
+core1-autocorrect = ["tecla/autocorrect"]
+
+[[example]]
+name = "core1_autocorrect"
+required-features = ["core1-autocorrect"]
 
 [[example]]
 name = "steno_uni_v4"

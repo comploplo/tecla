@@ -1508,10 +1508,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hilt"
-version = "0.1.0"
-
-[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2770,7 +2766,6 @@ dependencies = [
  "embedded-io-async 0.6.1",
  "embedded-storage-async",
  "heapless 0.8.0",
- "hilt",
  "postcard",
  "sequential-storage",
  "serde",
@@ -2856,6 +2851,29 @@ dependencies = [
  "static_cell",
  "tecla",
  "tecla-config",
+ "tecla-macros",
+]
+
+[[package]]
+name = "tecla-stm32f3"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-stm32",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embassy-usb",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "heapless 0.8.0",
+ "panic-probe",
+ "portable-atomic",
+ "static_cell",
+ "tecla",
  "tecla-macros",
 ]
 

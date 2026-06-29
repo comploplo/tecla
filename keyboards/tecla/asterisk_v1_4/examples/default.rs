@@ -11,7 +11,7 @@ use panic_probe as _;
 use static_cell::StaticCell;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::devices::steno::steno::StenoEngine;
+use tecla::devices::steno::StenoEngine;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, steno};

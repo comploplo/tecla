@@ -11,18 +11,18 @@ use panic_probe as _;
 use static_cell::StaticCell;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::keyboard::KeyboardProcessor;
-use tecla::devices::steno::steno::StenoEngine;
+use tecla::devices::steno::StenoEngine;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::task::{EventChannel, ReportChannel};
-use tecla_macros::{keyboard_main, steno};
+use tecla_macros::{keyboard_main, keymap};
 use tecla_rp2040::{UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
 });
 
-const ROWS: usize = 2;
-const COLS: usize = 6;
+const ROWS: usize = 3;
+const COLS: usize = 11;
 
 static EVENT_CHANNEL: StaticCell<EventChannel<NoopRawMutex, 16>> = StaticCell::new();
 static REPORT_CHANNEL: StaticCell<ReportChannel<NoopRawMutex, 8>> = StaticCell::new();
@@ -70,16 +70,22 @@ async fn main(spawner: Spawner) {
     let usb = builder.build();
 
     let rows: [Output<'_>; ROWS] = [
-        Output::new(p.PIN_26, Level::High),
-        Output::new(p.PIN_27, Level::High),
+        Output::new(p.PIN_25, Level::High),
+        Output::new(p.PIN_18, Level::High),
+        Output::new(p.PIN_17, Level::High),
     ];
     let cols: [Input<'_>; COLS] = [
-        Input::new(p.PIN_2, Pull::Up),
-        Input::new(p.PIN_3, Pull::Up),
-        Input::new(p.PIN_4, Pull::Up),
-        Input::new(p.PIN_5, Pull::Up),
+        Input::new(p.PIN_24, Pull::Up),
+        Input::new(p.PIN_23, Pull::Up),
+        Input::new(p.PIN_21, Pull::Up),
+        Input::new(p.PIN_20, Pull::Up),
+        Input::new(p.PIN_19, Pull::Up),
         Input::new(p.PIN_6, Pull::Up),
-        Input::new(p.PIN_7, Pull::Up),
+        Input::new(p.PIN_5, Pull::Up),
+        Input::new(p.PIN_4, Pull::Up),
+        Input::new(p.PIN_3, Pull::Up),
+        Input::new(p.PIN_2, Pull::Up),
+        Input::new(p.PIN_1, Pull::Up),
     ];
 
     let scanner = tecla_rp2040::GpioMatrixScanner::new(rows, cols);
@@ -122,7 +128,7 @@ async fn matrix_task(
 #[embassy_executor::task]
 async fn keyboard_task(
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
-    processor: KeyboardProcessor<ROWS, COLS, 1, 12>,
+    processor: KeyboardProcessor<ROWS, COLS, 1, 33>,
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
 ) -> ! {
     tecla::task::keyboard_task(event_ch.receiver(), processor, report_ch.sender()).await

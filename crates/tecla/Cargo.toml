@@ -5,12 +5,24 @@ edition = "2021"
 description = "Embedded Rust keyboard firmware core — no_std, async-first, MCU-agnostic"
 authors.workspace = true
 license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla"
 
 [lints]
 workspace = true
 
 [features]
-default = []
+default = ["autocorrect", "autocomplete"]
+
+# Trie-based typo correction (AutocorrectEngine). Optional for minimal builds.
+# The edit-distance search is the heaviest pure-logic path in the crate; drop
+# this feature to shrink the binary on flash-constrained targets.
+autocorrect = []
+
+# Trie-based prefix completion (AutocompleteEngine). Optional for minimal builds.
+autocomplete = []
 
 # Enables std — host-side testing, simulation, and build tooling.
 # The core library is no_std by default.
@@ -19,9 +31,8 @@ std = []
 # Unlocks deterministic clock injection and the simulate! macro for tests.
 testing = ["std"]
 
-# Hardware-in-the-loop test fixtures via Renode + Podman/Docker.
-# Provided by the shared `hilt` crate.
-hil = ["std", "dep:hilt"]
+# Hardware-in-the-loop integration tests via Renode + Podman/Docker.
+hil = ["std"]
 
 # Enables the async Embassy orchestrator — task::run() and the async scanner /
 # reporter traits. Requires an Embassy time driver in the final binary.
@@ -49,11 +60,7 @@ postcard               = { workspace = true, optional = true }
 embedded-storage-async = { workspace = true, optional = true }
 sequential-storage     = { workspace = true, optional = true }
 
-# Shared Renode HIL test fixtures (host-only; pulled in by the `hil` feature).
-hilt = { path = "../../../hilt", optional = true }
-
-
 [dev-dependencies]
 similar-asserts = { workspace = true }
 serde_json      = { workspace = true }
-tecla-config    = { path = "../tecla-config" }
+tecla-config    = { version = "0.1.0", path = "../tecla-config" }

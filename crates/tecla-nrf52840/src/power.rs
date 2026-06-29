@@ -3,7 +3,7 @@
 //! [`Nrf52840PowerManager`] implements [`PowerManager`] using the nRF52840
 //! POWER peripheral for System OFF mode and GPIO SENSE for wake detection.
 
-use tecla::power::{PowerManager, WakeReason};
+use tecla::pipeline::power::{PowerManager, WakeReason};
 
 const POWER_BASE: u32 = 0x4000_0000;
 const RESETREAS_OFFSET: u32 = 0x400;

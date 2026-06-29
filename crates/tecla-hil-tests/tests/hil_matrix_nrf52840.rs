@@ -8,11 +8,11 @@
 #![expect(clippy::print_stderr, reason = "test diagnostic output")]
 #![expect(clippy::str_to_string, reason = "test code")]
 
-use std::path::PathBuf;
-use std::process::Command;
-use tecla::hil::{
+use hilt::{
     extract_elf_info, generate_matrix_test_resc, parse_key_log, run_renode_container, Platform,
 };
+use std::path::PathBuf;
+use std::process::Command;
 
 fn firmware_path() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

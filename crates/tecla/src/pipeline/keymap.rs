@@ -11,6 +11,20 @@ use crate::action::{Action, LayerOp};
 /// Sentinel value meaning "no layer cached for this key".
 const NO_CACHE: u8 = u8::MAX;
 
+/// Maximum keys per layer. Sized for the largest single-controller board in the
+/// tree (the 12×7 = 84-key Voyager) with headroom. A `Layer` owns this many
+/// `Action`s by value, and a `KeyboardProcessor` is constructed on the stack
+/// before moving into its static home — at 256 the Voyager's 3-layer keymap was
+/// ~16 KB and overflowed the F303's 40 KB SRAM during construction.
+///
+/// The Voyager (84 keys) is the current ceiling; 88 covers it while keeping the
+/// transient construction footprint (keymap local + processor temp ≈ 16 KB)
+/// comfortably under the F303's 40 KB SRAM.
+///
+/// ponytail: fixed cap, not `KEYS`-generic. Make `Layer<KEYS, Ext>` generic if a
+/// board ever exceeds this — it threads through the `keymap!` macro and callers.
+pub const MAX_LAYER_KEYS: usize = 88;
+
 /// A single layer: a fixed-size array of actions indexed by flat key position.
 ///
 /// Flat index is computed as `row * COLS + col` by the caller.
@@ -19,7 +33,7 @@ pub struct Layer<Ext = ()>
 where
     Ext: Copy + PartialEq,
 {
-    actions: heapless::Vec<Action<Ext>, 256>,
+    actions: heapless::Vec<Action<Ext>, MAX_LAYER_KEYS>,
 }
 
 impl<Ext: Copy + PartialEq> Layer<Ext> {

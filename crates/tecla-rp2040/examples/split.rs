@@ -187,8 +187,8 @@ async fn remote_event_task(
 #[embassy_executor::task]
 async fn keyboard_task(
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
-    processor: KeyboardProcessor<ROWS, TOTAL_COLS, 2, 48>,
+    mut processor: KeyboardProcessor<ROWS, TOTAL_COLS, 2, 48>,
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
 ) -> ! {
-    tecla::task::keyboard_task(event_ch.receiver(), processor, report_ch.sender()).await
+    tecla::task::keyboard_task(event_ch.receiver(), &mut processor, report_ch.sender()).await
 }

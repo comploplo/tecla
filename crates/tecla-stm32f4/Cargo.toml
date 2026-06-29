@@ -5,13 +5,17 @@ edition = "2021"
 description = "Tecla keyboard firmware board support for STM32F4"
 authors.workspace = true
 license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-stm32f4"
 
 [lints]
 workspace = true
 
 [dependencies]
-tecla        = { path = "../tecla", features = ["embassy"] }
-tecla-macros = { path = "../tecla-macros" }
+tecla        = { version = "0.1.0", path = "../tecla", features = ["embassy"] }
+tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
 embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
 embassy-stm32    = { workspace = true }
@@ -19,7 +23,7 @@ embassy-usb      = { workspace = true }
 embassy-time     = { workspace = true }
 embassy-sync     = { workspace = true }
 
-cortex-m     = { workspace = true }
+cortex-m     = { workspace = true, features = ["critical-section-single-core"] }
 cortex-m-rt  = { workspace = true }
 defmt        = { workspace = true }
 defmt-rtt    = { workspace = true }

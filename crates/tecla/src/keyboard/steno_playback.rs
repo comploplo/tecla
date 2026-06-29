@@ -251,7 +251,7 @@ impl StenoPlayback {
         } else {
             text.chars()
                 .last()
-                .is_some_and(|ch| matches!(ch, ' ' | '\n' | '\t'))
+                .is_some_and(|ch| !matches!(ch, ' ' | '\n' | '\t'))
         };
         Some(data_end)
     }
@@ -566,6 +566,26 @@ mod tests {
         let keys = typed_keys(&output);
         assert_eq!(keys[0], KeyCode::Space);
         assert_eq!(keys[1], KeyCode::C);
+    }
+
+    #[test]
+    fn normal_text_marks_next_word_for_space() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let translation = text_bytes("cat");
+        playback.play_translation(translation.as_slice(), None, &mut output, &mut |_| {});
+
+        assert!(playback.needs_space);
+    }
+
+    #[test]
+    fn text_ending_in_space_does_not_mark_next_word_for_space() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let translation = text_bytes("cat ");
+        playback.play_translation(translation.as_slice(), None, &mut output, &mut |_| {});
+
+        assert!(!playback.needs_space);
     }
 
     #[test]

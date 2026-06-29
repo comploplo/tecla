@@ -5,13 +5,17 @@ edition = "2021"
 description = "Tecla keyboard firmware board support for nRF52840"
 authors.workspace = true
 license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-nrf52840"
 
 [lints]
 workspace = true
 
 [dependencies]
-tecla        = { path = "../tecla", features = ["embassy"] }
-tecla-macros = { path = "../tecla-macros" }
+tecla        = { version = "0.1.0", path = "../tecla", features = ["embassy"] }
+tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
 embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
 embassy-nrf      = { workspace = true }

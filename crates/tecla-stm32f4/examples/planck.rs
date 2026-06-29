@@ -142,6 +142,8 @@ async fn main(spawner: Spawner) {
         request_handler: None,
         poll_ms: 1,
         max_packet_size: 8,
+        hid_subclass: embassy_usb::class::hid::HidSubclass::Boot,
+        hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::Keyboard,
     };
     let hid_writer: HidWriter<'_, _, 8> =
         HidWriter::new(&mut builder, HID_STATE.init(State::new()), hid_config);
@@ -193,13 +195,9 @@ async fn main(spawner: Spawner) {
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());
 
-    spawner.spawn(usb_device_task(usb)).unwrap();
-    spawner
-        .spawn(matrix_task(scanner, debouncer, event_ch))
-        .unwrap();
-    spawner
-        .spawn(keyboard_task(event_ch, processor, report_ch))
-        .unwrap();
+    spawner.spawn(usb_device_task(usb).unwrap());
+    spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
+    spawner.spawn(keyboard_task(event_ch, processor, report_ch).unwrap());
     tecla::task::usb_task(report_ch.receiver(), reporter).await;
 }
 
@@ -222,8 +220,8 @@ async fn matrix_task(
 #[embassy_executor::task]
 async fn keyboard_task(
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
-    processor: KeyboardProcessor<ROWS, COLS, 2, 48>,
+    mut processor: KeyboardProcessor<ROWS, COLS, 2, 48>,
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
 ) -> ! {
-    tecla::task::keyboard_task(event_ch.receiver(), processor, report_ch.sender()).await
+    tecla::task::keyboard_task(event_ch.receiver(), &mut processor, report_ch.sender()).await
 }

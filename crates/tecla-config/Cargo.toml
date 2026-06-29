@@ -5,6 +5,10 @@ edition = "2021"
 description = "QMK config parser and keymap transpiler for tecla"
 authors.workspace = true
 license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-config"
 
 [lints]
 workspace = true

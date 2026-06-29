@@ -10,6 +10,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::Duration;
 
 use serde::Deserialize;
 use tecla_config::qmk::info_json;
@@ -19,6 +21,7 @@ use tecla_config::qmk::info_json;
 enum FlashMethod {
     ProbeRs,
     Uf2,
+    Dfu,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +38,10 @@ struct BoardManifest {
     qmk_family: Option<String>,
     #[serde(default)]
     vendor: Option<String>,
+    #[serde(default)]
+    dfu_vid_pid: Option<String>,
+    #[serde(default)]
+    dfu_address: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +54,8 @@ struct BoardProfile {
     features: Vec<String>,
     qmk_family: Option<String>,
     vendor: Option<String>,
+    dfu_vid_pid: Option<String>,
+    dfu_address: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +181,7 @@ fn method_name(method: FlashMethod) -> &'static str {
     match method {
         FlashMethod::ProbeRs => "probe-rs",
         FlashMethod::Uf2 => "uf2",
+        FlashMethod::Dfu => "dfu",
     }
 }
 
@@ -264,6 +274,8 @@ fn discover_native_profiles() -> Vec<BoardProfile> {
                 features: manifest.features,
                 qmk_family: manifest.qmk_family,
                 vendor: manifest.vendor,
+                dfu_vid_pid: manifest.dfu_vid_pid,
+                dfu_address: manifest.dfu_address,
             });
         }
     }
@@ -336,15 +348,8 @@ fn flash_profile(profile: BoardProfile, device: Option<&str>) -> ! {
 
     match profile.method {
         FlashMethod::ProbeRs => run_cargo(&cargo_args),
-        FlashMethod::Uf2 => {
-            let device = device
-                .map(|selector| selector.to_string())
-                .or_else(auto_select_uf2_device)
-                .unwrap_or_else(|| {
-                    fail("UF2 flashing requires a connected UF2 boot device or `--device <usb-device>`")
-                });
-            run_uf2(&profile, &cargo_args, &device)
-        }
+        FlashMethod::Uf2 => run_uf2(&profile, &cargo_args, device),
+        FlashMethod::Dfu => run_dfu(&profile, &cargo_args, device),
     }
 }
 
@@ -385,7 +390,7 @@ fn run_cargo(cargo_args: &[String]) -> ! {
     exit_status("cargo", status);
 }
 
-fn run_uf2(profile: &BoardProfile, cargo_args: &[String], device: &str) -> ! {
+fn run_uf2(profile: &BoardProfile, cargo_args: &[String], device: Option<&str>) -> ! {
     let status = run_command("cargo", cargo_args);
     ensure_success("cargo", status);
 
@@ -397,12 +402,9 @@ fn run_uf2(profile: &BoardProfile, cargo_args: &[String], device: &str) -> ! {
         &[elf.display().to_string(), uf2.display().to_string()],
     );
     ensure_success("elf2uf2-rs", status);
+    eprintln!("firmware UF2: {}", uf2.display());
 
-    let mount = find_uf2_mount(device)
-        .or_else(|| find_uf2_block_device(device).and_then(|block| mount_uf2_block_device(&block)))
-        .unwrap_or_else(|| {
-            fail("could not find the UF2 boot device; put the board into boot mode first and retry")
-        });
+    let mount = wait_for_uf2_target(device);
 
     eprintln!("found UF2 target at {}", mount.display());
     print_uf2_info(&mount);
@@ -421,6 +423,154 @@ fn run_uf2(profile: &BoardProfile, cargo_args: &[String], device: &str) -> ! {
     std::process::exit(0);
 }
 
+fn wait_for_uf2_target(selector: Option<&str>) -> PathBuf {
+    match selector {
+        Some(device) => eprintln!(
+            "waiting for UF2 boot device matching `{device}`; put the keyboard into boot mode now"
+        ),
+        None => eprintln!("waiting for a UF2 boot device; put the keyboard into boot mode now"),
+    }
+
+    let mut attempts = 0u32;
+    loop {
+        if let Some(device) = selector {
+            if let Some(mount) = find_uf2_mount(device).or_else(|| {
+                find_uf2_block_device(device).and_then(|block| mount_uf2_block_device(&block))
+            }) {
+                return mount;
+            }
+        } else if let Some(mount) = auto_select_uf2_mount() {
+            return mount;
+        }
+
+        attempts = attempts.saturating_add(1);
+        if attempts % 10 == 0 {
+            eprintln!("still waiting for a UF2 boot device...");
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn auto_select_uf2_mount() -> Option<PathBuf> {
+    let mounts = discover_uf2_mounts();
+    match mounts.as_slice() {
+        [mount] => Some(mount.clone()),
+        [] => auto_select_uf2_device().and_then(|device| {
+            find_uf2_mount(&device).or_else(|| {
+                find_uf2_block_device(&device).and_then(|block| mount_uf2_block_device(&block))
+            })
+        }),
+        many => {
+            let list = many
+                .iter()
+                .map(|mount| mount.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            fail(&format!(
+                "multiple UF2 boot devices are mounted: {list}. Pass `--device <usb-device>`"
+            ));
+        }
+    }
+}
+
+fn run_dfu(profile: &BoardProfile, cargo_args: &[String], device: Option<&str>) -> ! {
+    let status = run_command("cargo", cargo_args);
+    ensure_success("cargo", status);
+
+    let elf = build_elf_path(profile);
+    eprintln!("built ELF: {}", elf.display());
+    let bin = build_bin_path(profile);
+    let objcopy = find_objcopy();
+    let status = run_command(
+        &objcopy,
+        &[
+            "-O".to_string(),
+            "binary".to_string(),
+            elf.display().to_string(),
+            bin.display().to_string(),
+        ],
+    );
+    ensure_success(&objcopy, status);
+    eprintln!("firmware BIN: {}", bin.display());
+
+    let Some(vid_pid) = profile.dfu_vid_pid.as_deref() else {
+        fail("DFU flashing requires `dfu_vid_pid` in board.toml");
+    };
+    ensure_command_available("dfu-util", "install `dfu-util` to flash DFU keyboards");
+    wait_for_dfu_target(vid_pid, device);
+
+    let address = profile.dfu_address.as_deref().unwrap_or("0x08000000:leave");
+    let status = run_command(
+        "dfu-util",
+        &[
+            "-d".to_string(),
+            vid_pid.to_string(),
+            "-a".to_string(),
+            "0".to_string(),
+            "-s".to_string(),
+            address.to_string(),
+            "-D".to_string(),
+            bin.display().to_string(),
+        ],
+    );
+    exit_status("dfu-util", status);
+}
+
+fn ensure_command_available(program: &str, hint: &str) {
+    if Command::new(program).arg("--version").output().is_ok() {
+        return;
+    }
+    fail(&format!(
+        "required command `{program}` was not found; {hint}"
+    ));
+}
+
+fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) {
+    match selector {
+        Some(selector) => eprintln!(
+            "waiting for DFU device `{selector}` ({vid_pid}); put the keyboard into bootloader mode now"
+        ),
+        None => eprintln!(
+            "waiting for DFU device {vid_pid}; put the keyboard into bootloader mode now"
+        ),
+    }
+
+    let mut attempts = 0u32;
+    loop {
+        if dfu_target_present(vid_pid, selector) {
+            eprintln!("found DFU device {vid_pid}");
+            return;
+        }
+
+        attempts = attempts.saturating_add(1);
+        if attempts % 10 == 0 {
+            eprintln!("still waiting for DFU device {vid_pid}...");
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn dfu_target_present(vid_pid: &str, selector: Option<&str>) -> bool {
+    let output = Command::new("dfu-util").arg("-l").output();
+    let Ok(output) = output else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    let errors = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    let listing = format!("{text}\n{errors}");
+
+    let vid_pid = vid_pid.to_ascii_lowercase().replace('/', ":");
+    if !listing.contains(&format!("[{vid_pid}]")) && !listing.contains(&vid_pid) {
+        return false;
+    }
+
+    let Some(selector) = selector else {
+        return true;
+    };
+    let selector = selector.to_ascii_lowercase().replace('/', ":");
+    selector == vid_pid || listing.contains(&selector)
+}
+
 fn print_uf2_info(mount: &Path) {
     let info = mount.join("INFO_UF2.TXT");
     match fs::read_to_string(&info) {
@@ -434,6 +584,52 @@ fn print_uf2_info(mount: &Path) {
             eprintln!("could not read {}: {err}", info.display());
         }
     }
+}
+
+fn discover_uf2_mounts() -> Vec<PathBuf> {
+    let mut mounts = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = fs::read_to_string("/proc/mounts") {
+            for line in text.lines() {
+                let mut fields = line.split_whitespace();
+                let Some(_) = fields.next() else {
+                    continue;
+                };
+                let Some(mount) = fields.next() else {
+                    continue;
+                };
+                let mount = PathBuf::from(unescape_mount_path(mount));
+                if mount.join("INFO_UF2.TXT").is_file() && !mounts.contains(&mount) {
+                    mounts.push(mount);
+                }
+            }
+        }
+    }
+
+    for root in ["/Volumes", "/media", "/run/media", "/mnt"] {
+        let root = Path::new(root);
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.join("INFO_UF2.TXT").is_file() && !mounts.contains(&path) {
+                mounts.push(path.clone());
+            }
+            if let Ok(subdirs) = fs::read_dir(&path) {
+                for sub in subdirs.flatten() {
+                    let subpath = sub.path();
+                    if subpath.join("INFO_UF2.TXT").is_file() && !mounts.contains(&subpath) {
+                        mounts.push(subpath);
+                    }
+                }
+            }
+        }
+    }
+
+    mounts
 }
 
 fn find_uf2_mount(selector: &str) -> Option<PathBuf> {
@@ -561,6 +757,12 @@ fn usb_source_matches_selector(info: &UsbSourceInfo, selector: &str) -> bool {
 }
 
 fn qmk_family(keyboard_name: &str) -> String {
+    if keyboard_name.eq_ignore_ascii_case("zsa/voyager")
+        || keyboard_name.eq_ignore_ascii_case("voyager")
+    {
+        return "zsa/voyager".to_string();
+    }
+
     keyboard_name
         .split('/')
         .next()
@@ -677,6 +879,14 @@ fn build_uf2_path(profile: &BoardProfile) -> PathBuf {
         .join(format!("{}.uf2", profile.example))
 }
 
+fn build_bin_path(profile: &BoardProfile) -> PathBuf {
+    Path::new("target")
+        .join(&profile.target)
+        .join("release")
+        .join("examples")
+        .join(format!("{}.bin", profile.example))
+}
+
 fn copy_with_progress(src: &Path, dst: &Path) -> io::Result<u64> {
     let mut input = fs::File::open(src)?;
     let mut output = fs::File::create(dst)?;
@@ -713,6 +923,22 @@ fn build_elf_path(profile: &BoardProfile) -> PathBuf {
         .join("release")
         .join("examples")
         .join(&profile.example)
+}
+
+/// Picks the first available objcopy: `rust-objcopy` (cargo-binutils),
+/// `llvm-objcopy`, or `arm-none-eabi-objcopy` (arm GNU toolchain).
+fn find_objcopy() -> String {
+    const CANDIDATES: &[&str] = &["rust-objcopy", "llvm-objcopy", "arm-none-eabi-objcopy"];
+    for cand in CANDIDATES {
+        if Command::new(cand).arg("--version").output().is_ok() {
+            return (*cand).to_string();
+        }
+    }
+    fail(
+        "no objcopy found; install one of: cargo-binutils \
+         (`cargo install cargo-binutils && rustup component add llvm-tools-preview`) \
+         or the arm-none-eabi GNU toolchain",
+    );
 }
 
 fn run_command(program: &str, args: &[String]) -> ExitStatus {

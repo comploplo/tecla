@@ -6,6 +6,7 @@ members = [
     "crates/tecla-rp2040",
     "crates/tecla-nrf52840",
     "crates/tecla-stm32f4",
+    "crates/tecla-stm32f3",
 ]
 # esp-hal 1.0 + esp-rom-sys has an i8::to_ascii_lowercase bug on the current
 # espup toolchain (1.93.0.0). Re-include once upstream fixes land.
@@ -17,6 +18,9 @@ resolver = "2"
 [workspace.package]
 authors = ["Gabe Oppenheimer"]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["keyboard", "firmware", "embedded", "hid", "no-std"]
+categories = ["embedded", "hardware-support", "no-std"]
 
 # ---------------------------------------------------------------------------
 # Workspace-wide lints — inherited by all crates via `lints.workspace = true`
@@ -34,7 +38,8 @@ missing_docs = "deny"
 [workspace.dependencies]
 
 # Core embedded abstractions
-embedded-hal = "1"
+embedded-hal       = "1"
+embedded-hal-async = "1"
 
 # Async runtime
 embassy-executor = { version = "0.10", features = ["executor-thread"] }

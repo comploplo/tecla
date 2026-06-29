@@ -6,9 +6,8 @@
 #![cfg(feature = "hil")]
 #![allow(clippy::tests_outside_test_module, reason = "integration test")]
 
+use hilt::{assert_hil_ok, HilConfig, Platform, RenodeRunner};
 use std::path::PathBuf;
-use tecla::assert_hil_ok;
-use tecla::hil::{HilConfig, Platform, RenodeRunner};
 
 fn firmware_path() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

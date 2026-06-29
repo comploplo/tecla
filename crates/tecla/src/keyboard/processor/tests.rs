@@ -4,6 +4,7 @@
 use super::RolloverMode;
 use super::*;
 use crate::action::{Action, KeyCode, KeyOverride, LayerOp, ModifierKey, MouseAction, TriLayerDef};
+use crate::devices::keyboard::combo::{Combo, ComboConfig};
 use crate::devices::keyboard::tapping::{TapHoldConfig, TapHoldMode};
 use crate::devices::steno::{CaseMode, OP_RETRO_CASE, OP_SPACE, OP_STITCH, OP_TEXT};
 use crate::pipeline::event::{KeyEvent, KeyPos};
@@ -15,6 +16,23 @@ const ROWS: usize = 2;
 const COLS: usize = 3;
 const LAYERS: usize = 2;
 const KEYS: usize = 6;
+static DF_KEYS: &[KeyCode] = &[KeyCode::D, KeyCode::F];
+static DF_COMBOS: &[Combo] = &[Combo::key(DF_KEYS, KeyCode::Backspace)];
+static DF_SHIFT_A_COMBOS: &[Combo] = &[Combo::new(
+    DF_KEYS,
+    Action::ModifiedKey {
+        modifier: ModifierKey::LSHIFT,
+        key: KeyCode::A,
+    },
+)];
+
+fn df_combo_config() -> ComboConfig {
+    ComboConfig::new(DF_COMBOS)
+}
+
+fn df_shift_a_combo_config() -> ComboConfig {
+    ComboConfig::new(DF_SHIFT_A_COMBOS)
+}
 
 fn pos(row: u8, col: u8) -> KeyPos {
     KeyPos::new(row, col)
@@ -228,6 +246,115 @@ fn multiple_keys_pressed_simultaneously_appear_in_report() {
     let kcs = keyboard_keycodes(*reports.first().unwrap());
     assert!(kcs.contains(&KeyCode::A.usage_id()));
     assert!(kcs.contains(&KeyCode::B.usage_id()));
+}
+
+// ── Combos ────────────────────────────────────────────────────────────────
+
+#[test]
+fn combo_suppresses_source_keys_and_taps_action() {
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(df_combo_config());
+
+    // Holding both chord keys emits nothing.
+    let held = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(press(pos(0, 1), 10), 10, emit);
+    });
+    assert!(held.is_empty());
+
+    // Releasing the first key alone does not complete the chord.
+    let partial = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 20), 20, emit);
+    });
+    assert!(partial.is_empty());
+
+    // Releasing the last held key fires the combo action as a tap.
+    let fired = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 1), 21), 21, emit);
+    });
+    assert_eq!(fired.len(), 2);
+    assert!(keyboard_keycodes(fired[0]).contains(&KeyCode::Backspace.usage_id()));
+    assert!(!keyboard_keycodes(fired[0]).contains(&KeyCode::D.usage_id()));
+    assert!(!keyboard_keycodes(fired[0]).contains(&KeyCode::F.usage_id()));
+    assert_eq!(keyboard_keycodes(fired[1]), [0; 6]);
+}
+
+#[test]
+fn combo_can_tap_standard_action() {
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(df_shift_a_combo_config());
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(press(pos(0, 1), 10), 10, emit);
+        proc.process_event(release(pos(0, 0), 20), 20, emit);
+        proc.process_event(release(pos(0, 1), 21), 21, emit);
+    });
+
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+    assert_eq!(keyboard_mods(reports[0]), ModifierKey::LSHIFT.bits());
+    assert_eq!(keyboard_keycodes(*reports.last().unwrap()), [0; 6]);
+    assert_eq!(keyboard_mods(*reports.last().unwrap()), 0);
+}
+
+#[test]
+fn combo_failure_replays_buffered_key_before_new_press() {
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::Key(KeyCode::C),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(df_combo_config());
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(press(pos(0, 2), 10), 10, emit);
+    });
+
+    assert_eq!(reports.len(), 2);
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::D.usage_id()));
+    let second = keyboard_keycodes(reports[1]);
+    assert!(second.contains(&KeyCode::D.usage_id()));
+    assert!(second.contains(&KeyCode::C.usage_id()));
+}
+
+#[test]
+fn combo_key_release_before_match_replays_press_and_release() {
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(df_combo_config());
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(release(pos(0, 0), 10), 10, emit);
+    });
+
+    assert_eq!(reports.len(), 2);
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::D.usage_id()));
+    assert_eq!(keyboard_keycodes(reports[1]), [0; 6]);
 }
 
 #[test]
@@ -2327,6 +2454,72 @@ fn with_autocorrect_attaches_engine() {
     assert!(proc.autocorrect.is_none());
     let proc = proc.with_autocorrect(crate::autocorrect::AutocorrectEngine::new(&[]));
     assert!(proc.autocorrect.is_some());
+}
+
+#[test]
+fn autocorrect_offload_buffers_typed_keycodes() {
+    // In offload mode the processor must NOT run the engine inline; it buffers
+    // exactly the keycodes the inline engine would have consumed, in order.
+    extern crate std;
+    let trie = tecla_config::trie::compile_trie(&[(std::string::String::from("the"), 0u8)]);
+    let dict: &'static [u8] = std::boxed::Box::leak(trie.into_boxed_slice());
+
+    // Layout: idx0=T idx1=E idx2=H idx3=Space (KEYS=6, COLS=3).
+    let layout = [
+        Action::Key(KeyCode::T),
+        Action::Key(KeyCode::E),
+        Action::Key(KeyCode::H),
+        Action::Key(KeyCode::Space),
+        Action::NoOp,
+        Action::NoOp,
+    ];
+    let positions = [pos(0, 0), pos(0, 1), pos(0, 2), pos(1, 0)];
+
+    let mut proc = make_processor(&layout).with_autocorrect_offload();
+    let mut t = 0u64;
+    for p in positions {
+        proc.process_event(press(p, t), t, &mut |_| {});
+        proc.process_event(release(p, t + 1), t + 1, &mut |_| {});
+        t += 10;
+    }
+
+    // The buffered feed is exactly the typed word + boundary.
+    let mut feed: std::vec::Vec<KeyCode> = std::vec::Vec::new();
+    while let Some(kc) = proc.pop_typed_keycode() {
+        feed.push(kc);
+    }
+    assert_eq!(
+        feed,
+        std::vec![KeyCode::T, KeyCode::E, KeyCode::H, KeyCode::Space]
+    );
+
+    // Running those through a (remote) engine yields the same correction the
+    // inline path documents: 3 backspaces, then "the".
+    let mut engine = crate::autocorrect::AutocorrectEngine::new(dict);
+    let mut correction = None;
+    for (i, kc) in feed.iter().enumerate() {
+        if let Some(c) = engine.process_keycode(*kc, i as u64) {
+            correction = Some(c);
+        }
+    }
+    let c = correction.expect("engine should correct teh -> the");
+    assert_eq!(c.backspaces, 3);
+    assert_eq!(c.replacement_slice(), &[0x17, 0x0B, 0x08]); // t, h, e
+
+    // inject_correction emits the backspaces and replacement through playback.
+    let replacement = [KeyCode::T, KeyCode::H, KeyCode::E];
+    let reports = collect_reports(|emit| {
+        proc.inject_correction(usize::from(c.backspaces), &replacement, emit);
+    });
+    let pressed: std::vec::Vec<u8> = reports
+        .iter()
+        .filter_map(|r| {
+            let codes = keyboard_keycodes(*r);
+            (codes[0] != 0).then_some(codes[0])
+        })
+        .collect();
+    assert!(pressed.contains(&KeyCode::Backspace.usage_id()));
+    assert!(pressed.windows(3).any(|w| w == [0x17, 0x0B, 0x08]));
 }
 
 #[test]

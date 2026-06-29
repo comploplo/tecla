@@ -10,8 +10,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tecla        = { path = "../tecla", features = ["embassy"] }
-tecla-macros = { path = "../tecla-macros" }
+tecla        = { version = "0.1.0", path = "../tecla", features = ["embassy"] }
+tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
 embassy-usb      = { workspace = true }
 embassy-time     = { workspace = true }

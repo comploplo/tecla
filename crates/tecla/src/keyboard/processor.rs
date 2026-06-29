@@ -32,9 +32,12 @@ use crate::action::{
     Action, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction,
     TriLayerDef,
 };
+#[cfg(feature = "autocomplete")]
 use crate::autocomplete::AutocompleteEngine;
+#[cfg(feature = "autocorrect")]
 use crate::autocorrect::AutocorrectEngine;
 use crate::devices::gamepad::GamepadState;
+use crate::devices::keyboard::combo::{Combo, ComboConfig};
 use crate::devices::keyboard::tapping::{TapHoldConfig, TapHoldDecision, TapHoldRecognizer};
 use crate::pipeline::event::{KeyEvent, KeyPos};
 use crate::pipeline::keymap::LayerStack;
@@ -158,6 +161,14 @@ pub struct KeyboardProcessor<
     tap_hold_config: TapHoldConfig,
     active_tap_hold: Option<TapHoldRecognizer>,
     active_holds: Vec<ActiveHold, 8>,
+    combo_config: ComboConfig<Ext>,
+    // Chords are release-to-fire: buffer the presses (to replay on no-match),
+    // accumulate the union of pressed combo keys, and track which are still
+    // held so we know when the chord is complete (all released).
+    // ponytail: cap 8 keys per chord; bump if a board defines wider chords.
+    combo_pending: Deque<KeyEvent, 8>,
+    combo_pressed: Vec<KeyCode, 8>,
+    combo_held: Vec<KeyPos, 8>,
     pressed_keys: Vec<u8, 16>,
     pending: Deque<KeyEvent, 32>,
     rollover_mode: RolloverMode,
@@ -177,7 +188,16 @@ pub struct KeyboardProcessor<
     last_any_press_ms: u64,
     last_tap_hold_tap: Option<(KeyPos, u64)>,
     pending_ble: Option<crate::transport::ble::BleCommand>,
+    #[cfg(feature = "autocorrect")]
     autocorrect: Option<AutocorrectEngine>,
+    /// When set, typed keycodes are queued in `typed_out` for a remote engine
+    /// (e.g. on a second core) instead of running the engine inline.
+    #[cfg(feature = "autocorrect")]
+    autocorrect_offload: bool,
+    /// Keycodes awaiting forwarding to a remote autocorrect engine.
+    #[cfg(feature = "autocorrect")]
+    typed_out: Deque<KeyCode, 32>,
+    #[cfg(feature = "autocomplete")]
     autocomplete: Option<AutocompleteEngine>,
     steno_engine: Option<crate::devices::steno::StenoEngine>,
     steno_chord: u64,
@@ -200,6 +220,10 @@ where
             tap_hold_config,
             active_tap_hold: None,
             active_holds: Vec::new(),
+            combo_config: ComboConfig::empty(),
+            combo_pending: Deque::new(),
+            combo_pressed: Vec::new(),
+            combo_held: Vec::new(),
             pressed_keys: Vec::new(),
             pending: Deque::new(),
             rollover_mode: RolloverMode::Kro6,
@@ -219,7 +243,13 @@ where
             last_any_press_ms: 0,
             last_tap_hold_tap: None,
             pending_ble: None,
+            #[cfg(feature = "autocorrect")]
             autocorrect: None,
+            #[cfg(feature = "autocorrect")]
+            autocorrect_offload: false,
+            #[cfg(feature = "autocorrect")]
+            typed_out: Deque::new(),
+            #[cfg(feature = "autocomplete")]
             autocomplete: None,
             steno_engine: None,
             steno_chord: 0,
@@ -250,14 +280,65 @@ where
         self
     }
 
+    /// Sets combo definitions and timing.
+    ///
+    /// Combo keys are buffered until either a combo resolves or the configured
+    /// combo term expires. On timeout/failure, buffered events are replayed
+    /// through the normal processor path.
+    #[must_use]
+    pub fn with_combos(mut self, config: ComboConfig<Ext>) -> Self {
+        self.combo_config = config;
+        self
+    }
+
     /// Attaches an autocorrect engine, consuming and returning `self`.
+    #[cfg(feature = "autocorrect")]
     #[must_use]
     pub fn with_autocorrect(mut self, engine: AutocorrectEngine) -> Self {
         self.autocorrect = Some(engine);
         self
     }
 
+    /// Routes typed keycodes to a *remote* autocorrect engine instead of running
+    /// one inline. Pair with [`autocorrect_task`](crate::task::autocorrect_task),
+    /// [`pop_typed_keycode`](Self::pop_typed_keycode), and
+    /// [`inject_correction`](Self::inject_correction). The remote engine may run
+    /// on a second core. Do not combine with [`with_autocorrect`](Self::with_autocorrect).
+    #[cfg(feature = "autocorrect")]
+    #[must_use]
+    pub fn with_autocorrect_offload(mut self) -> Self {
+        self.autocorrect_offload = true;
+        self
+    }
+
+    /// Pops the next keycode queued for a remote autocorrect engine.
+    ///
+    /// Returns `None` unless [`with_autocorrect_offload`](Self::with_autocorrect_offload)
+    /// is set. The async task layer drains this into the engine's input channel.
+    #[cfg(feature = "autocorrect")]
+    pub fn pop_typed_keycode(&mut self) -> Option<KeyCode> {
+        self.typed_out.pop_front()
+    }
+
+    /// Applies a correction produced by a remote autocorrect engine: emits
+    /// `backspaces` backspaces followed by the `replacement` keycodes through
+    /// the normal playback path.
+    #[cfg(feature = "autocorrect")]
+    pub fn inject_correction<F>(&mut self, backspaces: usize, replacement: &[KeyCode], emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        for _ in 0..backspaces {
+            let _ = self.playback_queue.push_back(KeyCode::Backspace);
+        }
+        for &kc in replacement {
+            let _ = self.playback_queue.push_back(kc);
+        }
+        self.drain_playback(emit);
+    }
+
     /// Attaches an autocomplete engine, consuming and returning `self`.
+    #[cfg(feature = "autocomplete")]
     #[must_use]
     pub fn with_autocomplete(mut self, engine: AutocompleteEngine) -> Self {
         self.autocomplete = Some(engine);
@@ -447,10 +528,12 @@ where
             .accessibility
             .as_ref()
             .and_then(|a| a.next_slow_key_deadline());
-        match (tap_hold, slow_key) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
+        // Chords are release-to-fire, so they never contribute a timer deadline.
+        let mut deadline = tap_hold;
+        if let Some(slow_key) = slow_key {
+            deadline = Some(deadline.map_or(slow_key, |d| d.min(slow_key)));
         }
+        deadline
     }
 
     /// Replaces a single action in the keymap at runtime.
@@ -478,6 +561,16 @@ where
     }
 
     fn process_one<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if self.handle_combo_event(event, now_ms, emit) {
+            return;
+        }
+        self.process_one_without_combo(event, now_ms, emit);
+    }
+
+    fn process_one_without_combo<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
     where
         F: FnMut(HidReport) + ?Sized,
     {
@@ -512,10 +605,154 @@ where
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "central dispatch over all Action variants"
-    )]
+    /// Release-to-fire chord recognition.
+    ///
+    /// While combo keys are held we buffer their presses and emit nothing. When
+    /// the last held combo key is released we match the accumulated set against
+    /// the table: an exact match taps the combo's action; otherwise the buffered
+    /// keys are replayed as normal taps. A non-combo key press aborts an
+    /// in-progress chord, replaying its keys as normal presses.
+    ///
+    /// Returns `true` when the event was consumed by chord handling.
+    ///
+    /// ponytail: no timing window, so a fast roll across two chord keys fires
+    /// the chord; put chords on keys you don't roll, or on a dedicated layer.
+    fn handle_combo_event<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F) -> bool
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        if self.combo_config.combos().is_empty() {
+            return false;
+        }
+
+        if event.pressed {
+            if let Some(kc) = self.combo_key_for(event.pos) {
+                let _ = self.combo_pending.push_back(event);
+                if !self.combo_pressed.contains(&kc) {
+                    let _ = self.combo_pressed.push(kc);
+                }
+                if !self.combo_held.contains(&event.pos) {
+                    let _ = self.combo_held.push(event.pos);
+                }
+                return true;
+            }
+            // A non-combo key joined: abandon the chord, replaying held keys.
+            if !self.combo_pressed.is_empty() {
+                self.abort_combo(now_ms, emit);
+            }
+            return false;
+        }
+
+        // Release: only combo keys that are part of the building chord matter.
+        let Some(idx) = self.combo_held.iter().position(|&p| p == event.pos) else {
+            return false;
+        };
+        self.combo_held.swap_remove(idx);
+        if self.combo_held.is_empty() {
+            match self.combo_match() {
+                Some(combo) => {
+                    self.combo_pending.clear();
+                    self.combo_pressed.clear();
+                    // `event.pos` is the last-released chord key — a real
+                    // position to anchor the synthesized tap.
+                    self.tap_action(combo.action, event.pos, now_ms, emit);
+                }
+                None => self.replay_combo_as_taps(now_ms, emit),
+            }
+        }
+        true
+    }
+
+    /// Aborts an in-progress chord because a non-combo key was pressed. The
+    /// chord keys are still physically held, so replay their presses as normal
+    /// presses and let their later releases flow through unchanged.
+    fn abort_combo<F>(&mut self, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        self.combo_pressed.clear();
+        self.combo_held.clear();
+        while let Some(event) = self.combo_pending.pop_front() {
+            self.process_one_without_combo(event, now_ms, emit);
+        }
+    }
+
+    /// No combo matched the released chord: the keys were pressed and released,
+    /// so replay each as a discrete tap in press order.
+    /// ponytail: discrete taps lose the original rollover overlap.
+    fn replay_combo_as_taps<F>(&mut self, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        self.combo_pressed.clear();
+        self.combo_held.clear();
+        while let Some(event) = self.combo_pending.pop_front() {
+            self.process_one_without_combo(event, now_ms, emit);
+            let release = KeyEvent::release(event.pos, now_ms);
+            self.process_one_without_combo(release, now_ms, emit);
+        }
+    }
+
+    fn tap_action<F>(&mut self, action: Action<Ext>, pos: KeyPos, now_ms: u64, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        match action {
+            Action::ModTap { tap: kc, .. } | Action::LayerTap { tap: kc, .. } => {
+                self.press_keycode(kc, emit);
+                self.release_keycode(kc, emit);
+            }
+            Action::TapToggle(layer) => {
+                self.layer_stack.apply(LayerOp::Toggle(layer));
+                self.check_tri_layers();
+            }
+            _ => {
+                let press = KeyEvent::press(pos, now_ms);
+                self.handle_action_press(action, press, now_ms, emit);
+                let release = KeyEvent::release(pos, now_ms);
+                self.handle_action_release(action, release, emit);
+            }
+        }
+    }
+
+    /// The base-layer keycode a position produces, for combo matching.
+    ///
+    /// Combos are defined by keycode, so a press is mapped to the key it types
+    /// on the base layer (layer 0). Mod-tap / layer-tap keys resolve to their
+    /// tap keycode.
+    /// ponytail: base layer only — a combo whose keys live on another layer
+    /// won't match; resolve against the active layer if that's ever needed.
+    fn combo_keycode(&self, pos: KeyPos) -> Option<KeyCode> {
+        match self.layer_stack.get_action(0, pos.flat(COLS)) {
+            Some(Action::Key(kc))
+            | Some(Action::ModTap { tap: kc, .. })
+            | Some(Action::LayerTap { tap: kc, .. }) => Some(kc),
+            _ => None,
+        }
+    }
+
+    /// Returns the keycode at `pos` if it participates in some combo.
+    fn combo_key_for(&self, pos: KeyPos) -> Option<KeyCode> {
+        let kc = self.combo_keycode(pos)?;
+        self.combo_config
+            .combos()
+            .iter()
+            .any(|combo| combo.contains(kc))
+            .then_some(kc)
+    }
+
+    /// Finds a combo whose keycode set exactly equals the accumulated chord.
+    fn combo_match(&self) -> Option<Combo<Ext>> {
+        self.combo_config.combos().iter().copied().find(|combo| {
+            combo.keys.len() == self.combo_pressed.len()
+                && combo
+                    .keys
+                    .iter()
+                    .copied()
+                    .all(|kc| self.combo_pressed.contains(&kc))
+        })
+    }
+
     fn handle_press<F>(&mut self, event: KeyEvent, now_ms: u64, emit: &mut F)
     where
         F: FnMut(HidReport) + ?Sized,
@@ -528,6 +765,22 @@ where
             other => other,
         };
 
+        self.handle_action_press(action, event, now_ms, emit);
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "central dispatch over all Action variants"
+    )]
+    fn handle_action_press<F>(
+        &mut self,
+        action: Action<Ext>,
+        event: KeyEvent,
+        now_ms: u64,
+        emit: &mut F,
+    ) where
+        F: FnMut(HidReport) + ?Sized,
+    {
         match action {
             Action::Key(kc) => {
                 self.press_keycode(kc, emit);
@@ -667,27 +920,34 @@ where
                 }
                 self.handle_gamepad_press(ga, emit);
             }
-            Action::AutocorrectToggle => {
+            Action::AutocorrectToggle =>
+            {
+                #[cfg(feature = "autocorrect")]
                 if let Some(ref mut e) = self.autocorrect {
                     e.set_enabled(!e.enabled());
                 }
             }
-            Action::AutocompleteToggle => {
+            Action::AutocompleteToggle =>
+            {
+                #[cfg(feature = "autocomplete")]
                 if let Some(ref mut e) = self.autocomplete {
                     e.set_enabled(!e.enabled());
                 }
             }
             Action::AutocompleteAccept => {
-                if let Some(ref mut e) = self.autocomplete {
-                    if let Some(codes) = e.accept() {
-                        for &uid in codes.as_slice() {
-                            if let Some(kc) = KeyCode::from_usage_id(uid) {
-                                let _ = self.playback_queue.push_back(kc);
+                #[cfg(feature = "autocomplete")]
+                {
+                    if let Some(ref mut e) = self.autocomplete {
+                        if let Some(codes) = e.accept() {
+                            for &uid in codes.as_slice() {
+                                if let Some(kc) = KeyCode::from_usage_id(uid) {
+                                    let _ = self.playback_queue.push_back(kc);
+                                }
                             }
                         }
                     }
+                    self.drain_playback(emit);
                 }
-                self.drain_playback(emit);
             }
             Action::BounceKeysToggle => {
                 if let Some(ref mut a) = self.accessibility {
@@ -756,6 +1016,13 @@ where
         let action = self.layer_stack.release_action(event.pos, COLS);
         self.layer_stack.clear_cache(event.pos, COLS);
 
+        self.handle_action_release(action, event, emit);
+    }
+
+    fn handle_action_release<F>(&mut self, action: Action<Ext>, event: KeyEvent, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
         match action {
             Action::Key(kc) => {
                 self.release_keycode(kc, emit);
@@ -976,7 +1243,12 @@ where
             }
         }
 
-        if let Some(ref mut engine) = self.autocorrect {
+        #[cfg(feature = "autocorrect")]
+        if self.autocorrect_offload {
+            // Offload mode: hand the keycode to the remote engine via the task
+            // layer instead of searching the trie on this (real-time) path.
+            let _ = self.typed_out.push_back(kc);
+        } else if let Some(ref mut engine) = self.autocorrect {
             if let Some(correction) = engine.process_keycode(kc, 0) {
                 for _ in 0..correction.backspaces {
                     let _ = self.playback_queue.push_back(KeyCode::Backspace);
@@ -990,6 +1262,7 @@ where
             }
         }
 
+        #[cfg(feature = "autocomplete")]
         if let Some(ref mut engine) = self.autocomplete {
             engine.process_keycode(kc);
         }

@@ -16,7 +16,7 @@ use embassy_rp as _;
 use heapless::String;
 use tecla::action::KeyCode;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
-use tecla::devices::steno::steno::StenoEngine;
+use tecla::devices::steno::StenoEngine;
 use tecla::keyboard::KeyboardProcessor;
 use tecla::pipeline::event::{KeyEvent, KeyPos};
 use tecla::pipeline::report::HidReport;

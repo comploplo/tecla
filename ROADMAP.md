@@ -379,6 +379,10 @@ Silent by default — no setup wizard, no accessibility menu, no mode
 switch (Findlater & Wobbrock CHI 2012: silent adaptation outperforms
 explicit adaptation interfaces).
 
+User-facing rules for making adaptation reversible, inspectable, and
+non-hostile live in [`docs/adaptive-ux.md`](docs/adaptive-ux.md). That
+document is the product contract for this research section.
+
 Design principle: each telemetry struct collects one domain's raw
 events. `ProcessorTelemetry` is the only place that synthesizes across
 domains to produce adaptation recommendations. No struct computes
@@ -397,7 +401,7 @@ another's observations.
 - [ ] Fix `AccessibilityTelemetry::reset_deltas` (currently a no-op) to
   zero the delta fields so the adaptation tick sees recent behavior,
   not lifetime totals
-- [ ] Remove doc reference to "medication cycle detection" from
+- [x] Remove doc reference to "medication cycle detection" from
   `accessibility.rs` module doc — not our claim to make
 
 *Step 2 — Telemetry observation extensions:*
@@ -707,7 +711,7 @@ Modality-specific telemetry (feature-gated, each ~50-200 bytes):
   rate, scroll frequency, hover duration before click
 - [ ] **Accessibility** — slow key rejection rate, bounce key rejection
   rate, sticky key usage count, hold time trend over session (fatigue),
-  error rate trend over session (medication cycle detection)
+  error rate trend over session (comfort and consistency drift)
 - [ ] **Split** — per-half press balance, cross-hand vs same-hand bigram
   timing, transport round-trip latency measurement
 - [ ] **Cap touch** — per-pad discharge count distribution, threshold

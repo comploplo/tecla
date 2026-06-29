@@ -218,9 +218,10 @@ just ci         # all of the above — same gates as CI
 ```
 
 `just flash --device <usb-device> --tecla-config <profile>` builds the matching
-board example and flashes it using the configured method. For UF2 targets, the
-device selector should identify the board's live USB device, not the mounted
-boot drive, so the tool can verify the right board before copying the UF2.
+board example and flashes it using the configured method. For UF2 and DFU
+targets, the tool compiles the firmware first, prints the generated artifact
+path, and then waits for a bootloader device so you can put the keyboard into
+boot mode after the build succeeds.
 `just flash --device <usb-device> --qmk-keyboard <keyboard_name>` resolves a
 vendored QMK `keyboard_name` and flashes the matching Tecla-backed profile
 when one exists.
@@ -239,6 +240,19 @@ USB devices, and currently mounted UF2 flash targets.
 Requires: `podman` (or `docker` via `TECLA_CONTAINER_RUNTIME=docker`), `rust-objdump`, `rust-nm`.
 
 Pre-commit hooks run `just fmt-check`, `just lint`, and `just test` automatically.
+
+______________________________________________________________________
+
+## License and publishing notes
+
+Tecla source is dual licensed under `MIT OR Apache-2.0`; see [LICENSE](LICENSE).
+
+The `keyboards/` tree contains vendored QMK-derived compatibility data and is
+licensed separately by its upstream sources. Keep that material separate from
+Tecla source releases unless the release format is intended to include the
+vendored QMK data and its license notices.
+
+For crate and release preflight details, see [docs/publishing.md](docs/publishing.md).
 
 ______________________________________________________________________
 

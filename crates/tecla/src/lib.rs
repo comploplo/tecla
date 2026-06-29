@@ -80,7 +80,9 @@ pub mod devices;
 pub mod accessibility;
 pub mod action;
 pub mod audio;
+#[cfg(feature = "autocomplete")]
 pub mod autocomplete;
+#[cfg(feature = "autocorrect")]
 pub mod autocorrect;
 pub mod haptic;
 pub mod keyboard;
@@ -88,14 +90,6 @@ pub mod rgb;
 
 #[cfg(feature = "embassy")]
 pub mod task;
-
-#[cfg(feature = "hil")]
-pub mod hil;
-
-// Re-export `assert_hil_ok!` at the crate root so `tecla::assert_hil_ok` keeps
-// resolving after the move to the shared `hilt` crate.
-#[cfg(feature = "hil")]
-pub use hilt::assert_hil_ok;
 
 pub mod prelude {
     //! Convenience re-exports — `use tecla::prelude::*` gives you everything a
@@ -106,7 +100,9 @@ pub mod prelude {
         ModifierKey, MouseAction, TriLayerDef,
     };
     pub use crate::audio::{AudioCommand, AudioController, Tone};
+    #[cfg(feature = "autocomplete")]
     pub use crate::autocomplete::AutocompleteEngine;
+    #[cfg(feature = "autocorrect")]
     pub use crate::autocorrect::{AutocorrectEngine, Correction};
     pub use crate::devices::encoder::EncoderMapping;
     pub use crate::devices::keyboard::tapping::{

@@ -2,7 +2,7 @@
 //!
 //! Tracks filter rejection rates, usage patterns, and fatigue indicators
 //! for slow keys, bounce keys, and sticky keys. These metrics drive
-//! adaptive threshold tuning and medication cycle detection.
+//! adaptive threshold tuning without inferring health or ability state.
 
 /// Accessibility telemetry collector.
 #[derive(Default)]
