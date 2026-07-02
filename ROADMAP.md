@@ -76,6 +76,14 @@ ______________________________________________________________________
 - [x] `LeaderRecognizer` — Emacs-style nested trie sequences, per-branch
   timeouts, which-key metadata for display integration
 - [x] `ComboRecognizer` — simultaneous key-set within a configurable window
+  (standalone, currently unused by the processor — see live model below)
+- [x] Live combo (chord) model in `KeyboardProcessor` — no timing window,
+  press-to-fire: the action presses (held and repeating exactly like any
+  other key, including host typematic repeat) the instant the held set
+  matches a combo, releasing on the first member key-up. An intervening
+  non-combo key press before any match aborts and replays the chord as
+  normal keys; after a match it's ordinary rollover. Falls back to
+  replaying buffered taps if the full set releases with no match
 - [x] `TapDanceRecognizer` — counted rapid taps → action per count
 - [x] `StenoRecognizer` — chord until all-release, GeminiPR / TXBOLT wire
   format (dictionary stays on host in Plover)
@@ -268,6 +276,18 @@ ______________________________________________________________________
 Blocked on hardware.
 
 - [x] STM32F4 support — `tecla-stm32f4` board crate, Planck example, builds for thumbv7em-none-eabihf
+- [x] STM32F3 support — `tecla-stm32f3` board crate, ZSA Voyager example, first
+  successful HID enumeration. Bring-up bug: `memory.x` declared 32K RAM
+  (STM32F303CB) after `Cargo.toml` had already been corrected to the real
+  chip (STM32F303CC, 256K flash / 40K RAM, confirmed via the DFU bootloader's
+  own flash report + `stm32-metapac`'s chip data). The under-declared RAM
+  put `PROCESSOR.init_with`'s ~10K stack build right at the edge of what the
+  linker thought was available, hard-faulting `main()` after `usb_device_task`
+  was already spawned — the executor never got back around to poll it, so
+  every `SetAddress` timed out identically on every build, cable, and port.
+  Added a compile-time guard asserting `KeyboardProcessor`'s size against a
+  stack budget so a future regression fails the build instead of hard-faulting
+  silently on hardware
 - [ ] CH32V3 support (`ch32-hal`, ultra-low-cost RISC-V)
 - [x] ESP32-S3 support — `tecla-esp32s3` board crate written, excluded pending upstream esp-hal bug
 - [ ] Shared HAL abstraction layer

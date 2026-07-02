@@ -444,7 +444,7 @@ fn wait_for_uf2_target(selector: Option<&str>) -> PathBuf {
         }
 
         attempts = attempts.saturating_add(1);
-        if attempts % 10 == 0 {
+        if attempts.is_multiple_of(10) {
             eprintln!("still waiting for a UF2 boot device...");
         }
         thread::sleep(Duration::from_millis(500));
@@ -543,7 +543,7 @@ fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) {
         }
 
         attempts = attempts.saturating_add(1);
-        if attempts % 10 == 0 {
+        if attempts.is_multiple_of(10) {
             eprintln!("still waiting for DFU device {vid_pid}...");
         }
         thread::sleep(Duration::from_millis(500));

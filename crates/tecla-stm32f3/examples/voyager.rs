@@ -2,7 +2,8 @@
 //!
 //! Left half scans over STM32 GPIO; the right half scans over an MCP23018 on
 //! I2C1. Mirrors QMK's `keyboards/zsa/voyager`. The keymap lives in the profile
-//! at [`keyboards/tecla/voyager/keymaps/default.rs`].
+//! at [`keyboards/tecla/voyager/keymaps/default/keymap.rs`], with its combos
+//! alongside at [`keyboards/tecla/voyager/keymaps/default/combos.rs`].
 //!
 //! # Wiring (from QMK)
 //!
@@ -77,13 +78,27 @@ const _: () = assert!(
     "voyager keymap KEYS must equal ROWS*COLS"
 );
 
+// Compile-time stack-budget guard. `PROCESSOR.init_with` builds this struct as
+// a stack temporary before moving it into the StaticCell (see the comment on
+// `PROCESSOR` below) — on a chip with only 40K total SRAM, an unnoticed size
+// regression here (e.g. a bigger macro queue or another layer) is exactly the
+// kind of change that silently overflows the stack and hard-faults main()
+// after usb_device_task is already spawned, stranding USB enumeration. This
+// caught a real instance of that bug: fix the size or the budget, don't
+// delete this.
+const _: () = assert!(
+    core::mem::size_of::<KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>>() <= 16 * 1024,
+    "KeyboardProcessor grew past its 16K stack budget on a 40K-RAM chip"
+);
+
 type Bus = BitBangI2c<'static>;
 
 static EVENT_CHANNEL: StaticCell<EventChannel<NoopRawMutex, 16>> = StaticCell::new();
 static REPORT_CHANNEL: StaticCell<ReportChannel<NoopRawMutex, 8>> = StaticCell::new();
 // The processor is ~16 KB; park it in a StaticCell so it lives in .bss exactly
-// once. Passing it by value through the task future makes rustc reserve two
-// copies (param + generator local) — fatal on the F303's 32 KB main SRAM.
+// once. Passing it by value through the task future would make rustc reserve
+// two copies (param + generator local) on this chip's 40 KB SRAM — init_with
+// below constructs it in place instead.
 static PROCESSOR: StaticCell<KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>> = StaticCell::new();
 
 static HID_STATE: StaticCell<State> = StaticCell::new();
@@ -91,16 +106,16 @@ static USB_DEVICE_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONFIG_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_BOS_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
-// Combos as a separate const (not bundled into the keymap tuple): on this 32K
-// chip the processor is already built as a ~10K stack temporary at boot, and an
-// extra LayerStack copy from a tuple return overflows the stack → hard fault.
+// Combos as a separate const (not bundled into the keymap tuple): the
+// processor is already a ~10K stack temporary at boot, and an extra
+// LayerStack copy from a tuple return would add unnecessary stack pressure.
 static VOYAGER_COMBO_CONFIG: ComboConfig = include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../keyboards/tecla/voyager/combos/default.rs"
+    "/../../keyboards/tecla/voyager/keymaps/default/combos.rs"
 ));
 
 /// 72 MHz from an 8 MHz HSE crystal; the USB clock is derived automatically as
-/// PLL/1.5 = 48 MHz. Verify the Voyager's crystal is 8 MHz on bring-up.
+/// PLL/1.5 = 48 MHz.
 fn stm32_config() -> Config {
     use embassy_stm32::rcc::*;
     let mut rcc = embassy_stm32::rcc::Config::default();
@@ -225,11 +240,11 @@ async fn main(spawner: Spawner) {
 
     let keymap = include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/voyager/keymaps/default.rs"
+        "/../../keyboards/tecla/voyager/keymaps/default/keymap.rs"
     ));
-    let processor = PROCESSOR.init(
-        KeyboardProcessor::new(keymap, TapHoldConfig::default()).with_combos(VOYAGER_COMBO_CONFIG),
-    );
+    let processor = PROCESSOR.init_with(|| {
+        KeyboardProcessor::new(keymap, TapHoldConfig::default()).with_combos(VOYAGER_COMBO_CONFIG)
+    });
     let reporter = UsbHidReporter::new(hid_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());

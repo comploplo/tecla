@@ -7,9 +7,11 @@
 //!
 //! Note: the live combo path is the processor's inline state machine, which
 //! treats combos as steno-style *chords* — it accumulates the pressed keys and
-//! fires the matching combo's action on full release (no timing window). The
-//! standalone [`ComboRecognizer`] below keeps the older eager/windowed model
-//! and is currently unused by the processor.
+//! fires the matching combo's action the instant the held set matches (no
+//! timing window), holding it — repeating exactly like any other held key —
+//! until the first member releases. The standalone [`ComboRecognizer`] below
+//! keeps the older eager/windowed model and is currently unused by the
+//! processor.
 
 use crate::action::{Action, KeyCode};
 use crate::pipeline::event::{KeyEvent, KeyPos};
@@ -23,8 +25,10 @@ use crate::pipeline::recognizer::{Recognition, Recognizer};
 /// …) exactly as in the keymap, never raw `(row, col)` coordinates.
 ///
 /// The processor suppresses the individual key presses while a chord is
-/// building. When every member key is held and then fully released, it taps
-/// `action`; otherwise it replays the buffered key events normally.
+/// building. The instant every member key is held, it presses `action` —
+/// held and repeating like any other key — and releases it on the first
+/// member key-up; if the held set never matches before all keys release, the
+/// buffered key events are replayed normally instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Combo<Ext = ()>
 where
@@ -63,8 +67,8 @@ impl Combo<()> {
 
 /// Combo (chord) table.
 ///
-/// Chords are release-to-fire: there is no timing window, so this is just the
-/// set of defined combos.
+/// Chords have no timing window — they resolve the instant the held set
+/// matches — so this is just the set of defined combos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComboConfig<Ext = ()>
 where

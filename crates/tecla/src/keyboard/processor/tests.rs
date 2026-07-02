@@ -251,7 +251,7 @@ fn multiple_keys_pressed_simultaneously_appear_in_report() {
 // ── Combos ────────────────────────────────────────────────────────────────
 
 #[test]
-fn combo_suppresses_source_keys_and_taps_action() {
+fn combo_suppresses_source_keys_and_fires_on_match_then_holds() {
     let mut proc = make_processor(&[
         Action::Key(KeyCode::D),
         Action::Key(KeyCode::F),
@@ -262,28 +262,142 @@ fn combo_suppresses_source_keys_and_taps_action() {
     ])
     .with_combos(df_combo_config());
 
-    // Holding both chord keys emits nothing.
-    let held = collect_reports(|emit| {
+    // Pressing the first chord key alone emits nothing (still building).
+    let building = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
+    });
+    assert!(building.is_empty());
+
+    // Completing the chord fires the action immediately — held, not tapped —
+    // same as pressing any other key.
+    let fired = collect_reports(|emit| {
         proc.process_event(press(pos(0, 1), 10), 10, emit);
     });
-    assert!(held.is_empty());
-
-    // Releasing the first key alone does not complete the chord.
-    let partial = collect_reports(|emit| {
-        proc.process_event(release(pos(0, 0), 20), 20, emit);
-    });
-    assert!(partial.is_empty());
-
-    // Releasing the last held key fires the combo action as a tap.
-    let fired = collect_reports(|emit| {
-        proc.process_event(release(pos(0, 1), 21), 21, emit);
-    });
-    assert_eq!(fired.len(), 2);
+    assert_eq!(fired.len(), 1);
     assert!(keyboard_keycodes(fired[0]).contains(&KeyCode::Backspace.usage_id()));
     assert!(!keyboard_keycodes(fired[0]).contains(&KeyCode::D.usage_id()));
     assert!(!keyboard_keycodes(fired[0]).contains(&KeyCode::F.usage_id()));
+
+    // While both chord keys stay held, the action stays held too — the host's
+    // own typematic repeat takes it from here, exactly like any other key.
+    let while_held = collect_reports(|_emit| {});
+    assert!(while_held.is_empty());
+
+    // Releasing the first chord key releases the held action — like letting
+    // go of any other held key.
+    let released = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 20), 20, emit);
+    });
+    assert_eq!(released.len(), 1);
+    assert_eq!(keyboard_keycodes(released[0]), [0; 6]);
+
+    // Releasing the remaining chord key is drained silently — already resolved.
+    let drained = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 1), 21), 21, emit);
+    });
+    assert!(drained.is_empty());
+}
+
+#[test]
+fn combo_rollover_with_unrelated_key_after_match_is_independent() {
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::Key(KeyCode::C),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(df_combo_config());
+
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {}); // fires + holds Backspace
+
+    // A non-combo key pressed while the combo is already held is ordinary
+    // rollover, not an abort — the combo keeps repeating alongside it.
+    let rollover = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 2), 20), 20, emit);
+    });
+    assert_eq!(rollover.len(), 1);
+    let codes = keyboard_keycodes(rollover[0]);
+    assert!(codes.contains(&KeyCode::Backspace.usage_id()));
+    assert!(codes.contains(&KeyCode::C.usage_id()));
+}
+
+#[test]
+fn combo_modtap_action_fires_instantly_not_held() {
+    static KEYS: &[KeyCode] = &[KeyCode::D, KeyCode::F];
+    static COMBOS: &[Combo] = &[Combo::new(
+        KEYS,
+        Action::ModTap {
+            hold: ModifierKey::LSHIFT,
+            tap: KeyCode::A,
+        },
+    )];
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+    .with_combos(ComboConfig::new(COMBOS));
+
+    // Completing the chord taps `A` instantly — ModTap isn't holdable, it's
+    // its own tap/hold decision, so it can't be driven by a synthetic press
+    // with no matching observe loop.
+    let fired = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(press(pos(0, 1), 10), 10, emit);
+    });
+    assert_eq!(fired.len(), 2);
+    assert!(keyboard_keycodes(fired[0]).contains(&KeyCode::A.usage_id()));
     assert_eq!(keyboard_keycodes(fired[1]), [0; 6]);
+
+    // The remaining releases are drained, not replayed or refired.
+    let drained = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 20), 20, emit);
+        proc.process_event(release(pos(0, 1), 21), 21, emit);
+    });
+    assert!(drained.is_empty());
+}
+
+#[test]
+fn combo_taptoggle_action_fires_instantly() {
+    static KEYS: &[KeyCode] = &[KeyCode::D, KeyCode::F];
+    static COMBOS: &[Combo] = &[Combo::new(KEYS, Action::TapToggle(1))];
+    let base = [
+        Action::Key(KeyCode::D),
+        Action::Key(KeyCode::F),
+        Action::Key(KeyCode::C),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ];
+    let overlay = [
+        Action::Transparent,
+        Action::Transparent,
+        Action::Key(KeyCode::B),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ];
+    let mut proc = make_processor_two_layers(&base, &overlay).with_combos(ComboConfig::new(COMBOS));
+
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
+
+    // Releases are drained, not replayed — the toggle already fired once.
+    proc.process_event(release(pos(0, 0), 20), 20, &mut |_| {});
+    proc.process_event(release(pos(0, 1), 21), 21, &mut |_| {});
+
+    // Layer 1 is toggled on: the shared position now resolves to the
+    // overlay's keycode instead of the base layer's.
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 2), 30), 30, emit);
+    });
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::B.usage_id()));
 }
 
 #[test]
@@ -2449,6 +2563,7 @@ fn keyboard_mods_returns_zero_for_gamepad_report() {
 }
 
 #[test]
+#[cfg(feature = "autocorrect")]
 fn with_autocorrect_attaches_engine() {
     let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
     assert!(proc.autocorrect.is_none());
@@ -2457,6 +2572,7 @@ fn with_autocorrect_attaches_engine() {
 }
 
 #[test]
+#[cfg(feature = "autocorrect")]
 fn autocorrect_offload_buffers_typed_keycodes() {
     // In offload mode the processor must NOT run the engine inline; it buffers
     // exactly the keycodes the inline engine would have consumed, in order.
@@ -2523,6 +2639,7 @@ fn autocorrect_offload_buffers_typed_keycodes() {
 }
 
 #[test]
+#[cfg(feature = "autocomplete")]
 fn with_autocomplete_attaches_engine() {
     let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
     assert!(proc.autocomplete.is_none());

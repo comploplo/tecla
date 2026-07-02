@@ -25,7 +25,7 @@ embassy-executor = { workspace = true, features = ["platform-cortex-m", "executo
 # unifies features when the F3 and F4 board crates are built together, so build
 # this crate alone:
 #   cargo build -p tecla-stm32f3 --example voyager --target thumbv7em-none-eabihf
-embassy-stm32 = { version = "0.6", features = ["stm32f303cb", "time-driver-any", "exti", "unstable-pac"] }
+embassy-stm32 = { version = "0.6", features = ["stm32f303cc", "time-driver-any", "exti", "unstable-pac"] }
 embassy-usb      = { workspace = true }
 embassy-time     = { workspace = true }
 embassy-sync     = { workspace = true }

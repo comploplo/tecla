@@ -6,7 +6,7 @@ export LLVM_PROFDATA := _llvm_bin + "/llvm-profdata"
 default: test
 
 # Host-only crates — exclude embedded board crates that require cross-compilation
-_host := "--workspace --exclude tecla-rp2040 --exclude tecla-nrf52840 --exclude tecla-stm32f4"
+_host := "--workspace --exclude tecla-rp2040 --exclude tecla-nrf52840 --exclude tecla-stm32f4 --exclude tecla-stm32f3"
 
 # Run tests across all host-compilable workspace crates
 test:
@@ -17,9 +17,13 @@ test:
 hack:
     cargo hack {{_host}} --feature-powerset nextest run
 
-# Clippy across all crates and feature combinations
-# Run this before implementing any module to verify clean baseline
+# Clippy across all crates with default features — fast, runs on every commit
 lint:
+    cargo clippy {{_host}} --all-targets
+
+# Clippy across every feature combination — slow (1000+ builds), CI-only.
+# Run this before implementing any module to verify a clean baseline.
+lint-full:
     cargo hack {{_host}} --feature-powerset clippy --all-targets
 
 # Format all crates
@@ -91,7 +95,7 @@ outdated:
 # Run everything — same gates as CI
 ci:
     just fmt-check
-    just lint
+    just lint-full
     just hack
     just outdated
     just cov-core

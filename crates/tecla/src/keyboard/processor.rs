@@ -162,13 +162,17 @@ pub struct KeyboardProcessor<
     active_tap_hold: Option<TapHoldRecognizer>,
     active_holds: Vec<ActiveHold, 8>,
     combo_config: ComboConfig<Ext>,
-    // Chords are release-to-fire: buffer the presses (to replay on no-match),
-    // accumulate the union of pressed combo keys, and track which are still
-    // held so we know when the chord is complete (all released).
+    // Chords fire as soon as the held set exactly matches a combo: buffer the
+    // presses (to replay on no-match), accumulate the union of pressed combo
+    // keys, and track which are still held so we know when the chord resolves
+    // (matched, or fully released with no match).
     // ponytail: cap 8 keys per chord; bump if a board defines wider chords.
     combo_pending: Deque<KeyEvent, 8>,
     combo_pressed: Vec<KeyCode, 8>,
     combo_held: Vec<KeyPos, 8>,
+    // Set when the held chord matches a combo: the action is pressed (held,
+    // repeating exactly like any other key) until the first member releases.
+    combo_active: Option<(Action<Ext>, KeyPos)>,
     pressed_keys: Vec<u8, 16>,
     pending: Deque<KeyEvent, 32>,
     rollover_mode: RolloverMode,
@@ -224,6 +228,7 @@ where
             combo_pending: Deque::new(),
             combo_pressed: Vec::new(),
             combo_held: Vec::new(),
+            combo_active: None,
             pressed_keys: Vec::new(),
             pending: Deque::new(),
             rollover_mode: RolloverMode::Kro6,
@@ -528,7 +533,8 @@ where
             .accessibility
             .as_ref()
             .and_then(|a| a.next_slow_key_deadline());
-        // Chords are release-to-fire, so they never contribute a timer deadline.
+        // Chords have no timing window — they resolve on the next press or
+        // release event, never a timer — so they never contribute a deadline.
         let mut deadline = tap_hold;
         if let Some(slow_key) = slow_key {
             deadline = Some(deadline.map_or(slow_key, |d| d.min(slow_key)));
@@ -605,13 +611,16 @@ where
         }
     }
 
-    /// Release-to-fire chord recognition.
+    /// Press-to-fire, hold-to-repeat chord recognition.
     ///
-    /// While combo keys are held we buffer their presses and emit nothing. When
-    /// the last held combo key is released we match the accumulated set against
-    /// the table: an exact match taps the combo's action; otherwise the buffered
-    /// keys are replayed as normal taps. A non-combo key press aborts an
-    /// in-progress chord, replaying its keys as normal presses.
+    /// While combo keys are held we buffer their presses. As soon as the
+    /// accumulated set exactly matches a combo, its action is pressed — held
+    /// and repeating exactly like any other key — and released on the first
+    /// member key-up, same as letting go of a normal held key. If the held
+    /// set is fully released without ever matching, the buffered presses are
+    /// replayed as normal taps. A non-combo key pressed before any match
+    /// aborts the in-progress chord, replaying its keys as normal presses; one
+    /// pressed after a match is independent rollover, not an abort.
     ///
     /// Returns `true` when the event was consumed by chord handling.
     ///
@@ -634,31 +643,69 @@ where
                 if !self.combo_held.contains(&event.pos) {
                     let _ = self.combo_held.push(event.pos);
                 }
+                if self.combo_active.is_none() {
+                    if let Some(combo) = self.combo_match() {
+                        self.combo_pending.clear();
+                        self.combo_pressed.clear();
+                        match combo.action {
+                            // Tap-hold and toggle actions aren't holdable —
+                            // they're their own tap/hold decision or a single
+                            // instantaneous flip, so fire them instantly, same
+                            // as a directly-mapped key would.
+                            Action::ModTap { tap: kc, .. } | Action::LayerTap { tap: kc, .. } => {
+                                self.press_keycode(kc, emit);
+                                self.release_keycode(kc, emit);
+                            }
+                            Action::TapToggle(layer) => {
+                                self.layer_stack.apply(LayerOp::Toggle(layer));
+                                self.check_tri_layers();
+                            }
+                            _ => {
+                                // `event.pos` is the key that completed the
+                                // match — a real position to anchor the held
+                                // action, released on the first key-up below.
+                                self.handle_action_press(
+                                    combo.action,
+                                    KeyEvent::press(event.pos, now_ms),
+                                    now_ms,
+                                    emit,
+                                );
+                                self.combo_active = Some((combo.action, event.pos));
+                            }
+                        }
+                    }
+                }
                 return true;
             }
-            // A non-combo key joined: abandon the chord, replaying held keys.
-            if !self.combo_pressed.is_empty() {
+            // A non-combo key joined before any match: abandon the chord,
+            // replaying held keys. After a match, this is just rollover.
+            if self.combo_active.is_none() && !self.combo_pressed.is_empty() {
                 self.abort_combo(now_ms, emit);
             }
             return false;
         }
 
-        // Release: only combo keys that are part of the building chord matter.
+        // Release: only combo keys that are part of the building/held chord matter.
         let Some(idx) = self.combo_held.iter().position(|&p| p == event.pos) else {
             return false;
         };
         self.combo_held.swap_remove(idx);
+
+        if let Some((action, pos)) = self.combo_active.take() {
+            // Already matched and held: release on the first key-up, exactly
+            // like releasing any other held key.
+            self.handle_action_release(action, KeyEvent::release(pos, now_ms), emit);
+            return true;
+        }
+
+        if self.combo_pressed.is_empty() {
+            // Already resolved (aborted or replayed above) — the remaining
+            // physical releases are just drained silently.
+            return true;
+        }
+
         if self.combo_held.is_empty() {
-            match self.combo_match() {
-                Some(combo) => {
-                    self.combo_pending.clear();
-                    self.combo_pressed.clear();
-                    // `event.pos` is the last-released chord key — a real
-                    // position to anchor the synthesized tap.
-                    self.tap_action(combo.action, event.pos, now_ms, emit);
-                }
-                None => self.replay_combo_as_taps(now_ms, emit),
-            }
+            self.replay_combo_as_taps(now_ms, emit);
         }
         true
     }
@@ -690,28 +737,6 @@ where
             self.process_one_without_combo(event, now_ms, emit);
             let release = KeyEvent::release(event.pos, now_ms);
             self.process_one_without_combo(release, now_ms, emit);
-        }
-    }
-
-    fn tap_action<F>(&mut self, action: Action<Ext>, pos: KeyPos, now_ms: u64, emit: &mut F)
-    where
-        F: FnMut(HidReport) + ?Sized,
-    {
-        match action {
-            Action::ModTap { tap: kc, .. } | Action::LayerTap { tap: kc, .. } => {
-                self.press_keycode(kc, emit);
-                self.release_keycode(kc, emit);
-            }
-            Action::TapToggle(layer) => {
-                self.layer_stack.apply(LayerOp::Toggle(layer));
-                self.check_tri_layers();
-            }
-            _ => {
-                let press = KeyEvent::press(pos, now_ms);
-                self.handle_action_press(action, press, now_ms, emit);
-                let release = KeyEvent::release(pos, now_ms);
-                self.handle_action_release(action, release, emit);
-            }
         }
     }
 
