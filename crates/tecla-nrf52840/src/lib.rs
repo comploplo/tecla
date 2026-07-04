@@ -28,6 +28,7 @@
 pub mod power;
 pub mod reporter;
 pub mod scanner;
+pub mod telemetry;
 
 #[cfg(feature = "ble")]
 #[allow(
@@ -42,6 +43,7 @@ pub mod battery;
 pub use power::Nrf52840PowerManager;
 pub use reporter::UsbHidReporter;
 pub use scanner::{DirectPinScanner, GpioMatrixScanner};
+pub use telemetry::CdcTelemetryWriter;
 
 #[cfg(feature = "ble")]
 pub use ble_reporter::run_ble_peripheral;

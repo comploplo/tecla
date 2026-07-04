@@ -34,8 +34,10 @@
 
 pub mod reporter;
 pub mod scanner;
+pub mod telemetry;
 
 pub use reporter::UsbHidReporter;
 pub use scanner::{DirectPinScanner, GpioMatrixScanner};
+pub use telemetry::CdcTelemetryWriter;
 
 pub use tecla::report::KEYBOARD_REPORT_DESCRIPTOR;

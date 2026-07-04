@@ -95,6 +95,8 @@ tree-sitter-c = "0.24"
 similar-asserts = "1"
 trybuild        = { version = "1", features = ["diff"] }
 insta           = { version = "1", features = ["glob"] }
+proptest        = "1"
+criterion       = "0.5"
 
 [profile.release]
 debug         = 2

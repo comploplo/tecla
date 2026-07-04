@@ -312,8 +312,17 @@ impl<const BUF: usize> Recognizer for TapHoldRecognizer<BUF> {
             return Recognition::Pending;
         }
 
+        // Whenever an incoming event triggers a *hold* resolution, it must be
+        // buffered first so the caller replays it after applying the hold —
+        // dropping it desyncs pressed/released bookkeeping (e.g. a release
+        // that lands exactly at term expiry would otherwise vanish, leaving
+        // its keycode stuck asserted). Only the tap key's own pre-term
+        // release is consumed without replay: the tap decision itself emits
+        // that press/release pair.
+
         // Tapping term expired — resolve as hold.
         if now_ms.wrapping_sub(press_ms) >= self.config.tapping_term_ms {
+            self.waiting.push_back(event).ok();
             return self.resolve_hold();
         }
 
@@ -325,12 +334,14 @@ impl<const BUF: usize> Recognizer for TapHoldRecognizer<BUF> {
         // Another key event arrived during the tapping window.
         match self.config.mode {
             TapHoldMode::HoldOnOtherKeyPress if event.pressed => {
+                self.waiting.push_back(event).ok();
                 return self.resolve_hold();
             }
             TapHoldMode::PermissiveHold => {
                 if event.pressed {
                     self.saw_other_press = true;
                 } else if self.saw_other_press {
+                    self.waiting.push_back(event).ok();
                     return self.resolve_hold();
                 }
             }

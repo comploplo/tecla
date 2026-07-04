@@ -484,7 +484,7 @@ fn noop_key_emits_no_report() {
 }
 
 #[test]
-fn duplicate_key_press_does_not_duplicate_keycode_in_report() {
+fn duplicate_key_press_is_ignored() {
     let mut proc = make_processor(&[
         Action::Key(KeyCode::A),
         Action::NoOp,
@@ -494,12 +494,16 @@ fn duplicate_key_press_does_not_duplicate_keycode_in_report() {
         Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    // A second press with no intervening release is debounce noise: no
+    // report at all, and the key stays held and releasable.
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 1), 1, emit);
     });
-    let kcs = keyboard_keycodes(*reports.first().unwrap());
-    let count = kcs.iter().filter(|&&k| k == KeyCode::A.usage_id()).count();
-    assert_eq!(count, 1);
+    assert!(reports.is_empty());
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 2), 2, emit);
+    });
+    assert!(!keyboard_keycodes(*reports.last().unwrap()).contains(&KeyCode::A.usage_id()));
 }
 
 // ── Modifier keys ─────────────────────────────────────────────────────────

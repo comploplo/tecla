@@ -64,3 +64,15 @@ sequential-storage     = { workspace = true, optional = true }
 similar-asserts = { workspace = true }
 serde_json      = { workspace = true }
 tecla-config    = { version = "0.1.0", path = "../tecla-config" }
+proptest        = { workspace = true }
+criterion       = { workspace = true }
+
+[[bench]]
+name = "dafsa_lookup"
+harness = false
+required-features = ["testing"]
+
+[[bench]]
+name = "process_event"
+harness = false
+required-features = ["testing"]

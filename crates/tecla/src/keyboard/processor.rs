@@ -835,6 +835,14 @@ where
     where
         F: FnMut(HidReport) + ?Sized,
     {
+        // A press for a position that is already down (has a live press cache
+        // entry) is debounce noise a well-formed scanner never produces.
+        // Re-resolving it would overwrite the cached press-time action — if a
+        // layer changed in between, the originally pressed keycode could then
+        // never be released. Ignore it.
+        if self.layer_stack.has_cached_press(event.pos, COLS) {
+            return;
+        }
         self.layer_stack.cache_press(event.pos, COLS);
         let resolved = self.layer_stack.resolve(event.pos, COLS);
 
@@ -1260,6 +1268,11 @@ where
         match decision {
             TapHoldDecision::Tap(kc) => {
                 self.last_tap_hold_tap = Some((rec.tap_pos(), now_ms));
+                // The recognizer consumed the key's own release, so
+                // handle_release never runs for this position — clear its
+                // press cache here or the next press would be ignored as a
+                // duplicate.
+                self.layer_stack.clear_cache(rec.tap_pos(), COLS);
                 self.press_keycode(kc, emit);
                 rec.drain_pending(|e| {
                     let _ = self.pending.push_back(e);
@@ -1280,6 +1293,9 @@ where
                 });
             }
             TapHoldDecision::TapToggleLayer(n) => {
+                // Same as Tap: the recognizer consumed the release, so clear
+                // the press cache it would have cleared.
+                self.layer_stack.clear_cache(rec.tap_pos(), COLS);
                 self.layer_stack.apply(LayerOp::Toggle(n));
                 self.check_tri_layers();
                 rec.drain_pending(|e| {

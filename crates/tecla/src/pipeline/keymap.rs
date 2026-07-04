@@ -202,6 +202,14 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
             .unwrap_or(Action::NoOp)
     }
 
+    /// Returns `true` if `pos` has a press cached (pressed, not yet released).
+    #[must_use]
+    pub fn has_cached_press(&self, pos: KeyPos, cols: usize) -> bool {
+        self.press_cache
+            .get(pos.flat(cols))
+            .is_some_and(|&c| c != NO_CACHE)
+    }
+
     /// Clears the press cache entry for `pos`.
     ///
     /// Call this after processing a key release.
