@@ -1,13 +1,12 @@
-[target.thumbv7em-none-eabihf]
+# Linker rustflags for this target come from the workspace root
+# .cargo/config.toml — don't repeat them here: cargo *joins* rustflags arrays
+# from nested configs, and a duplicated -Tlink.x fails the link with
+# "region 'FLASH' already defined".
+#
 # The Voyager flashes over its ZSA DFU bootloader, not SWD. Build the ELF, then:
 #   arm-none-eabi-objcopy -O binary <elf> voyager.bin
 #   dfu-util -a 0 -d 3297:0791 -s 0x08002000:leave -D voyager.bin
 # (put the board in bootloader first — hold the small reset button on the back.)
-rustflags = [
-    "-C", "link-arg=--nmagic",
-    "-C", "link-arg=-Tlink.x",
-    "-C", "link-arg=-Tdefmt.x",
-]
 
 [build]
 target = "thumbv7em-none-eabihf"

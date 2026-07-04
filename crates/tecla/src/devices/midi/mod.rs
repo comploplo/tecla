@@ -36,6 +36,22 @@ pub fn midi_cc(channel: u8, controller: u8, value: u8) -> MidiEvent {
     }
 }
 
+/// Creates a MIDI polyphonic key pressure (per-note aftertouch) event.
+#[must_use]
+pub fn midi_poly_pressure(channel: u8, note: u8, pressure: u8) -> MidiEvent {
+    MidiEvent::PolyPressure {
+        channel,
+        note,
+        pressure,
+    }
+}
+
+/// Creates a MIDI channel pressure (aftertouch) event.
+#[must_use]
+pub fn midi_channel_pressure(channel: u8, pressure: u8) -> MidiEvent {
+    MidiEvent::ChannelPressure { channel, pressure }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +90,31 @@ mod tests {
                 channel: 0,
                 controller: 7,
                 value: 100
+            }
+        );
+    }
+
+    #[test]
+    fn poly_pressure_creates_correct_event() {
+        let e = midi_poly_pressure(0, 60, 100);
+        assert_eq!(
+            e,
+            MidiEvent::PolyPressure {
+                channel: 0,
+                note: 60,
+                pressure: 100
+            }
+        );
+    }
+
+    #[test]
+    fn channel_pressure_creates_correct_event() {
+        let e = midi_channel_pressure(1, 90);
+        assert_eq!(
+            e,
+            MidiEvent::ChannelPressure {
+                channel: 1,
+                pressure: 90
             }
         );
     }

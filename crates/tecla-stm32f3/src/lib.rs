@@ -21,9 +21,12 @@
 
 pub mod bitbang_i2c;
 pub mod bootloader;
+pub mod is31fl3731;
 pub mod mcp23018;
 pub mod reporter;
 pub mod scanner;
+pub mod shared_i2c;
+pub mod voyager_leds;
 
 pub use reporter::UsbHidReporter;
 pub use scanner::VoyagerScanner;

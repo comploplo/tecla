@@ -29,8 +29,8 @@ use heapless::{Deque, Vec};
 
 use crate::accessibility::{AccessibilityConfig, AccessibilityState, SlowKeyResult};
 use crate::action::{
-    Action, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction,
-    TriLayerDef,
+    Action, DksKeys, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction, ModifierKey,
+    MouseAction, TriLayerDef,
 };
 #[cfg(feature = "autocomplete")]
 use crate::autocomplete::AutocompleteEngine;
@@ -39,6 +39,7 @@ use crate::autocorrect::AutocorrectEngine;
 use crate::devices::gamepad::GamepadState;
 use crate::devices::keyboard::combo::{Combo, ComboConfig};
 use crate::devices::keyboard::tapping::{TapHoldConfig, TapHoldDecision, TapHoldRecognizer};
+use crate::matrix::TriggerPhase;
 use crate::pipeline::event::{KeyEvent, KeyPos};
 use crate::pipeline::keymap::LayerStack;
 use crate::pipeline::modifier::ModifierState;
@@ -173,6 +174,14 @@ pub struct KeyboardProcessor<
     // Set when the held chord matches a combo: the action is pressed (held,
     // repeating exactly like any other key) until the first member releases.
     combo_active: Option<(Action<Ext>, KeyPos)>,
+    // Tracks which keycode is currently "held" for each physically-active DKS
+    // key, so process_dks_phase and handle_action_release know what to
+    // release before pressing the next phase's keycode. Bounded to 8
+    // simultaneously-active DKS keys (matches other small rollover caps in
+    // this struct); a 9th DKS key held at the same time is not pressed at
+    // all (see handle_action_press's Dks arm) rather than being pressed
+    // untracked, which would make it unreleasable.
+    dks_active: Vec<(KeyPos, DksKeys, KeyCode), 8>,
     pressed_keys: Vec<u8, 16>,
     pending: Deque<KeyEvent, 32>,
     rollover_mode: RolloverMode,
@@ -192,6 +201,7 @@ pub struct KeyboardProcessor<
     last_any_press_ms: u64,
     last_tap_hold_tap: Option<(KeyPos, u64)>,
     pending_ble: Option<crate::transport::ble::BleCommand>,
+    pending_rgb: Option<crate::rgb::RgbCommand>,
     #[cfg(feature = "autocorrect")]
     autocorrect: Option<AutocorrectEngine>,
     /// When set, typed keycodes are queued in `typed_out` for a remote engine
@@ -229,6 +239,7 @@ where
             combo_pressed: Vec::new(),
             combo_held: Vec::new(),
             combo_active: None,
+            dks_active: Vec::new(),
             pressed_keys: Vec::new(),
             pending: Deque::new(),
             rollover_mode: RolloverMode::Kro6,
@@ -248,6 +259,7 @@ where
             last_any_press_ms: 0,
             last_tap_hold_tap: None,
             pending_ble: None,
+            pending_rgb: None,
             #[cfg(feature = "autocorrect")]
             autocorrect: None,
             #[cfg(feature = "autocorrect")]
@@ -397,6 +409,12 @@ where
         self.pending_ble.take()
     }
 
+    /// Returns and clears the pending RGB command, if any.
+    #[must_use]
+    pub fn pending_rgb_command(&mut self) -> Option<crate::rgb::RgbCommand> {
+        self.pending_rgb.take()
+    }
+
     /// Returns the default layer bitmask.
     #[must_use]
     pub fn default_state(&self) -> u32 {
@@ -518,6 +536,41 @@ where
             }
         }
         self.drain_pending(now_ms, emit);
+    }
+
+    /// Advances a Dynamic Keystroke ([`Action::Dks`]) key through its
+    /// bottom-out or release-from-bottom phase.
+    ///
+    /// Call this from an analog board task whenever
+    /// [`crate::matrix::RapidTrigger::process`] yields a
+    /// [`TriggerPhase::BottomOut`] or [`TriggerPhase::ReleaseFromBottom`]
+    /// transition for a key position. Ordinary [`TriggerPhase::Press`] /
+    /// [`TriggerPhase::Release`] transitions should instead go through the
+    /// normal [`process_event`](Self::process_event) as a regular
+    /// [`KeyEvent`].
+    ///
+    /// A no-op if the key at `pos` isn't currently an active [`Action::Dks`]
+    /// key, or if `phase` is [`TriggerPhase::Press`] or
+    /// [`TriggerPhase::Release`].
+    pub fn process_dks_phase<F>(&mut self, pos: KeyPos, phase: TriggerPhase, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        let Some(idx) = self.dks_active.iter().position(|(p, _, _)| *p == pos) else {
+            return;
+        };
+        let (_, dks, held) = self.dks_active[idx];
+        let new_kc = match phase {
+            TriggerPhase::BottomOut => dks.bottom_out,
+            TriggerPhase::ReleaseFromBottom => dks.release_from_bottom,
+            TriggerPhase::Press | TriggerPhase::Release => return,
+        };
+        if new_kc == held {
+            return;
+        }
+        self.release_keycode(held, emit);
+        self.press_keycode(new_kc, emit);
+        self.dks_active[idx].2 = new_kc;
     }
 
     /// Returns the next timer deadline the caller must wake at.
@@ -810,6 +863,16 @@ where
             Action::Key(kc) => {
                 self.press_keycode(kc, emit);
             }
+            Action::Dks(dks) => {
+                // Track before pressing: if `dks_active` is already full (8
+                // concurrent DKS keys), don't press a keycode we have no
+                // slot to release later — that would leave it stuck asserted
+                // forever, since `handle_action_release`'s Dks arm only
+                // releases keys it finds in `dks_active`.
+                if self.dks_active.push((event.pos, dks, dks.press)).is_ok() {
+                    self.press_keycode(dks.press, emit);
+                }
+            }
             Action::Modifier(m) => {
                 let sticky = self
                     .accessibility
@@ -930,6 +993,7 @@ where
                         MidiAction::NoteOn { velocity, .. } => t.midi.record_note_on(velocity),
                         MidiAction::NoteOff { .. } => t.midi.record_note_off(),
                         MidiAction::Cc { .. } => t.midi.record_cc(),
+                        MidiAction::PolyPressure { .. } | MidiAction::ChannelPressure { .. } => {}
                     }
                 }
                 Self::emit_midi_press(ma, emit);
@@ -1009,6 +1073,9 @@ where
             Action::BleHostSwitch(n) => {
                 self.pending_ble = Some(crate::transport::ble::BleCommand::SwitchHost(n));
             }
+            Action::Rgb(cmd) => {
+                self.pending_rgb = Some(cmd);
+            }
             Action::Steno(bit) => {
                 self.steno_chord |= 1u64 << bit.min(63);
                 self.steno_held_count = self.steno_held_count.saturating_add(1);
@@ -1016,7 +1083,6 @@ where
             Action::Audio(_)
             | Action::Haptic(_)
             | Action::OutputSelect(_)
-            | Action::Rgb(_)
             | Action::Sleep
             | Action::Transparent
             | Action::NoOp
@@ -1051,6 +1117,13 @@ where
         match action {
             Action::Key(kc) => {
                 self.release_keycode(kc, emit);
+            }
+            Action::Dks(_) => {
+                if let Some(idx) = self.dks_active.iter().position(|(p, _, _)| *p == event.pos) {
+                    let (_, _, held) = self.dks_active[idx];
+                    self.release_keycode(held, emit);
+                    self.dks_active.swap_remove(idx);
+                }
             }
             Action::Modifier(m) => {
                 self.modifier_state.release(m);
@@ -1292,9 +1365,13 @@ where
             engine.process_keycode(kc);
         }
 
-        let uid = kc.usage_id();
-        if uid != 0 && !self.pressed_keys.contains(&uid) {
-            let _ = self.pressed_keys.push(uid);
+        if let Some(m) = kc.as_modifier() {
+            self.modifier_state.press(m);
+        } else {
+            let uid = kc.usage_id();
+            if uid != 0 && !self.pressed_keys.contains(&uid) {
+                let _ = self.pressed_keys.push(uid);
+            }
         }
         self.emit_keyboard(emit);
         self.modifier_state.consume_oneshot();
@@ -1308,9 +1385,13 @@ where
     where
         F: FnMut(HidReport) + ?Sized,
     {
-        let uid = kc.usage_id();
-        if let Some(idx) = self.pressed_keys.iter().position(|&k| k == uid) {
-            self.pressed_keys.swap_remove(idx);
+        if let Some(m) = kc.as_modifier() {
+            self.modifier_state.release(m);
+        } else {
+            let uid = kc.usage_id();
+            if let Some(idx) = self.pressed_keys.iter().position(|&k| k == uid) {
+                self.pressed_keys.swap_remove(idx);
+            }
         }
         self.modifier_state.clear_weak();
         self.emit_keyboard(emit);
@@ -1440,6 +1521,18 @@ where
                 controller,
                 value,
             },
+            MidiAction::PolyPressure {
+                channel,
+                note,
+                pressure,
+            } => MidiEvent::PolyPressure {
+                channel,
+                note,
+                pressure,
+            },
+            MidiAction::ChannelPressure { channel, pressure } => {
+                MidiEvent::ChannelPressure { channel, pressure }
+            }
         };
         emit(HidReport::Midi(event));
     }

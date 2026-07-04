@@ -10,5 +10,6 @@ mod types;
 pub use consumer::ConsumerCode;
 pub use keycode::KeyCode;
 pub use types::{
-    Action, GamepadAction, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction, TriLayerDef,
+    Action, DksKeys, GamepadAction, KeyOverride, LayerOp, MidiAction, ModifierKey, MouseAction,
+    TriLayerDef,
 };

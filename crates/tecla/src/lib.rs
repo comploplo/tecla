@@ -96,7 +96,7 @@ pub mod prelude {
     //! board crate needs.
 
     pub use crate::action::{
-        Action, ConsumerCode, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction,
+        Action, ConsumerCode, DksKeys, GamepadAction, KeyCode, KeyOverride, LayerOp, MidiAction,
         ModifierKey, MouseAction, TriLayerDef,
     };
     pub use crate::audio::{AudioCommand, AudioController, Tone};
@@ -124,7 +124,7 @@ pub mod prelude {
     pub use crate::rgb::{Animation, Hsv, Rgb, RgbCommand, RgbController};
     pub use crate::transport::ble::{BleHostManager, BondInfo};
 
-    pub use crate::matrix::split::{SplitConfig, SplitRole};
+    pub use crate::matrix::split::{SplitConfig, TileId};
     pub use crate::transport::SplitTransport;
 
     #[cfg(feature = "embassy")]

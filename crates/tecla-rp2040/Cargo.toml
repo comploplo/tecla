@@ -54,3 +54,23 @@ required-features = ["steno-dictionary"]
 [[example]]
 name = "asterisk_v1_4"
 required-features = ["steno-dictionary"]
+
+[[example]]
+name = "hil_minimal"
+required-features = ["hil"]
+
+[[example]]
+name = "hil_keyboard"
+required-features = ["hil"]
+
+[[example]]
+name = "hil_matrix_test"
+required-features = ["hil"]
+
+[[example]]
+name = "hil_steno_stitch"
+required-features = ["hil"]
+
+[[example]]
+name = "hil_steno_uni_v4"
+required-features = ["hil"]

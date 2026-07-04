@@ -5,7 +5,7 @@ keymap! {
            NOOP,               ESC,         N1,          N2,          N3,          N4,          N5,
            NOOP,               CAPS,        Q,           W,           E,           R,           T,
            NOOP,               MT!(LCTL, BSPC), A,       S,           D,           F,           G,
-           NOOP,               LSFT,        MT!(LALT, Z), X,          C,           V,           NOOP,
+           NOOP,               MT!(LSFT, DEL), MT!(LALT, Z), X,       C,           V,           NOOP,
            NOOP,               NOOP,        NOOP,        NOOP,        B,           NOOP,        NOOP,
            LT!(Nav, ENT),      MT!(LGUI, TAB), NOOP,     NOOP,        NOOP,        NOOP,        NOOP,
 
@@ -40,7 +40,7 @@ keymap! {
     layer!(Media,
         // Left hand: outer -> inner.
         // spacer              outer        pinky        ring         middle       index        inner
-           NOOP,               NOOP,        NOOP,        NOOP,        NOOP,        NOOP,        NOOP,
+           NOOP,               RGB_NEXT,    NOOP,        NOOP,        NOOP,        NOOP,        NOOP,
            NOOP,               TRNS,        TRNS,        NOOP,        NOOP,        NOOP,        TRNS,
            NOOP,               TRNS,        NOOP,        NOOP,        NOOP,        NOOP,        TRNS,
            NOOP,               TRNS,        TRNS,        TRNS,        TRNS,        TRNS,        NOOP,

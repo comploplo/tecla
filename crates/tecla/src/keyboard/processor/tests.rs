@@ -3,10 +3,13 @@
 
 use super::RolloverMode;
 use super::*;
-use crate::action::{Action, KeyCode, KeyOverride, LayerOp, ModifierKey, MouseAction, TriLayerDef};
+use crate::action::{
+    Action, DksKeys, KeyCode, KeyOverride, LayerOp, ModifierKey, MouseAction, TriLayerDef,
+};
 use crate::devices::keyboard::combo::{Combo, ComboConfig};
 use crate::devices::keyboard::tapping::{TapHoldConfig, TapHoldMode};
 use crate::devices::steno::{CaseMode, OP_RETRO_CASE, OP_SPACE, OP_STITCH, OP_TEXT};
+use crate::matrix::TriggerPhase;
 use crate::pipeline::event::{KeyEvent, KeyPos};
 use crate::pipeline::keymap::{Layer, LayerStack};
 use crate::pipeline::report::{ConsumerReport, HidReport, MouseReport};
@@ -519,6 +522,30 @@ fn modifier_press_sets_modifier_byte() {
         keyboard_mods(*reports.first().unwrap()),
         ModifierKey::LSHIFT.bits()
     );
+}
+
+#[test]
+fn bare_modifier_keycode_acts_as_held_modifier() {
+    // A keymap can bind a modifier via a bare keycode (e.g. the `LSFT` DSL
+    // token, which resolves to `Action::Key(KeyCode::LShift)` rather than
+    // `Action::Modifier`) instead of `Action::Modifier`. It must still shift
+    // a simultaneously-held key, not just occupy a keycode slot uselessly.
+    let mut proc = make_processor(&[
+        Action::Key(KeyCode::LShift),
+        Action::Key(KeyCode::A),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ]);
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 1), 0), 0, emit);
+    });
+    let report = *reports.last().unwrap();
+    assert_eq!(keyboard_mods(report), ModifierKey::LSHIFT.bits());
+    assert!(keyboard_keycodes(report).contains(&KeyCode::A.usage_id()));
+    assert!(!keyboard_keycodes(report).contains(&KeyCode::LShift.usage_id()));
 }
 
 #[test]
@@ -1728,6 +1755,25 @@ fn ble_host_switch_sets_pending_command() {
         proc.pending_ble_command(),
         Some(crate::transport::ble::BleCommand::SwitchHost(2))
     );
+}
+
+#[test]
+fn rgb_command_sets_pending_command() {
+    let mut proc = make_processor(&[
+        Action::Rgb(crate::rgb::RgbCommand::Next),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ]);
+    assert!(proc.pending_rgb_command().is_none());
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    assert_eq!(
+        proc.pending_rgb_command(),
+        Some(crate::rgb::RgbCommand::Next)
+    );
+    assert!(proc.pending_rgb_command().is_none());
 }
 
 // ── State accessors & restore ────────────────────────────────────────────
@@ -3088,4 +3134,207 @@ fn sticky_keys_disabled_modifier_held_normally() {
     });
     let mods = keyboard_mods(*reports.first().unwrap());
     assert_eq!(mods & 0x02, 0);
+}
+
+// ── Dynamic Keystroke (DKS) ──────────────────────────────────────────────
+
+fn dks1() -> DksKeys {
+    DksKeys {
+        press: KeyCode::A,
+        bottom_out: KeyCode::B,
+        release_from_bottom: KeyCode::C,
+        release: KeyCode::D,
+    }
+}
+
+fn dks2() -> DksKeys {
+    DksKeys {
+        press: KeyCode::E,
+        bottom_out: KeyCode::F,
+        release_from_bottom: KeyCode::G,
+        release: KeyCode::H,
+    }
+}
+
+fn make_dks_processor() -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
+    make_processor(&[
+        Action::Dks(dks1()),
+        Action::Dks(dks2()),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ])
+}
+
+#[test]
+fn dks_press_emits_press_keycode_and_holds() {
+    let mut proc = make_dks_processor();
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+    });
+    assert_eq!(reports.len(), 1);
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+}
+
+#[test]
+fn dks_bottom_out_releases_press_and_presses_bottom_out() {
+    let mut proc = make_dks_processor();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+
+    let reports = collect_reports(|emit| {
+        proc.process_dks_phase(pos(0, 0), TriggerPhase::BottomOut, emit);
+    });
+    assert_eq!(reports.len(), 2);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+    assert!(keyboard_keycodes(reports[1]).contains(&KeyCode::B.usage_id()));
+    assert!(!keyboard_keycodes(reports[1]).contains(&KeyCode::A.usage_id()));
+}
+
+#[test]
+fn dks_release_from_bottom_after_bottom_out_releases_bottom_out_and_presses_release_from_bottom() {
+    let mut proc = make_dks_processor();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_dks_phase(pos(0, 0), TriggerPhase::BottomOut, &mut |_| {});
+
+    let reports = collect_reports(|emit| {
+        proc.process_dks_phase(pos(0, 0), TriggerPhase::ReleaseFromBottom, emit);
+    });
+    assert_eq!(reports.len(), 2);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::B.usage_id()));
+    assert!(keyboard_keycodes(reports[1]).contains(&KeyCode::C.usage_id()));
+    assert!(!keyboard_keycodes(reports[1]).contains(&KeyCode::B.usage_id()));
+}
+
+#[test]
+fn dks_ordinary_release_from_press_releases_held_press_keycode() {
+    let mut proc = make_dks_processor();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 10), 10, emit);
+    });
+    assert_eq!(reports.len(), 1);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+}
+
+#[test]
+fn dks_ordinary_release_after_bottoming_out_releases_bottom_out_keycode() {
+    let mut proc = make_dks_processor();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_dks_phase(pos(0, 0), TriggerPhase::BottomOut, &mut |_| {});
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 10), 10, emit);
+    });
+    assert_eq!(reports.len(), 1);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::B.usage_id()));
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+}
+
+#[test]
+fn dks_two_keys_held_simultaneously_track_independently() {
+    let mut proc = make_dks_processor();
+
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+        proc.process_event(press(pos(0, 1), 10), 10, emit);
+    });
+    assert_eq!(reports.len(), 2);
+    assert!(keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+    let both = keyboard_keycodes(reports[1]);
+    assert!(both.contains(&KeyCode::A.usage_id()));
+    assert!(both.contains(&KeyCode::E.usage_id()));
+
+    // Bottoming out the second key must not disturb the first.
+    let reports = collect_reports(|emit| {
+        proc.process_dks_phase(pos(0, 1), TriggerPhase::BottomOut, emit);
+    });
+    let last = keyboard_keycodes(*reports.last().unwrap());
+    assert!(last.contains(&KeyCode::A.usage_id()));
+    assert!(last.contains(&KeyCode::F.usage_id()));
+    assert!(!last.contains(&KeyCode::E.usage_id()));
+
+    // Releasing key 1 must not affect key 2 (still bottomed on F).
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 20), 20, emit);
+    });
+    let last = keyboard_keycodes(*reports.last().unwrap());
+    assert!(!last.contains(&KeyCode::A.usage_id()));
+    assert!(last.contains(&KeyCode::F.usage_id()));
+}
+
+#[test]
+fn dks_phase_for_inactive_position_is_a_no_op() {
+    let mut proc = make_dks_processor();
+
+    let reports = collect_reports(|emit| {
+        proc.process_dks_phase(pos(0, 2), TriggerPhase::BottomOut, emit);
+    });
+    assert!(reports.is_empty());
+}
+
+#[test]
+fn dks_phase_press_and_release_variants_are_no_ops_on_active_key() {
+    let mut proc = make_dks_processor();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+
+    let reports = collect_reports(|emit| {
+        proc.process_dks_phase(pos(0, 0), TriggerPhase::Press, emit);
+        proc.process_dks_phase(pos(0, 0), TriggerPhase::Release, emit);
+    });
+    assert!(reports.is_empty());
+
+    // The originally pressed keycode (A) is still held, unaffected.
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 10), 10, emit);
+    });
+    assert_eq!(reports.len(), 1);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+}
+
+#[test]
+fn dks_ninth_concurrent_key_is_not_pressed_and_cannot_get_stuck() {
+    // `dks_active` caps at 8. A 9th DKS key held at the same time must not
+    // emit its press keycode at all (since there's no slot to track it for
+    // release) — the alternative, pressing it untracked, would make the
+    // keycode unreleasable forever.
+    const NINE: usize = 9;
+    let actions = [Action::Dks(dks1()); NINE];
+    let mut layers: heapless::Vec<Layer<()>, 1> = heapless::Vec::new();
+    layers.push(Layer::new(&actions)).ok();
+    let stack: LayerStack<1, NINE> = LayerStack::new(layers);
+    let mut proc: KeyboardProcessor<1, NINE, 1, NINE> =
+        KeyboardProcessor::new(stack, TapHoldConfig::default());
+
+    // Press 8 DKS keys — fills dks_active to capacity.
+    for i in 0u8..8 {
+        let reports = collect_reports(|emit| {
+            proc.process_event(press(pos(0, i), u64::from(i)), u64::from(i), emit);
+        });
+        assert_eq!(reports.len(), 1, "each of the first 8 presses should emit");
+    }
+
+    // The 9th concurrently-held key must not be pressed at all.
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 8), 8), 8, emit);
+    });
+    assert!(
+        reports.is_empty(),
+        "9th DKS key must not press an untracked keycode"
+    );
+
+    // Releasing the 9th key is a no-op (nothing to release).
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 8), 9), 9, emit);
+    });
+    assert!(reports.is_empty());
+
+    // The first 8 keys are unaffected and still release normally.
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 10), 10, emit);
+    });
+    assert_eq!(reports.len(), 1);
+    assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
 }

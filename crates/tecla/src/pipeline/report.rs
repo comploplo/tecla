@@ -169,6 +169,22 @@ pub enum MidiEvent {
         /// Controller value (0–127).
         value: u8,
     },
+    /// Polyphonic key pressure (per-note aftertouch).
+    PolyPressure {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// MIDI note number (0–127).
+        note: u8,
+        /// Pressure (0–127).
+        pressure: u8,
+    },
+    /// Channel pressure (single aftertouch value for the whole channel).
+    ChannelPressure {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// Pressure (0–127).
+        pressure: u8,
+    },
 }
 
 /// A HID gamepad report.

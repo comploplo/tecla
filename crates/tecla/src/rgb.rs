@@ -253,6 +253,478 @@ impl Animation for ReactivePress {
     }
 }
 
+/// Rotating rainbow whose speed reacts to typing speed (approximate WPM),
+/// scaled against the user's own observed personal-best pace rather than a
+/// fixed assumed maximum.
+#[derive(Debug, Clone, Copy)]
+pub struct WpmRainbow {
+    inner: RainbowCycle,
+    last_press_ms: Option<u64>,
+    interval_ema_ms: u32,
+    /// Whether at least one real inter-press interval has been measured yet.
+    /// Until then `interval_ema_ms` is just the seeded placeholder, not a
+    /// real pace, so it must not be compared against `max_wpm_seen`.
+    has_interval: bool,
+    ticks_since_press: u32,
+    max_wpm_seen: u16,
+}
+
+impl WpmRainbow {
+    /// Ambient/idle rainbow speed floor.
+    const IDLE_SPEED: u8 = 8;
+    /// Matches [`RainbowCycle::speed`]'s full `u8` range.
+    const MAX_SPEED: u8 = 255;
+    /// Modest initial personal-best seed so the first few keystrokes don't
+    /// already peg the animation at full speed; grows as the user types
+    /// faster over the session.
+    const INITIAL_MAX_WPM: u16 = 40;
+    /// Bit-shift EMA smoothing factor for the inter-press interval (mirrors
+    /// [`crate::matrix::analog::Ema::update`]'s pattern).
+    const EMA_SHIFT: u8 = 2;
+    /// Sane ceiling for a single inter-press interval, so an idle gap of
+    /// hours can't produce a nonsensical (or truncated) interval.
+    const MAX_INTERVAL_MS: u32 = 60_000;
+    /// Ticks of no presses after which speed decays back to the ambient
+    /// floor. ~2s at a plausible 60Hz RGB tick rate (4s at 30Hz) — this is a
+    /// cosmetic effect and doesn't need to be exact.
+    const IDLE_TICKS: u32 = 120;
+
+    /// Creates a new WPM-reactive rainbow, idle at the ambient speed floor.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            inner: RainbowCycle {
+                speed: Self::IDLE_SPEED,
+                offset: 0,
+            },
+            last_press_ms: None,
+            // No data yet; placeholder only — has_interval gates its use.
+            interval_ema_ms: 300,
+            has_interval: false,
+            ticks_since_press: 0,
+            max_wpm_seen: Self::INITIAL_MAX_WPM,
+        }
+    }
+
+    /// Approximate words-per-minute derived from the smoothed inter-press
+    /// interval, using the standard 5-characters-per-word convention.
+    #[must_use]
+    #[expect(
+        clippy::integer_division_remainder_used,
+        reason = "keystrokes/min ÷ 5 chars/word folded into one division"
+    )]
+    pub fn current_wpm(&self) -> u16 {
+        let wpm = 12_000 / self.interval_ema_ms.max(1);
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "wpm clamped to u16::MAX before narrowing"
+        )]
+        let wpm = wpm.min(u32::from(u16::MAX)) as u16;
+        wpm
+    }
+
+    /// Returns the highest WPM observed so far this session — a ratcheting
+    /// personal best that only ever increases.
+    #[must_use]
+    pub const fn max_wpm(&self) -> u16 {
+        self.max_wpm_seen
+    }
+}
+
+impl Default for WpmRainbow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Animation for WpmRainbow {
+    fn tick(&mut self, led_count: usize, elapsed_ms: u32, buffer: &mut [Rgb]) {
+        self.ticks_since_press = self.ticks_since_press.saturating_add(1);
+
+        let wpm = self.current_wpm();
+
+        self.inner.speed = if self.ticks_since_press > Self::IDLE_TICKS || !self.has_interval {
+            Self::IDLE_SPEED
+        } else {
+            #[expect(
+                clippy::integer_division_remainder_used,
+                reason = "scales wpm onto the ambient-floor..=255 speed range"
+            )]
+            let scaled =
+                u32::from(wpm) * u32::from(Self::MAX_SPEED) / u32::from(self.max_wpm_seen.max(1));
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "scaled clamped to MAX_SPEED (255) before narrowing"
+            )]
+            let scaled = scaled.min(u32::from(Self::MAX_SPEED)) as u8;
+            scaled.max(Self::IDLE_SPEED)
+        };
+
+        // Ratchet the personal best *after* scaling speed against it, so this
+        // tick's speed is always computed against the pace established
+        // before this tick, not a denominator silently rewritten to equal
+        // the numerator moments earlier.
+        if wpm > self.max_wpm_seen {
+            self.max_wpm_seen = wpm;
+        }
+
+        self.inner.tick(led_count, elapsed_ms, buffer);
+    }
+
+    fn on_key_event(&mut self, event: KeyEvent, led_count: usize, buffer: &mut [Rgb]) {
+        if event.pressed {
+            if let Some(prev) = self.last_press_ms {
+                let interval_ms = event
+                    .timestamp_ms
+                    .saturating_sub(prev)
+                    .min(u64::from(Self::MAX_INTERVAL_MS));
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "interval clamped to MAX_INTERVAL_MS (60_000) before narrowing to u32"
+                )]
+                let interval_ms = interval_ms as u32;
+
+                // Mirror Ema::update's shift-based smoothing (matrix/analog.rs).
+                // i32 comfortably holds both operands (both ≤ MAX_INTERVAL_MS);
+                // u32 can't go negative so the diff needs a signed type.
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "interval_ema_ms ≤ MAX_INTERVAL_MS (60_000), fits i32 losslessly"
+                )]
+                let mut ema = self.interval_ema_ms as i32;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "interval_ms ≤ MAX_INTERVAL_MS (60_000), fits i32 losslessly"
+                )]
+                let sample = interval_ms as i32;
+                ema += (sample - ema) >> Self::EMA_SHIFT;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "MAX_INTERVAL_MS (60_000) fits i32 losslessly"
+                )]
+                let max_interval = Self::MAX_INTERVAL_MS as i32;
+                ema = ema.clamp(0, max_interval);
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_sign_loss,
+                    reason = "ema clamped to 0..=MAX_INTERVAL_MS above"
+                )]
+                let ema = ema as u32;
+                self.interval_ema_ms = ema;
+                self.has_interval = true;
+            }
+            self.last_press_ms = Some(event.timestamp_ms);
+            self.ticks_since_press = 0;
+        }
+        self.inner.on_key_event(event, led_count, buffer);
+    }
+}
+
+/// Keys accumulate heat on press and slowly cool over time, shifting hue
+/// from cool (blue) when barely warm to hot (red) as heat builds. Unlike
+/// [`ReactivePress`]'s flash-and-fade, heat lingers so repeated presses on a
+/// key visibly build up into a hotspot.
+#[derive(Debug, Clone)]
+pub struct Heatmap {
+    /// Per-key heat values.
+    pub heat: [u8; 128],
+    /// Heat added per press (saturating at 255).
+    pub heat_step: u8,
+    /// Heat lost per tick (small, so heat lingers and accumulates).
+    pub decay: u8,
+}
+
+impl Heatmap {
+    /// Creates a new heatmap animation with all keys cold.
+    #[must_use]
+    pub fn new(heat_step: u8, decay: u8) -> Self {
+        Self {
+            heat: [0; 128],
+            heat_step,
+            decay,
+        }
+    }
+}
+
+impl Default for Heatmap {
+    fn default() -> Self {
+        // Modest step with slow decay so heat accumulates and lingers.
+        Self::new(40, 2)
+    }
+}
+
+impl Animation for Heatmap {
+    #[expect(
+        clippy::integer_division_remainder_used,
+        clippy::cast_possible_truncation,
+        clippy::as_conversions,
+        reason = "heat (≤255) scaled onto the 0..170 hue range; truncation to u8 is intentional"
+    )]
+    fn tick(&mut self, _led_count: usize, _elapsed_ms: u32, buffer: &mut [Rgb]) {
+        for (i, led) in buffer.iter_mut().enumerate() {
+            if let Some(&h) = self.heat.get(i) {
+                if h > 0 {
+                    // heat=255 → hue 0 (red/hot); heat near 0 → hue ~170 (blue/cool).
+                    let hue = 170u8.saturating_sub((u16::from(h) * 170 / 255) as u8);
+                    *led = hsv_to_rgb(Hsv::new(hue, 255, h));
+                } else {
+                    *led = Rgb::BLACK;
+                }
+            } else {
+                *led = Rgb::BLACK;
+            }
+        }
+        for h in &mut self.heat {
+            *h = h.saturating_sub(self.decay);
+        }
+    }
+
+    fn on_key_event(&mut self, event: KeyEvent, _led_count: usize, _buffer: &mut [Rgb]) {
+        if event.pressed {
+            let idx = event.pos.flat(16);
+            if let Some(h) = self.heat.get_mut(idx) {
+                *h = h.saturating_add(self.heat_step);
+            }
+        }
+    }
+}
+
+/// Max simultaneous ripples in flight (a cosmetic cap, not a correctness one —
+/// pressing a 5th key while 4 ripples are still expanding just reuses the
+/// oldest slot instead of starting a 5th ring).
+const MAX_RIPPLES: usize = 4;
+
+/// Integer square root (floored), via Newton's method — no floating point,
+/// so this stays usable on `no_std` targets without `libm`.
+fn isqrt(n: u32) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    let mut x = n;
+    let mut y = x.div_ceil(2);
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RippleState {
+    origin_row: u8,
+    origin_col: u8,
+    age_ticks: u16,
+    /// Chosen when the ripple started, from the typing pace at that moment —
+    /// see [`Ripple::hue_for_pace`].
+    color: Rgb,
+}
+
+/// A ring of color expands outward from each pressed key and fades as it
+/// travels, using each LED's real matrix row/col — unlike [`ReactivePress`]
+/// and [`Heatmap`], which only ever check "is this the same key" and so can
+/// get away with the fixed `pos.flat(16)` convention, a ripple needs genuine
+/// relative geometry between *different* keys. That convention reshapes a
+/// board's real layout into a 16-columns-wide strip, which would flatten
+/// almost any board's rings into a horizontal smear. `positions[i]` gives
+/// the board's real `(row, col)` for buffer slot `i`; board code should feed
+/// this animation the *unremapped* [`KeyEvent`] (not passed through whatever
+/// flat(16) remap it applies for other animations), since its origin here is
+/// also real row/col, not a synthetic index.
+///
+/// Each ripple's color is picked from the typing pace at the moment it
+/// started (fast presses run hot/red, slow presses run cool/blue), mirroring
+/// [`WpmRainbow`]'s interval-EMA approach.
+#[derive(Debug, Clone)]
+pub struct Ripple<const LEDS: usize> {
+    ripples: [Option<RippleState>; MAX_RIPPLES],
+    positions: [(u8, u8); LEDS],
+    /// Ticks between each one-cell expansion of the ring radius.
+    pub ticks_per_step: u16,
+    /// Ring radius (in matrix cells) at which a ripple fully fades out.
+    pub max_radius: u16,
+    /// Ring softness in matrix cells: how far a cell can sit from the ring's
+    /// exact radius and still glow, tapering linearly to nothing at the
+    /// edge. Higher = a thicker, more gradual ring instead of a hard,
+    /// one-cell-wide edge.
+    pub thickness: u16,
+    last_press_ms: Option<u64>,
+    interval_ema_ms: u32,
+    has_interval: bool,
+}
+
+impl<const LEDS: usize> Ripple<LEDS> {
+    /// Interval at/below which a ripple is colored fully "hot" (hue 0).
+    const FAST_INTERVAL_MS: u32 = 120;
+    /// Interval at/above which a ripple is colored fully "cool" (hue 170).
+    const SLOW_INTERVAL_MS: u32 = 600;
+    /// Bit-shift EMA smoothing factor (mirrors [`crate::matrix::analog::Ema::update`]).
+    const EMA_SHIFT: u8 = 2;
+    /// Sane ceiling for a single inter-press interval.
+    const MAX_INTERVAL_MS: u32 = 60_000;
+
+    /// Creates a new ripple animation over a board's real per-LED
+    /// `(row, col)` table. `ticks_per_step` controls how fast the ring
+    /// expands, `max_radius` how far it travels before fading out, and
+    /// `thickness` how soft/gradual the ring's edge is.
+    #[must_use]
+    pub const fn new(
+        positions: [(u8, u8); LEDS],
+        ticks_per_step: u16,
+        max_radius: u16,
+        thickness: u16,
+    ) -> Self {
+        Self {
+            ripples: [None; MAX_RIPPLES],
+            positions,
+            ticks_per_step,
+            max_radius,
+            thickness,
+            last_press_ms: None,
+            // No data yet; placeholder only — has_interval gates its use.
+            interval_ema_ms: 300,
+            has_interval: false,
+        }
+    }
+
+    /// Hue for the current typing pace: hot (0) when fast, cool (170) when
+    /// slow, linearly interpolated in between. Before any real interval has
+    /// been observed, defaults to cool.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "scaled onto the 0..170 hue range, which fits u8 losslessly"
+    )]
+    fn hue_for_pace(&self) -> u8 {
+        if !self.has_interval {
+            return 170;
+        }
+        let interval = self
+            .interval_ema_ms
+            .clamp(Self::FAST_INTERVAL_MS, Self::SLOW_INTERVAL_MS);
+        let span = Self::SLOW_INTERVAL_MS - Self::FAST_INTERVAL_MS;
+        (((interval - Self::FAST_INTERVAL_MS) * 170) / span) as u8
+    }
+}
+
+impl<const LEDS: usize> Animation for Ripple<LEDS> {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::as_conversions,
+        reason = "dr/dc are bounded by realistic board dimensions; their squared sum's isqrt fits u16 losslessly"
+    )]
+    fn tick(&mut self, _led_count: usize, _elapsed_ms: u32, buffer: &mut [Rgb]) {
+        for led in &mut *buffer {
+            *led = Rgb::BLACK;
+        }
+        let ticks_per_step = self.ticks_per_step.max(1);
+        let max_radius = self.max_radius.max(1);
+        let thickness = self.thickness.max(1);
+        for slot in &mut self.ripples {
+            let Some(r) = slot else { continue };
+            let radius = r.age_ticks / ticks_per_step;
+            if radius > max_radius {
+                *slot = None;
+                continue;
+            }
+            let radius_fade =
+                255 - (u32::from(radius) * 255 / u32::from(max_radius)).min(255) as u8;
+            for (i, led) in buffer.iter_mut().enumerate() {
+                let Some(&(row, col)) = self.positions.get(i) else {
+                    continue;
+                };
+                let dr = i32::from(row) - i32::from(r.origin_row);
+                let dc = i32::from(col) - i32::from(r.origin_col);
+                #[expect(
+                    clippy::cast_sign_loss,
+                    reason = "dr*dr + dc*dc is always non-negative"
+                )]
+                let dist_sq = (dr * dr + dc * dc) as u32;
+                let dist = isqrt(dist_sq) as u16;
+                let delta = dist.abs_diff(radius);
+                if delta > thickness {
+                    continue;
+                }
+                let taper = 255 - (u32::from(delta) * 255 / u32::from(thickness)).min(255) as u8;
+                let intensity = scale(radius_fade, taper);
+                let ring = Rgb::new(
+                    scale(r.color.r, intensity),
+                    scale(r.color.g, intensity),
+                    scale(r.color.b, intensity),
+                );
+                // Max-combine so overlapping ripples blend instead of one
+                // overwriting the other.
+                *led = Rgb::new(led.r.max(ring.r), led.g.max(ring.g), led.b.max(ring.b));
+            }
+            r.age_ticks = r.age_ticks.saturating_add(1);
+        }
+    }
+
+    fn on_key_event(&mut self, event: KeyEvent, _led_count: usize, _buffer: &mut [Rgb]) {
+        if event.pressed {
+            if let Some(prev) = self.last_press_ms {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "interval clamped to MAX_INTERVAL_MS before narrowing to u32"
+                )]
+                let interval_ms = event
+                    .timestamp_ms
+                    .saturating_sub(prev)
+                    .min(u64::from(Self::MAX_INTERVAL_MS)) as u32;
+
+                // Mirror Ema::update's shift-based smoothing (matrix/analog.rs).
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "interval_ema_ms ≤ MAX_INTERVAL_MS, fits i32 losslessly"
+                )]
+                let mut ema = self.interval_ema_ms as i32;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "interval_ms ≤ MAX_INTERVAL_MS, fits i32 losslessly"
+                )]
+                let sample = interval_ms as i32;
+                ema += (sample - ema) >> Self::EMA_SHIFT;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "MAX_INTERVAL_MS fits i32 losslessly"
+                )]
+                let max_interval = Self::MAX_INTERVAL_MS as i32;
+                ema = ema.clamp(0, max_interval);
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_sign_loss,
+                    reason = "ema clamped to 0..=MAX_INTERVAL_MS above"
+                )]
+                let ema = ema as u32;
+                self.interval_ema_ms = ema;
+                self.has_interval = true;
+            }
+            self.last_press_ms = Some(event.timestamp_ms);
+
+            let state = RippleState {
+                origin_row: event.pos.row,
+                origin_col: event.pos.col,
+                age_ticks: 0,
+                color: hsv_to_rgb(Hsv::new(self.hue_for_pace(), 255, 255)),
+            };
+            let slot = match self.ripples.iter_mut().find(|s| s.is_none()) {
+                Some(free) => free,
+                None => &mut self.ripples[0],
+            };
+            *slot = Some(state);
+        }
+    }
+}
+
 /// RGB control commands mapped to [`Action::Rgb`](crate::action::Action::Rgb).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RgbCommand {
@@ -283,7 +755,7 @@ pub enum RgbCommand {
 const BRIGHTNESS_STEP: u8 = 17;
 const HSV_STEP: u8 = 8;
 const SPEED_STEP: u8 = 8;
-const ANIMATION_COUNT: u8 = 4;
+const ANIMATION_COUNT: u8 = 7;
 
 /// Manages LED state, brightness, and animation selection.
 ///
@@ -656,10 +1128,10 @@ mod tests {
     fn controller_next_animation_cycles() {
         let mut ctrl = RgbController::<1>::new();
         assert_eq!(ctrl.current_animation(), 0);
-        ctrl.next_animation();
-        assert_eq!(ctrl.current_animation(), 1);
-        ctrl.next_animation();
-        ctrl.next_animation();
+        for i in 1..ANIMATION_COUNT {
+            ctrl.next_animation();
+            assert_eq!(ctrl.current_animation(), i);
+        }
         ctrl.next_animation();
         assert_eq!(ctrl.current_animation(), 0);
     }
@@ -798,5 +1270,350 @@ mod tests {
         let mut anim = SolidColor { color: Rgb::WHITE };
         ctrl.tick(0, &mut anim);
         assert!(ctrl.buffer().iter().all(|&c| c == Rgb::BLACK));
+    }
+
+    /// Sum of a color's channels — a proxy for rendered brightness.
+    fn brightness_sum(c: Rgb) -> u16 {
+        u16::from(c.r) + u16::from(c.g) + u16::from(c.b)
+    }
+
+    #[test]
+    fn heatmap_press_increases_brightness() {
+        let mut anim = Heatmap::new(40, 2);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.tick(4, 0, &mut buf);
+        assert_eq!(buf[1], Rgb::BLACK);
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 1), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert!(brightness_sum(buf[1]) > 0);
+    }
+
+    #[test]
+    fn heatmap_lingers_across_ticks() {
+        let mut anim = Heatmap::new(200, 2);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        // A single press must stay lit for several ticks — accumulation, not
+        // flash-and-fade.
+        for _ in 0..5 {
+            anim.tick(4, 0, &mut buf);
+            assert!(brightness_sum(buf[0]) > 0);
+        }
+    }
+
+    #[test]
+    fn heatmap_repeated_presses_accumulate() {
+        let mut anim = Heatmap::new(40, 2);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        let single = anim.heat[0];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        assert!(anim.heat[0] > single);
+    }
+
+    #[test]
+    fn heatmap_untouched_key_stays_black() {
+        let mut anim = Heatmap::new(40, 2);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert_eq!(buf[2], Rgb::BLACK);
+        assert_eq!(anim.heat[2], 0);
+    }
+
+    const RIPPLE_TEST_POSITIONS: [(u8, u8); 4] = [(0, 0), (0, 1), (0, 2), (0, 3)];
+
+    #[test]
+    fn ripple_press_lights_origin_immediately() {
+        let mut anim = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert_ne!(buf[0], Rgb::BLACK);
+        assert_eq!(buf[1], Rgb::BLACK);
+    }
+
+    #[test]
+    fn ripple_expands_outward_over_ticks() {
+        let mut anim = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf); // radius 0: lights index 0
+        anim.tick(4, 0, &mut buf); // radius 1: lights index 1, not 0
+        assert_eq!(buf[0], Rgb::BLACK);
+        assert_ne!(buf[1], Rgb::BLACK);
+    }
+
+    #[test]
+    fn ripple_fades_out_past_max_radius() {
+        let mut anim = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 1, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf); // radius 0
+        anim.tick(4, 0, &mut buf); // radius 1 (== max_radius, still visible)
+        anim.tick(4, 0, &mut buf); // radius 2 > max_radius: ripple cleared
+        assert!(buf.iter().all(|&c| c == Rgb::BLACK));
+    }
+
+    #[test]
+    fn ripple_release_does_not_start_a_ripple() {
+        let mut anim = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::release(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert!(buf.iter().all(|&c| c == Rgb::BLACK));
+    }
+
+    #[test]
+    fn ripple_beyond_max_ripples_does_not_panic() {
+        let mut anim = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        for col in 0..5u8 {
+            anim.on_key_event(KeyEvent::press(KeyPos::new(0, col), 0), 4, &mut buf);
+        }
+        anim.tick(4, 0, &mut buf);
+    }
+
+    #[test]
+    fn ripple_expands_in_two_dimensions() {
+        // A 2x2 grid: origin at (0,0). Euclidean distance (via isqrt) floors
+        // to 1 for all three neighbors, including the diagonal one — proving
+        // this isn't flattened onto a single row like the old flat(16) hack.
+        let positions: [(u8, u8); 4] = [(0, 0), (0, 1), (1, 0), (1, 1)];
+        let mut anim = Ripple::new(positions, 1, 3, 1);
+        let mut buf = [Rgb::BLACK; 4];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf); // radius 0: only origin (0,0)
+        anim.tick(4, 0, &mut buf); // radius 1: (0,1), (1,0), (1,1) all match
+        assert_eq!(buf[0], Rgb::BLACK);
+        assert_ne!(buf[1], Rgb::BLACK);
+        assert_ne!(buf[2], Rgb::BLACK);
+        assert_ne!(buf[3], Rgb::BLACK);
+    }
+
+    #[test]
+    fn isqrt_matches_known_squares() {
+        assert_eq!(isqrt(0), 0);
+        assert_eq!(isqrt(1), 1);
+        assert_eq!(isqrt(4), 2);
+        assert_eq!(isqrt(8), 2); // floors: 2^2=4 <= 8 < 9=3^2
+        assert_eq!(isqrt(9), 3);
+        assert_eq!(isqrt(18), 4); // floors: 4^2=16 <= 18 < 25=5^2
+        assert_eq!(isqrt(u32::from(u16::MAX)), 255);
+    }
+
+    #[test]
+    fn ripple_diverges_from_chebyshev_at_larger_radii() {
+        // At (3,3), Chebyshev distance is 3 but true Euclidean distance is
+        // sqrt(18)≈4.24, floor 4 — proving the ring now follows real
+        // circular geometry rather than the old square/diamond metric.
+        let positions: [(u8, u8); 2] = [(0, 0), (3, 3)];
+        let mut anim = Ripple::new(positions, 1, 5, 1);
+        let mut buf = [Rgb::BLACK; 2];
+        anim.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 2, &mut buf);
+        for _ in 0..=3 {
+            anim.tick(2, 0, &mut buf); // radii 0..3: Chebyshev would light here
+            assert_eq!(buf[1], Rgb::BLACK, "must not light at the Chebyshev radius");
+        }
+        anim.tick(2, 0, &mut buf); // radius 4: true Euclidean floor(sqrt(18))
+        assert_ne!(buf[1], Rgb::BLACK);
+    }
+
+    #[test]
+    fn ripple_thickness_softens_the_ring_edge() {
+        // With thickness 1 (a hard ring), the cell one unit past the exact
+        // radius is fully dark. With thickness 2, that same cell should
+        // glow, dimmer than the cell exactly on the ring.
+        let mut hard = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 1);
+        let mut hard_buf = [Rgb::BLACK; 4];
+        hard.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut hard_buf);
+        hard.tick(4, 0, &mut hard_buf); // radius 0
+        assert_eq!(hard_buf[1], Rgb::BLACK);
+
+        let mut soft = Ripple::new(RIPPLE_TEST_POSITIONS, 1, 3, 2);
+        let mut soft_buf = [Rgb::BLACK; 4];
+        soft.on_key_event(KeyEvent::press(KeyPos::new(0, 0), 0), 4, &mut soft_buf);
+        soft.tick(4, 0, &mut soft_buf); // radius 0
+        assert_ne!(soft_buf[1], Rgb::BLACK);
+        assert!(brightness_sum(soft_buf[1]) < brightness_sum(soft_buf[0]));
+    }
+
+    #[test]
+    fn ripple_color_reflects_typing_pace() {
+        let positions: [(u8, u8); 1] = [(0, 0)];
+
+        let mut fast = Ripple::new(positions, 1, 3, 1);
+        fast.on_key_event(
+            KeyEvent::press(KeyPos::new(0, 0), 0),
+            1,
+            &mut [Rgb::BLACK; 1],
+        );
+        fast.on_key_event(
+            KeyEvent::press(KeyPos::new(0, 0), 50),
+            1,
+            &mut [Rgb::BLACK; 1],
+        );
+        let fast_color = fast.ripples[1].unwrap().color;
+
+        let mut slow = Ripple::new(positions, 1, 3, 1);
+        slow.on_key_event(
+            KeyEvent::press(KeyPos::new(0, 0), 0),
+            1,
+            &mut [Rgb::BLACK; 1],
+        );
+        slow.on_key_event(
+            KeyEvent::press(KeyPos::new(0, 0), 2000),
+            1,
+            &mut [Rgb::BLACK; 1],
+        );
+        let slow_color = slow.ripples[1].unwrap().color;
+
+        assert!(
+            fast_color.r > slow_color.r,
+            "fast presses should run hotter/redder"
+        );
+        assert!(
+            slow_color.b > fast_color.b,
+            "slow presses should run cooler/bluer"
+        );
+    }
+
+    #[test]
+    fn wpm_rainbow_fast_presses_increase_speed() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        let mut t: u64 = 0;
+        // Repeated fast presses (100ms apart) converge the EMA toward a high WPM.
+        for _ in 0..30 {
+            t += 100;
+            anim.on_key_event(KeyEvent::press(pos, t), 4, &mut buf);
+            anim.tick(4, 0, &mut buf);
+        }
+        assert!(anim.current_wpm() > 60);
+        assert!(anim.inner.speed > WpmRainbow::IDLE_SPEED);
+    }
+
+    #[test]
+    fn wpm_rainbow_idle_settles_to_ambient_floor() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        anim.on_key_event(KeyEvent::press(pos, 0), 4, &mut buf);
+        anim.on_key_event(KeyEvent::press(pos, 100), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert!(anim.inner.speed > WpmRainbow::IDLE_SPEED);
+
+        for _ in 0..=WpmRainbow::IDLE_TICKS {
+            anim.tick(4, 0, &mut buf);
+        }
+        assert_eq!(anim.inner.speed, WpmRainbow::IDLE_SPEED);
+    }
+
+    #[test]
+    fn wpm_rainbow_first_keystroke_does_not_peg_full_speed() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        anim.on_key_event(KeyEvent::press(pos, 0), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        assert_eq!(anim.current_wpm(), 40);
+        assert_eq!(anim.max_wpm(), 40);
+        assert_eq!(anim.inner.speed, WpmRainbow::IDLE_SPEED);
+    }
+
+    #[test]
+    fn wpm_rainbow_first_press_has_no_prior_interval() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        anim.on_key_event(KeyEvent::press(pos, 12_345), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        // No prior press means no interval was folded in — still the seeded default.
+        assert_eq!(anim.current_wpm(), 40);
+    }
+
+    #[test]
+    fn wpm_rainbow_extremely_long_gap_clamps_interval() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        anim.on_key_event(KeyEvent::press(pos, 0), 4, &mut buf);
+        // Gap far beyond MAX_INTERVAL_MS (60_000ms) — hours in ms.
+        let huge_gap_ms: u64 = 10 * 60 * 60 * 1000;
+        anim.on_key_event(KeyEvent::press(pos, huge_gap_ms), 4, &mut buf);
+        anim.tick(4, 0, &mut buf);
+        // Clamped to a sane low WPM, not wrapped/truncated into garbage.
+        assert!(anim.current_wpm() <= 40);
+    }
+
+    #[test]
+    fn wpm_rainbow_release_does_not_affect_state() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        let ema_before = anim.interval_ema_ms;
+        anim.on_key_event(KeyEvent::release(pos, 12_345), 4, &mut buf);
+        assert_eq!(anim.last_press_ms, None);
+        assert_eq!(anim.interval_ema_ms, ema_before);
+    }
+
+    #[test]
+    fn wpm_rainbow_max_wpm_ratchets_up_never_down() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        let mut t: u64 = 0;
+        // Fast presses (50ms apart) push max_wpm_seen up.
+        for _ in 0..20 {
+            t += 50;
+            anim.on_key_event(KeyEvent::press(pos, t), 4, &mut buf);
+            anim.tick(4, 0, &mut buf);
+        }
+        let peak = anim.max_wpm();
+        assert!(peak > 40);
+
+        // Type much slower afterward — max_wpm_seen must not decrease.
+        for _ in 0..20 {
+            t += 2_000;
+            anim.on_key_event(KeyEvent::press(pos, t), 4, &mut buf);
+            anim.tick(4, 0, &mut buf);
+        }
+        assert_eq!(anim.max_wpm(), peak);
+    }
+
+    #[test]
+    fn wpm_rainbow_speed_scales_relative_to_personal_best() {
+        let mut anim = WpmRainbow::new();
+        let mut buf = [Rgb::BLACK; 4];
+        let pos = KeyPos::new(0, 0);
+        let mut t: u64 = 0;
+        // Establish a personal best at ~120 wpm (100ms interval).
+        for _ in 0..30 {
+            t += 100;
+            anim.on_key_event(KeyEvent::press(pos, t), 4, &mut buf);
+            anim.tick(4, 0, &mut buf);
+        }
+        let full_speed = anim.inner.speed;
+        assert!(
+            full_speed >= 230,
+            "expected near-max speed at personal best, got {full_speed}"
+        );
+
+        // Settle into typing at roughly half that pace (200ms interval ~ 60wpm).
+        for _ in 0..30 {
+            t += 200;
+            anim.on_key_event(KeyEvent::press(pos, t), 4, &mut buf);
+            anim.tick(4, 0, &mut buf);
+        }
+        let half_speed = anim.inner.speed;
+        // max_wpm_seen is unchanged (still the earlier personal best), so this
+        // proves the scaling tracks the observed max, not a fixed reference WPM.
+        assert!(half_speed < full_speed);
+        assert!(
+            (90..=160).contains(&half_speed),
+            "expected roughly half of full speed, got {half_speed}"
+        );
     }
 }

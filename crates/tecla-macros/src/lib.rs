@@ -148,6 +148,9 @@ fn special_token(name: &str) -> Option<TokenStream2> {
         "OUT_BLE" => Some(
             quote! { ::tecla::action::Action::<()>::OutputSelect(::tecla::hid::OutputMode::Ble) },
         ),
+        "RGB_NEXT" => {
+            Some(quote! { ::tecla::action::Action::<()>::Rgb(::tecla::rgb::RgbCommand::Next) })
+        }
         _ => None,
     }
 }

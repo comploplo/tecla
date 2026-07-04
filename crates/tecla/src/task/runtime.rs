@@ -127,7 +127,7 @@ async fn receive_and_process<
     processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     report_tx: &Sender<'_, M, HidReport, RN>,
     max_wait_ms: Option<u64>,
-) {
+) -> Option<KeyEvent> {
     let now_ms = Instant::now().as_millis();
     let deadline_ms = processor.next_deadline_ms();
     let tap_hold_wait = deadline_ms.map(|d| d.saturating_sub(now_ms));
@@ -162,7 +162,9 @@ async fn receive_and_process<
             let _ = reports.push(r);
         });
         send_reports(report_tx, reports).await;
+        return Some(event);
     }
+    None
 }
 
 async fn send_reports<M: RawMutex, const N: usize>(
@@ -331,6 +333,51 @@ where
         receive_and_process(&event_rx, processor, &report_tx, None).await;
         if let Some(cmd) = processor.pending_ble_command() {
             let _ = ble_tx.try_send(cmd);
+        }
+    }
+}
+
+/// Like [`keyboard_task`] but also forwards raw key presses and pending RGB
+/// commands to a board-owned RGB task.
+///
+/// Every press is forwarded to `rgb_event_tx` (releases are not, since the
+/// built-in [`Animation`](crate::rgb::Animation)s only react to presses), and
+/// any [`RgbCommand`](crate::rgb::RgbCommand) yielded by an [`Action::Rgb`]
+/// key is forwarded to `rgb_cmd_tx`. Pair with a board task that owns the
+/// [`RgbController`](crate::rgb::RgbController), drains both channels, and
+/// ticks the animation on a timer.
+///
+/// This function never returns.
+pub async fn keyboard_task_rgb<
+    M,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+    const EN: usize,
+    const RN: usize,
+    const EN2: usize,
+    const CN: usize,
+>(
+    event_rx: Receiver<'_, M, KeyEvent, EN>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    report_tx: Sender<'_, M, HidReport, RN>,
+    rgb_event_tx: Sender<'_, M, KeyEvent, EN2>,
+    rgb_cmd_tx: Sender<'_, M, crate::rgb::RgbCommand, CN>,
+) -> !
+where
+    M: RawMutex,
+    Ext: Copy + PartialEq,
+{
+    loop {
+        if let Some(event) = receive_and_process(&event_rx, processor, &report_tx, None).await {
+            if event.pressed {
+                let _ = rgb_event_tx.try_send(event);
+            }
+        }
+        if let Some(cmd) = processor.pending_rgb_command() {
+            let _ = rgb_cmd_tx.try_send(cmd);
         }
     }
 }

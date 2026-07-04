@@ -137,6 +137,22 @@ pub enum MidiAction {
         /// Controller value (0–127).
         value: u8,
     },
+    /// Polyphonic key pressure (per-note aftertouch).
+    PolyPressure {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// MIDI note number (0–127).
+        note: u8,
+        /// Pressure (0–127).
+        pressure: u8,
+    },
+    /// Channel pressure (single aftertouch value for the whole channel).
+    ChannelPressure {
+        /// MIDI channel (0–15).
+        channel: u8,
+        /// Pressure (0–127).
+        pressure: u8,
+    },
 }
 
 // ── GamepadAction ────────────────────────────────────────────────────────────
@@ -153,6 +169,22 @@ pub enum GamepadAction {
         /// Axis value (−128 to 127).
         value: i8,
     },
+}
+
+// ── DksKeys ──────────────────────────────────────────────────────────────────
+
+/// The up-to-4 keycodes fired across one key's physical travel by
+/// [`Action::Dks`] (Dynamic Keystroke).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DksKeys {
+    /// Fired when the key crosses its actuation threshold.
+    pub press: KeyCode,
+    /// Fired when the key reaches the deep "bottomed out" threshold.
+    pub bottom_out: KeyCode,
+    /// Fired when the key backs off the bottom-out threshold while still held.
+    pub release_from_bottom: KeyCode,
+    /// Fired when the key crosses its release threshold.
+    pub release: KeyCode,
 }
 
 // ── LayerOp ───────────────────────────────────────────────────────────────────
@@ -209,6 +241,12 @@ where
     CapsWord,
     /// Emit a consumer-control keycode.
     Consumer(ConsumerCode),
+    /// Dynamic Keystroke: up to 4 distinct keycodes across one key's physical
+    /// travel (press, bottom-out, release-from-bottom, release) — for
+    /// analog/Hall-effect switches. Only Press and Release fire on ordinary
+    /// digital switches; BottomOut/ReleaseFromBottom require an analog
+    /// scanner feeding [`crate::keyboard::KeyboardProcessor::process_dks_phase`].
+    Dks(DksKeys),
     /// Custom extension action (MIDI, gamepad, macro, etc.).
     Ext(Ext),
     /// Emit a gamepad button press or axis change.

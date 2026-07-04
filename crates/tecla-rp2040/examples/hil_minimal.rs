@@ -29,10 +29,10 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-/// Override embassy-rp's weak `__pre_init` to skip RP2040 clock/reset
-/// initialization — the stub Renode platform has no clock hardware.
-#[no_mangle]
-pub unsafe extern "C" fn __pre_init() {}
+// No `__pre_init` override here: embassy-rp defines its own (strong) one to
+// reset PSM/SIO, and rp2040-minimal.repl maps PSM as plain memory precisely
+// so that its write_and_wait read-back loop terminates. Overriding the symbol
+// again would also collide with embassy-rp's under fat LTO.
 
 #[entry]
 fn main() -> ! {

@@ -3,8 +3,11 @@
 //! Hardware-agnostic traits for matrix scanning and debouncing.
 //! Board crates provide GPIO-level implementations.
 
+pub mod analog;
 pub mod debounce;
 pub mod scanner;
 pub mod split;
+mod state;
 
+pub use analog::*;
 pub use scanner::*;

@@ -137,8 +137,8 @@ async fn matrix_task(
 #[embassy_executor::task]
 async fn keyboard_task(
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
-    processor: KeyboardProcessor<1, KEYS, 1, KEYS>,
+    mut processor: KeyboardProcessor<1, KEYS, 1, KEYS>,
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
 ) -> ! {
-    tecla::task::keyboard_task(event_ch.receiver(), processor, report_ch.sender()).await
+    tecla::task::keyboard_task(event_ch.receiver(), &mut processor, report_ch.sender()).await
 }

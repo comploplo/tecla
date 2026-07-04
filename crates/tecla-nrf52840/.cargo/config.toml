@@ -1,10 +1,10 @@
+# Linker rustflags for this target come from the workspace root
+# .cargo/config.toml — don't repeat them here: cargo *joins* rustflags arrays
+# from nested configs, and a duplicated -Tlink.x fails the link with
+# "region 'FLASH' already defined".
+
 [target.thumbv7em-none-eabihf]
 runner = "probe-rs run --chip nRF52840_xxAA"
-rustflags = [
-    "-C", "link-arg=--nmagic",
-    "-C", "link-arg=-Tlink.x",
-    "-C", "link-arg=-Tdefmt.x",
-]
 
 [build]
 target = "thumbv7em-none-eabihf"

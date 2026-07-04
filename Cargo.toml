@@ -101,3 +101,10 @@ debug         = 2
 lto           = true
 opt-level     = "s"
 codegen-units = 1
+
+# Size-optimize dependencies (embassy, metapac, …) even in dev so debug
+# firmware still fits the smaller MCUs' flash (the F303's 248K app region
+# overflows by ~53K at O0). Workspace crates stay at opt-level 0 for fast
+# rebuilds and honest debugging.
+[profile.dev.package."*"]
+opt-level = "s"
