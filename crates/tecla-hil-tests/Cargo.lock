@@ -4,7 +4,9 @@ version = 4
 
 [[package]]
 name = "hilt"
-version = "0.1.0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db371bf9d2c49f9f6f2b6d343747566b71a5334f42a78abde720504bd75a681"
 
 [[package]]
 name = "tecla-hil-tests"

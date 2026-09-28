@@ -20,7 +20,7 @@ fn firmware_path() -> PathBuf {
 #[test]
 #[ignore = "requires container runtime and cross-compiled firmware"]
 fn nrf52840_keyboard_processor_boots() {
-    let config = HilConfig::new(Platform::nrf52840(), firmware_path());
+    let config = HilConfig::single(Platform::nrf52840(), firmware_path());
     let runner = RenodeRunner::new(config);
     let output = runner.run();
     assert_hil_ok!(output);

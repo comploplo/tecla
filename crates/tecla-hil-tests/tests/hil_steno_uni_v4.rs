@@ -27,7 +27,7 @@ fn steno_uni_v4_hil_sequence() {
         elf.display()
     );
 
-    let output = RenodeRunner::new(HilConfig::new(Platform::rp2040(), elf).timeout(10)).run();
+    let output = RenodeRunner::new(HilConfig::single(Platform::rp2040(), elf).timeout(10)).run();
 
     assert!(output.passed(), "firmware did not complete:\n{output}");
     assert!(

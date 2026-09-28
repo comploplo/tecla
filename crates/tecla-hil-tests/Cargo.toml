@@ -13,4 +13,4 @@ license = "MIT OR Apache-2.0"
 hil = []
 
 [dependencies]
-hilt = { path = "../../../hilt" }
+hilt = { version = "0.2.0", features = ["matrix"] }

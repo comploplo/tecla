@@ -93,7 +93,7 @@ fn planck_keycode_verification() {
     );
 
     let elf_abs = elf.canonicalize().unwrap();
-    let info = extract_elf_info(&elf_abs, "hil_marker");
+    let info = extract_elf_info(&elf_abs, "hil_marker", "hil_fail");
 
     let report_marker =
         find_symbol(&elf_abs, "report_marker").expect("report_marker symbol not found");
@@ -147,14 +147,14 @@ fn planck_keycode_verification() {
         &format!("{}:{}", elf_abs.display(), elf_abs.display()),
         "--entrypoint",
         "/opt/renode/renode",
-        "docker.io/antmicro/renode:latest",
+        &hilt::default_renode_image(),
         "--disable-xwt",
         "--plain",
         "-e",
         "include @/hil/test.resc",
     ]);
 
-    let cmd_output = run_renode_container(cmd, 10, || {
+    let (cmd_output, _timed_out) = run_renode_container(cmd, 10, || {
         let Ok(cid) = std::fs::read_to_string(&cidfile) else {
             return;
         };
