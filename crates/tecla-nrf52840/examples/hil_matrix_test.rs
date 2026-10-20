@@ -57,9 +57,11 @@ defmt::timestamp!("");
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    let _ = hprintln!("PANIC: {}", info);
+    hprintln!("PANIC: {}", info);
     debug::exit(EXIT_FAILURE);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }
 
 #[entry]
@@ -112,9 +114,11 @@ fn main() -> ! {
     }
 
     hil_marker();
-    let _ = hprintln!("HIL OK");
+    hprintln!("HIL OK");
     debug::exit(EXIT_SUCCESS);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }
 
 #[inline(never)]

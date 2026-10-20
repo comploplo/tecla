@@ -291,6 +291,29 @@ fn planck_transpile_output_has_no_unresolved_keycodes() {
 }
 
 #[test]
+fn transpiled_output_contains_nothing_the_keymap_macro_cannot_parse() {
+    // `keymap!` parses a bare `layer` ident and rejects anything else, so an
+    // attribute in the output is a hard compile error in the generated file.
+    // The transpiler emitted `#[rustfmt::skip]` before every layer, which made
+    // every transpiled keymap non-compiling — and the golden snapshots recorded
+    // it as expected output, so nothing failed.
+    let shared = quantum_defines();
+    let layers = keymap::parse_keymap_c_with_shared(PLANCK_KEYMAP_C, &shared).unwrap();
+    let output = keymap::transpile(&layers, Some(12)).unwrap();
+
+    assert!(
+        !output.contains('#'),
+        "transpiled keymap contains an attribute or comment `keymap!` cannot parse:\n{output}"
+    );
+    for line in output.lines().map(str::trim) {
+        assert!(
+            !line.starts_with("#["),
+            "attribute in transpiled output: {line}"
+        );
+    }
+}
+
+#[test]
 fn every_resolved_keycode_variant_produces_valid_token() {
     let variants: Vec<ResolvedKeycode> = vec![
         ResolvedKeycode::NoOp,

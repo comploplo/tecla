@@ -4,7 +4,7 @@ This repository is Rust-first. Most day-to-day work only needs the Rust toolchai
 
 ## Required
 
-- `rustup` with the current stable toolchain
+- `rustup` (the toolchain version is pinned by `rust-toolchain.toml`)
 - `cargo`
 - `just`
 - `git`
@@ -41,6 +41,17 @@ Linux note:
 - `elf2uf2-rs` needs system `libudev` development files available through `pkg-config`.
 - On Debian/Ubuntu that usually means `libudev-dev`.
 - On Fedora/RHEL-like systems that usually means `systemd-libs` and `systemd-devel`.
+
+### DFU boards (ZSA Voyager)
+
+- `dfu-util` (from your package manager, e.g. `brew install dfu-util` or `apt install dfu-util`)
+- an `objcopy`: `rust-objcopy` from cargo-binutils, `llvm-objcopy`, or `arm-none-eabi-objcopy`
+
+Install with:
+
+```sh
+cargo install cargo-binutils
+```
 
 ### SWD boards
 

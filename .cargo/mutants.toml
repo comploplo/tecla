@@ -1,0 +1,9 @@
+# Equivalent mutations on valid states. Exact locations require review after edits.
+exclude_re = [
+    # accepted is a subset of previous; rising excludes previous, so OR equals XOR.
+    '(?:^|/)keyboards/tecla/asterisk_v1_4_chromatica/controls\.rs:78:40: replace \| with \^ in Controls::update$',
+    # retrigger is a subset of desired, so !desired and retrigger are disjoint.
+    '(?:^|/)keyboards/tecla/asterisk_v1_4_chromatica/controls\.rs:102:54: replace \| with \^ in Controls::deliver$',
+    # OCTAVE_UP (25) already returned None; > and >= differ only at that control.
+    '(?:^|/)keyboards/tecla/voyager_tonnetz/instrument\.rs:83:26: replace > with >= in base_note$',
+]

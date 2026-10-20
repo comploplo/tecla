@@ -4,7 +4,7 @@
 //! compatible with QMK's EEPROM layout expectations.
 
 use embedded_storage_async::nor_flash::NorFlash;
-use sequential_storage::cache::KeyCacheImpl;
+use sequential_storage::cache::CacheImpl;
 use sequential_storage::map::MapStorage;
 
 use crate::storage::StorageKey;
@@ -91,7 +91,7 @@ impl<const SIZE: usize> EepromShim<SIZE> {
     }
 
     /// Loads the EEPROM block from flash into the in-memory cache.
-    pub async fn load<S: NorFlash, C: KeyCacheImpl<StorageKey>>(
+    pub async fn load<S: NorFlash, C: CacheImpl<StorageKey>>(
         &mut self,
         storage: &mut MapStorage<StorageKey, S, C>,
         buf: &mut [u8],
@@ -111,7 +111,7 @@ impl<const SIZE: usize> EepromShim<SIZE> {
     }
 
     /// Persists the in-memory cache to flash as a single entry.
-    pub async fn flush<S: NorFlash, C: KeyCacheImpl<StorageKey>>(
+    pub async fn flush<S: NorFlash, C: CacheImpl<StorageKey>>(
         &mut self,
         storage: &mut MapStorage<StorageKey, S, C>,
         buf: &mut [u8],

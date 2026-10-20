@@ -410,18 +410,36 @@ proptest! {
             })
             .collect();
 
-        // The two streams may differ in coalescing behavior; compare *final*
-        // states only — every key in the 6KRO final set must also be in the
-        // NKRO final set.
-        let kro_final = kro_held.last().cloned().unwrap_or_default();
-        let nkro_final = nkro_held.last().cloned().unwrap_or_default();
-        for k in &kro_final {
-            prop_assert!(nkro_final.contains(k),
-                "6KRO has keycode {} but NKRO doesn't (6KRO={:?}, NKRO={:?})",
-                k, kro_final, nkro_final);
+        // A balanced stream ends with everything released, so the final
+        // states are both empty and comparing only them asserts nothing.
+        // Compare the *peak* held set instead — that is where 6KRO's
+        // 6-key truncation and NKRO's bitmap actually diverge.
+        // The generator can emit an empty stream; discard those. proptest
+        // fails the run if it has to discard too many, so this cannot quietly
+        // become a test of nothing.
+        prop_assume!(!kro_held.is_empty() && !nkro_held.is_empty());
+
+        let kro_peak = kro_held.iter().max_by_key(|s| s.len()).cloned().unwrap_or_default();
+        let nkro_peak = nkro_held.iter().max_by_key(|s| s.len()).cloned().unwrap_or_default();
+        prop_assume!(!kro_peak.is_empty());
+
+        let kro_union: std::collections::HashSet<u8> =
+            kro_held.iter().flatten().copied().collect();
+        let nkro_union: std::collections::HashSet<u8> =
+            nkro_held.iter().flatten().copied().collect();
+        for k in &kro_union {
+            prop_assert!(nkro_union.contains(k),
+                "6KRO reported keycode {} at some point but NKRO never did (6KRO={:?}, NKRO={:?})",
+                k, kro_union, nkro_union);
         }
-        // 6KRO final size is bounded by 6.
-        prop_assert!(kro_final.len() <= 6, "6KRO held {} keycodes", kro_final.len());
+        prop_assert!(
+            nkro_peak.len() >= kro_peak.len(),
+            "NKRO peak {} is smaller than 6KRO peak {} — NKRO should hold at least as many",
+            nkro_peak.len(), kro_peak.len()
+        );
+
+        // 6KRO can never report more than six keycodes at once.
+        prop_assert!(kro_peak.len() <= 6, "6KRO held {} keycodes", kro_peak.len());
     }
 
     /// Duplicate presses at the same position never increase pressed-key count.

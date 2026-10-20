@@ -575,76 +575,26 @@ mod tests {
     }
 
     #[test]
-    fn resolve_hex_literal() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("0xFF"), Some(0x00FF));
-    }
-
-    #[test]
-    fn resolve_decimal_literal() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("42"), Some(42));
-    }
-
-    #[test]
-    fn resolve_binary_literal() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("0b0100"), Some(4));
-    }
-
-    #[test]
-    fn resolve_identifier() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("KC_A"), Some(0x0004));
-    }
-
-    #[test]
-    fn resolve_chain() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("MY_KEY"), Some(0x0004));
-    }
-
-    #[test]
-    fn resolve_or_expression() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("QK_LSFT | KC_A"), Some(0x0204));
-    }
-
-    #[test]
-    fn resolve_parenthesized() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("(QK_LSFT | (KC_A))"), Some(0x0204));
-    }
-
-    #[test]
-    fn resolve_nonexistent() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("NONEXISTENT"), None);
-    }
-
-    #[test]
-    fn resolve_cycle_detection() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("CYCLE_A"), None);
-    }
-
-    #[test]
-    fn resolve_addition() {
+    fn resolve_value_evaluates_literals_names_and_expressions() {
         let mut qd = simple_defines();
         qd.defines.insert("QK_MOMENTARY".into(), "0x5220".into());
-        assert_eq!(qd.resolve_value("QK_MOMENTARY + 1"), Some(0x5221));
-    }
-
-    #[test]
-    fn resolve_shift() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("1 << 8"), Some(256));
-    }
-
-    #[test]
-    fn resolve_bitwise_and() {
-        let qd = simple_defines();
-        assert_eq!(qd.resolve_value("0xFF & 0x0F"), Some(0x0F));
+        let cases: &[(&str, Option<u16>)] = &[
+            ("0xFF", Some(0x00FF)),
+            ("42", Some(42)),
+            ("0b0100", Some(4)),
+            ("KC_A", Some(0x0004)),
+            ("MY_KEY", Some(0x0004)),
+            ("QK_LSFT | KC_A", Some(0x0204)),
+            ("(QK_LSFT | (KC_A))", Some(0x0204)),
+            ("QK_MOMENTARY + 1", Some(0x5221)),
+            ("1 << 8", Some(256)),
+            ("0xFF & 0x0F", Some(0x0F)),
+            ("NONEXISTENT", None),
+            ("CYCLE_A", None),
+        ];
+        for &(expr, want) in cases {
+            assert_eq!(qd.resolve_value(expr), want, "{expr}");
+        }
     }
 
     #[test]
@@ -655,51 +605,28 @@ mod tests {
     }
 
     #[test]
-    fn quantum_headers_kc_a() {
+    fn quantum_headers_resolve_real_qmk_keycodes() {
         let dir = quantum_dir();
-        if !dir.exists() {
-            return;
-        }
+        assert!(
+            dir.exists(),
+            "{dir:?} not found — run `git submodule update --init`"
+        );
         let qd = QmkDefines::from_quantum_dir(&dir);
         assert_eq!(qd.resolve_value("KC_A"), Some(0x0004));
-    }
-
-    #[test]
-    fn quantum_headers_qk_momentary() {
-        let dir = quantum_dir();
-        if !dir.exists() {
-            return;
-        }
-        let qd = QmkDefines::from_quantum_dir(&dir);
         assert_eq!(qd.resolve_value("QK_MOMENTARY"), Some(0x5220));
-    }
-
-    #[test]
-    fn quantum_headers_mo_macro() {
-        let dir = quantum_dir();
-        if !dir.exists() {
-            return;
-        }
-        let qd = QmkDefines::from_quantum_dir(&dir);
         assert_eq!(qd.expand_and_resolve("MO", &["1"]), Some(0x5221));
     }
 
     #[test]
-    fn replace_param_respects_underscore_boundary() {
-        let result = replace_param("QK_n_THING | (n)", "n", "42");
-        assert_eq!(result, "QK_n_THING | (42)");
-    }
-
-    #[test]
-    fn replace_param_underscore_prefix() {
-        let result = replace_param("_layer + layer", "layer", "1");
-        assert_eq!(result, "_layer + 1");
-    }
-
-    #[test]
-    fn replace_param_underscore_suffix() {
-        let result = replace_param("layer_ + layer", "layer", "1");
-        assert_eq!(result, "layer_ + 1");
+    fn replace_param_matches_whole_identifiers_only() {
+        let cases = [
+            ("QK_n_THING | (n)", "n", "42", "QK_n_THING | (42)"),
+            ("_layer + layer", "layer", "1", "_layer + 1"),
+            ("layer_ + layer", "layer", "1", "layer_ + 1"),
+        ];
+        for (body, param, arg, want) in cases {
+            assert_eq!(replace_param(body, param, arg), want, "{body}");
+        }
     }
 
     #[test]

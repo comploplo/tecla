@@ -1,0 +1,23 @@
+name: Instrument mutations
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  instruments:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Install mutation tools
+        run: |
+          cargo install --locked just
+          cargo install --locked cargo-mutants --version 27.1.0
+      - name: Mutate instrument behaviour
+        run: just mutants-instruments --jobs 2

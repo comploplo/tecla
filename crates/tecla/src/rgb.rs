@@ -105,6 +105,13 @@ pub trait Animation {
 
     /// React to a key event (optional, for reactive animations).
     fn on_key_event(&mut self, _event: KeyEvent, _led_count: usize, _buffer: &mut [Rgb]) {}
+
+    /// Adopt the controller's base color.
+    ///
+    /// [`RgbController::tick`] calls this every frame so the hue/saturation
+    /// keycodes ([`RgbCommand::HueUp`] and friends) reach the animation.
+    /// Animations with no single base color leave it as a no-op.
+    fn set_base_color(&mut self, _hsv: Hsv) {}
 }
 
 /// Sets all LEDs to a single static color.
@@ -122,6 +129,10 @@ impl Animation for SolidColor {
     }
 
     fn on_key_event(&mut self, _event: KeyEvent, _led_count: usize, _buffer: &mut [Rgb]) {}
+
+    fn set_base_color(&mut self, hsv: Hsv) {
+        self.color = hsv_to_rgb(hsv);
+    }
 }
 
 /// Rotating rainbow across all LEDs.
@@ -200,6 +211,10 @@ impl Animation for Breathing {
     }
 
     fn on_key_event(&mut self, _event: KeyEvent, _led_count: usize, _buffer: &mut [Rgb]) {}
+
+    fn set_base_color(&mut self, hsv: Hsv) {
+        self.color = hsv_to_rgb(hsv);
+    }
 }
 
 /// Keys light up on press and fade out over time.
@@ -250,6 +265,10 @@ impl Animation for ReactivePress {
                 *b = 255;
             }
         }
+    }
+
+    fn set_base_color(&mut self, hsv: Hsv) {
+        self.color = hsv_to_rgb(hsv);
     }
 }
 
@@ -791,7 +810,12 @@ impl<const LEDS: usize> RgbController<LEDS> {
             self.buffer = [Rgb::BLACK; LEDS];
             return;
         }
-        animation.tick(LEDS, elapsed_ms, &mut self.buffer);
+        animation.set_base_color(self.base_color);
+        // `speed` is a master rate multiplier: 128 is 1×, 0 freezes, 255 is ~2×.
+        let scaled_ms = elapsed_ms
+            .saturating_mul(u32::from(self.speed))
+            .wrapping_div(128);
+        animation.tick(LEDS, scaled_ms, &mut self.buffer);
         if self.brightness < 255 {
             for led in &mut self.buffer {
                 led.r = scale(led.r, self.brightness);
@@ -864,15 +888,29 @@ impl<const LEDS: usize> RgbController<LEDS> {
     }
 
     /// Returns the base HSV color.
+    ///
+    /// This is pushed into the animation on every [`tick`](Self::tick), so for
+    /// colour-bearing animations it — not the colour the animation was built
+    /// with — is what reaches the LEDs.
     #[must_use]
     pub fn base_color(&self) -> Hsv {
         self.base_color
     }
 
-    /// Returns the animation speed.
+    /// Sets the base HSV color applied to colour-bearing animations.
+    pub fn set_base_color(&mut self, hsv: Hsv) {
+        self.base_color = hsv;
+    }
+
+    /// Returns the animation speed. 128 is 1×; 0 freezes; 255 is ~2×.
     #[must_use]
     pub fn speed(&self) -> u8 {
         self.speed
+    }
+
+    /// Sets the master animation rate multiplier.
+    pub fn set_speed(&mut self, speed: u8) {
+        self.speed = speed;
     }
 
     /// Applies an [`RgbCommand`] to this controller.
@@ -1107,9 +1145,10 @@ mod tests {
         assert_eq!(ctrl.brightness(), 128);
         let mut anim = SolidColor { color: Rgb::WHITE };
         ctrl.tick(0, &mut anim);
+        // The controller pushes its base color (default hue 0: red) into the
+        // animation each tick, so this is full red at half brightness.
         for led in ctrl.buffer() {
-            assert!(led.r < 255);
-            assert!(led.r > 0);
+            assert_eq!(*led, Rgb::new(128, 0, 0));
         }
     }
 
@@ -1117,11 +1156,11 @@ mod tests {
     fn controller_full_brightness_no_dimming() {
         let mut ctrl = RgbController::<2>::new();
         ctrl.set_brightness(255);
-        let mut anim = SolidColor {
-            color: Rgb::new(200, 100, 50),
-        };
+        let hsv = Hsv::new(20, 200, 255);
+        ctrl.set_base_color(hsv);
+        let mut anim = SolidColor { color: Rgb::BLACK };
         ctrl.tick(0, &mut anim);
-        assert_eq!(ctrl.buffer().first(), Some(&Rgb::new(200, 100, 50)));
+        assert_eq!(ctrl.buffer().first(), Some(&hsv_to_rgb(hsv)));
     }
 
     #[test]
@@ -1157,6 +1196,43 @@ mod tests {
         let mut ctrl = RgbController::<1>::new();
         ctrl.handle_command(RgbCommand::BrightUp);
         assert_eq!(ctrl.brightness(), 255);
+    }
+
+    #[test]
+    fn hue_command_changes_the_pixels_a_solid_animation_emits() {
+        let mut ctrl = RgbController::<1>::new();
+        let mut anim = SolidColor { color: Rgb::BLACK };
+        ctrl.tick(0, &mut anim);
+        let before = ctrl.buffer()[0];
+        for _ in 0..8 {
+            ctrl.handle_command(RgbCommand::HueUp);
+        }
+        ctrl.tick(0, &mut anim);
+        assert_ne!(ctrl.buffer()[0], before, "HueUp never reached the LEDs");
+    }
+
+    #[test]
+    fn speed_command_changes_how_far_an_animation_advances() {
+        // Breathing is a pure function of accumulated (elapsed × speed) time,
+        // so a slower master speed must land on a different phase.
+        let mut fast = RgbController::<1>::new();
+        let mut slow = RgbController::<1>::new();
+        for _ in 0..8 {
+            slow.handle_command(RgbCommand::SpeedDown);
+        }
+        let mk = || Breathing {
+            color: Rgb::new(255, 255, 255),
+            speed: 16,
+            phase: 0,
+        };
+        let (mut a, mut b) = (mk(), mk());
+        fast.tick(100, &mut a);
+        slow.tick(100, &mut b);
+        assert_ne!(
+            fast.buffer()[0],
+            slow.buffer()[0],
+            "SpeedDown never reached the animation"
+        );
     }
 
     #[test]
@@ -1224,23 +1300,6 @@ mod tests {
     }
 
     #[test]
-    fn rgb_default_is_black() {
-        assert_eq!(Rgb::default(), Rgb::BLACK);
-    }
-
-    #[test]
-    fn hsv_default_is_zero() {
-        assert_eq!(Hsv::default(), Hsv::new(0, 0, 0));
-    }
-
-    #[test]
-    fn rgb_command_variants_distinct() {
-        assert_ne!(RgbCommand::Toggle, RgbCommand::Next);
-        assert_ne!(RgbCommand::Next, RgbCommand::Prev);
-        assert_ne!(RgbCommand::BrightUp, RgbCommand::BrightDown);
-    }
-
-    #[test]
     fn reactive_press_out_of_bounds_key_does_not_panic() {
         let mut anim = ReactivePress::new(Rgb::WHITE, 1);
         let mut buf = [Rgb::BLACK; 4];
@@ -1285,7 +1344,7 @@ mod tests {
         assert_eq!(buf[1], Rgb::BLACK);
         anim.on_key_event(KeyEvent::press(KeyPos::new(0, 1), 0), 4, &mut buf);
         anim.tick(4, 0, &mut buf);
-        assert!(brightness_sum(buf[1]) > 0);
+        assert_eq!(buf[1], Rgb::new(0, 25, 40));
     }
 
     #[test]

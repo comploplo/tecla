@@ -6,7 +6,7 @@
 //!
 //! Sleep is triggered by [`Action::Sleep`](crate::action::Action::Sleep).
 //!
-//! See also: [`ble`](crate::ble) for BLE host management.
+//! See also: [`ble`](crate::transport::ble) for BLE host management.
 
 /// Reason the MCU woke from deep sleep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,12 +71,6 @@ pub trait PowerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wake_reason_variants_distinct() {
-        assert_ne!(WakeReason::MatrixKey, WakeReason::BleEvent);
-        assert_ne!(WakeReason::UsbConnect, WakeReason::Timer);
-    }
 
     #[test]
     fn battery_level_new() {

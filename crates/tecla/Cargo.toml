@@ -5,6 +5,7 @@ edition = "2021"
 description = "Embedded Rust keyboard firmware core — no_std, async-first, MCU-agnostic"
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -12,6 +13,13 @@ documentation = "https://docs.rs/tecla"
 
 [lints]
 workspace = true
+
+[package.metadata.docs.rs]
+# Not all-features: `usb` pulls embassy-usb -> ssmarshal, which does not build
+# with `std`, and docs.rs builds for a host target. The USB reporter is
+# documented on the embedded target below instead.
+features = ["testing", "embassy", "storage", "via", "autocorrect", "autocomplete"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["autocorrect", "autocomplete"]
@@ -28,22 +36,33 @@ autocomplete = []
 # The core library is no_std by default.
 std = []
 
-# Unlocks deterministic clock injection and the simulate! macro for tests.
+# Alias for `std`, used by the coverage and integration-test targets.
 testing = ["std"]
 
-# Hardware-in-the-loop integration tests via Renode + Podman/Docker.
-hil = ["std"]
+# Host-only discovery target for firmware mutation tests.
+mutation-testing = ["testing", "embassy"]
 
 # Enables the async Embassy orchestrator — task::run() and the async scanner /
 # reporter traits. Requires an Embassy time driver in the final binary.
 embassy = ["dep:embassy-time", "dep:embassy-sync", "dep:embedded-io-async"]
+
+# Composite USB reporter — one HID interface per report variant plus USB-MIDI.
+# Board crates enable this and re-export CompositeUsbReporter rather than each
+# reimplementing the same routing.
+#
+# MUTUALLY EXCLUSIVE WITH `std`/`testing`: embassy-usb depends on ssmarshal,
+# which does not compile when serde has `std` enabled. This is why the host
+# gates use an explicit feature list rather than --all-features, and why
+# `just hack` excludes it. The feature is exercised by `just build-boards`,
+# which cross-compiles every board crate with it enabled.
+usb = ["embassy", "dep:embassy-usb"]
+
+# USB-MIDI interface on the composite reporter. Separate from `usb` because
+# embassy-usb's MIDI class costs ~4KB of flash — enough to overflow an
+# STM32F303CC that only wanted a keyboard.
+usb-midi = ["usb"]
 storage = ["dep:postcard", "dep:embedded-storage-async", "dep:sequential-storage", "dep:serde"]
 via = ["storage"]
-
-# MCU arch — these will gate embassy-executor features in board crates.
-arch-cortex-m = []
-arch-riscv32  = []
-arch-avr      = []
 
 [dependencies]
 embedded-hal       = { workspace = true }
@@ -53,6 +72,7 @@ defmt              = { workspace = true }
 embassy-time = { workspace = true, optional = true }
 embassy-sync     = { workspace = true, optional = true }
 embedded-io-async = { workspace = true, optional = true }
+embassy-usb      = { workspace = true, optional = true }
 
 serde = { workspace = true, optional = true }
 
@@ -61,11 +81,20 @@ embedded-storage-async = { workspace = true, optional = true }
 sequential-storage     = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Doc-tests in this crate use the macros to show a realistic keymap.
+# Path-only (no version) — see the matching note in tecla-macros/Cargo.toml.
+tecla-macros    = { path = "../tecla-macros" }
 similar-asserts = { workspace = true }
 serde_json      = { workspace = true }
-tecla-config    = { version = "0.1.0", path = "../tecla-config" }
+tecla-config    = { path = "../tecla-config" }
 proptest        = { workspace = true }
 criterion       = { workspace = true }
+embedded-hal-async = { workspace = true }
+embassy-futures = "0.1"
+
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+# Host tests exercise async delivery failures without an embedded RTT logger.
+defmt = { workspace = true, features = ["unstable-test"] }
 
 [[bench]]
 name = "dafsa_lookup"
@@ -76,3 +105,11 @@ required-features = ["testing"]
 name = "process_event"
 harness = false
 required-features = ["testing"]
+
+# cargo-mutants discovers binaries, but not integration-test module roots.
+[[bin]]
+name = "instrument-mutations"
+path = "mutation.rs"
+required-features = ["mutation-testing"]
+test = false
+bench = false

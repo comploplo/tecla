@@ -5,6 +5,7 @@ edition = "2021"
 description = "Tecla keyboard firmware board support for RP2040"
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -14,12 +15,14 @@ documentation = "https://docs.rs/tecla-rp2040"
 workspace = true
 
 [dependencies]
-tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "autocomplete"] }
+tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "usb", "autocomplete"] }
 tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
 embassy-executor = { workspace = true, features = ["platform-cortex-m", "executor-thread"] }
 embassy-rp       = { workspace = true }
 embassy-usb      = { workspace = true }
+# Same version embassy-rp uses for its PWM clock divider type.
+fixed            = "1.29"
 embassy-time     = { workspace = true }
 embassy-sync     = { workspace = true }
 
@@ -32,7 +35,7 @@ static_cell  = { workspace = true }
 heapless     = { workspace = true }
 portable-atomic = { version = "1", features = ["critical-section"] }
 
-cortex-m-semihosting = { version = "0.5", optional = true }
+cortex-m-semihosting = { version = "0.6", optional = true }
 
 [build-dependencies]
 tecla-config = { version = "0.1.0", path = "../tecla-config" }
@@ -40,8 +43,25 @@ tecla-config = { version = "0.1.0", path = "../tecla-config" }
 [features]
 hil = ["dep:cortex-m-semihosting"]
 steno-dictionary = []
+usb-midi = ["tecla/usb-midi"]
 # Demonstrates running autocorrect on core1 (build.rs emits a small demo trie).
 core1-autocorrect = ["tecla/autocorrect"]
+
+[[example]]
+name = "asterisk_v1_4_midi"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "asterisk_v1_4_autochord"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "asterisk_v1_4_omnichord"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "asterisk_v1_4_chromatica"
+required-features = ["usb-midi"]
 
 [[example]]
 name = "core1_autocorrect"

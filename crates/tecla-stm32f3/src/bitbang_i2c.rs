@@ -11,24 +11,38 @@
 //! [`crate::mcp23018::Mcp23018`] and [`crate::scanner::VoyagerScanner`] use it
 //! over the async HAL trait. The microsecond-scale bit edges are timed with a
 //! short busy-wait (accurate), but the master yields to the executor after every
-//! byte ([`Timer`]) so a full scan never blocks USB for more than ~one byte. An
-//! earlier all-busy-wait version starved `usb_task` and killed both halves —
-//! this does not.
+//! byte so a full scan never blocks USB for more than ~one byte. An earlier
+//! all-busy-wait version starved `usb_task` and killed both halves — this does
+//! not.
 //!
-//! Open-drain is emulated with [`Flex`]: "release high" switches the pin to
-//! input so the board's external pull-ups raise the line; "drive low" switches
-//! to output-low. ~400 kHz SCL (`HALF_PERIOD_CYCLES` at the 72 MHz core).
+//! Note what "does not block" means here: the busy-wait holds the CPU for the
+//! whole of each byte. The yield only lets other tasks in between bytes.
+//!
+//! Both pins are set to real open-drain once in [`BitBangI2c::new`]: "release
+//! high" lets the board's external pull-ups raise the line, "drive low" pulls
+//! it down, and neither touches the pin's mode register.
+//!
+//! # Speed
+//!
+//! `HALF_PERIOD_CYCLES` is the tuning knob, but it is not a cycle count:
+//! `cortex_m::asm::delay(n)` runs `1 + n/2` iterations of 3–4 cycles, so the
+//! delay costs roughly `2n` cycles, not `n`. The resulting SCL is well under
+//! the 400 kHz all three slave families support. Raising it is a hardware
+//! calibration, not a code change — this bus has four devices plus a TRRS
+//! cable's worth of capacitance, and 400 kHz demands a 300 ns rise time. Back
+//! it off if ACKs start missing or reads come back garbled.
 
-use embassy_stm32::gpio::{Flex, Pull, Speed};
-use embassy_time::Timer;
+use embassy_futures::yield_now;
+use embassy_stm32::gpio::{Flex, Speed};
 use embedded_hal_async::i2c::{
     Error, ErrorKind, ErrorType, I2c, NoAcknowledgeSource, Operation, SevenBitAddress,
 };
 
-/// Half a bit period: ~1.25 µs at 72 MHz → ~400 kHz SCL.
+/// Half a bit period, as the argument to `asm::delay` — see the module docs:
+/// the real cost is about twice this in cycles, so ~2.5 µs at 72 MHz.
 const HALF_PERIOD_CYCLES: u32 = 90;
-/// Microseconds to yield to the executor after each byte (also inter-byte gap).
-const YIELD_US: u64 = 3;
+/// Half-periods to wait for a stretched clock before giving up (~1.25 ms).
+const STRETCH_TIMEOUT_POLLS: u32 = 1_000;
 
 fn edge_delay() {
     cortex_m::asm::delay(HALF_PERIOD_CYCLES);
@@ -57,7 +71,14 @@ pub struct BitBangI2c<'d> {
 
 impl<'d> BitBangI2c<'d> {
     /// Builds a master on `scl`/`sda`, leaving both lines released (idle high).
-    pub fn new(scl: Flex<'d>, sda: Flex<'d>) -> Self {
+    ///
+    /// Both pins are put into real open-drain mode once, here. The alternative —
+    /// flipping between input and output on every edge to emulate it — costs
+    /// three interrupt-masked register writes per transition, roughly 27 of them
+    /// per byte, for no benefit the hardware does not already provide.
+    pub fn new(mut scl: Flex<'d>, mut sda: Flex<'d>) -> Self {
+        scl.set_as_input_output(Speed::Low);
+        sda.set_as_input_output(Speed::Low);
         let mut this = Self { scl, sda };
         this.release_scl();
         this.release_sda();
@@ -65,19 +86,33 @@ impl<'d> BitBangI2c<'d> {
         this
     }
 
+    /// Releases SCL and waits for it to actually rise.
+    ///
+    /// A slave is allowed to hold SCL low to buy time ("clock stretching"), and
+    /// the master must not clock on until it lets go. The MCP23018 and the
+    /// IS31FL3731s never stretch, so this went unnoticed — but an MCU-based
+    /// slave such as the Navigator's SC18IS606 bridge does, and clocking
+    /// through a stretch reads back zeros.
+    ///
+    /// Bounded, so a device holding SCL low forever cannot wedge the executor —
+    /// that is the whole reason this bit-bang master exists.
     fn release_scl(&mut self) {
-        self.scl.set_as_input(Pull::None);
+        self.scl.set_high();
+        for _ in 0..STRETCH_TIMEOUT_POLLS {
+            if self.scl.is_high() {
+                return;
+            }
+            edge_delay();
+        }
     }
     fn drive_scl_low(&mut self) {
         self.scl.set_low();
-        self.scl.set_as_output(Speed::Low);
     }
     fn release_sda(&mut self) {
-        self.sda.set_as_input(Pull::None);
+        self.sda.set_high();
     }
     fn drive_sda_low(&mut self) {
         self.sda.set_low();
-        self.sda.set_as_output(Speed::Low);
     }
 
     fn start(&mut self) {
@@ -196,15 +231,18 @@ impl I2c<SevenBitAddress> for BitBangI2c<'_> {
                             self.stop();
                             return Err(BitBangError::Nack);
                         }
-                        // Yield so USB/other tasks run between bytes.
-                        Timer::after_micros(YIELD_US).await;
+                        // Hand the executor a turn between bytes so USB and the other bus
+                        // consumers run. A plain yield, not a timer: I2C has no minimum
+                        // inter-byte gap, and a timer here meant a queue insert, an alarm
+                        // reprogram, and forced idle tens of thousands of times a second.
+                        yield_now().await;
                     }
                 }
                 Operation::Read(buf) => {
                     let last = buf.len();
                     for (i, slot) in buf.iter_mut().enumerate() {
                         *slot = self.read_byte(i + 1 != last);
-                        Timer::after_micros(YIELD_US).await;
+                        yield_now().await;
                     }
                 }
             }

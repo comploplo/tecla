@@ -20,6 +20,7 @@
 //! (144 bytes, one per channel). On the function page, the Shutdown register
 //! is at `0x0A` (`0x00` = shutdown, `0x01` = normal operation).
 
+use embassy_futures::yield_now;
 use embedded_hal_async::i2c::I2c;
 
 /// Left-hand chip address (address pin grounded).
@@ -36,6 +37,8 @@ const BLINK_CONTROL: u8 = 0x12;
 const BLINK_CONTROL_LEN: usize = 18;
 const PWM_TABLE: u8 = 0x24;
 const PWM_TABLE_LEN: usize = 144;
+/// Bound how long an LED write can hold the bus shared with the matrix scan.
+const PWM_CHUNK_LEN: usize = 8;
 const SHUTDOWN: u8 = 0x0A;
 
 /// A driver for one IS31FL3731 chip bound to an I2C bus and address.
@@ -51,7 +54,9 @@ impl<I2C: I2c> Is31fl3731<I2C> {
     }
 
     async fn select_page(&mut self, page: u8) -> Result<(), I2C::Error> {
-        self.i2c.write(self.addr, &[CMD_REG, page]).await
+        self.i2c.write(self.addr, &[CMD_REG, page]).await?;
+        yield_now().await;
+        Ok(())
     }
 
     /// Powers the chip up, enables every PWM channel, and zeroes brightness.
@@ -65,21 +70,23 @@ impl<I2C: I2c> Is31fl3731<I2C> {
     pub async fn init(&mut self) -> Result<(), I2C::Error> {
         self.select_page(FUNCTION_PAGE).await?;
         self.i2c.write(self.addr, &[SHUTDOWN, 0x00]).await?;
+        yield_now().await;
         self.i2c.write(self.addr, &[SHUTDOWN, 0x01]).await?;
+        yield_now().await;
 
         self.select_page(FRAME_0).await?;
 
         let mut led_control = [0xFFu8; LED_CONTROL_LEN + 1];
         led_control[0] = LED_CONTROL;
         self.i2c.write(self.addr, &led_control).await?;
+        yield_now().await;
 
         let mut blink_control = [0u8; BLINK_CONTROL_LEN + 1];
         blink_control[0] = BLINK_CONTROL;
         self.i2c.write(self.addr, &blink_control).await?;
+        yield_now().await;
 
-        let mut pwm = [0u8; PWM_TABLE_LEN + 1];
-        pwm[0] = PWM_TABLE;
-        self.i2c.write(self.addr, &pwm).await
+        self.write_frame(&[0; PWM_TABLE_LEN]).await
     }
 
     /// Pushes a full 144-channel brightness frame.
@@ -87,9 +94,36 @@ impl<I2C: I2c> Is31fl3731<I2C> {
     /// # Errors
     /// Returns the underlying I2C error if the transfer fails.
     pub async fn write_frame(&mut self, pwm: &[u8; PWM_TABLE_LEN]) -> Result<(), I2C::Error> {
-        let mut buf = [0u8; PWM_TABLE_LEN + 1];
-        buf[0] = PWM_TABLE;
-        buf[1..].copy_from_slice(pwm);
-        self.i2c.write(self.addr, &buf).await
+        self.write_frame_diff(pwm, None).await
+    }
+
+    /// Writes changed PWM chunks, yielding the shared bus between transactions.
+    ///
+    /// `previous` must describe a successfully delivered frame. Pass `None`
+    /// after any error or reset so every channel is restored.
+    ///
+    /// # Errors
+    /// Returns the underlying I2C error if a chunk fails to transfer.
+    pub async fn write_frame_diff(
+        &mut self,
+        pwm: &[u8; PWM_TABLE_LEN],
+        previous: Option<&[u8; PWM_TABLE_LEN]>,
+    ) -> Result<(), I2C::Error> {
+        for (index, chunk) in pwm.chunks(PWM_CHUNK_LEN).enumerate() {
+            let start = index * PWM_CHUNK_LEN;
+            if previous.is_some_and(|old| old[start..start + chunk.len()] == *chunk) {
+                continue;
+            }
+            let mut buf = [0u8; PWM_CHUNK_LEN + 1];
+            // The largest PWM offset is 0x24 + 136, safely within one byte.
+            #[expect(clippy::cast_possible_truncation, clippy::as_conversions)]
+            let register = PWM_TABLE + start as u8;
+            buf[0] = register;
+            buf[1..=chunk.len()].copy_from_slice(chunk);
+            self.i2c.write(self.addr, &buf[..chunk.len() + 1]).await?;
+            // SharedI2c releases its mutex when write returns; give scanning a turn.
+            yield_now().await;
+        }
+        Ok(())
     }
 }

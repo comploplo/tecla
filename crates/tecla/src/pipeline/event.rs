@@ -117,21 +117,6 @@ mod tests {
     }
 
     #[test]
-    fn key_pos_equal_when_same() {
-        assert_eq!(KeyPos::new(1, 3), KeyPos::new(1, 3));
-    }
-
-    #[test]
-    fn key_pos_not_equal_different_row() {
-        assert_ne!(KeyPos::new(0, 3), KeyPos::new(1, 3));
-    }
-
-    #[test]
-    fn key_pos_not_equal_different_col() {
-        assert_ne!(KeyPos::new(1, 0), KeyPos::new(1, 3));
-    }
-
-    #[test]
     fn key_pos_ordered_by_row_then_col() {
         assert!(KeyPos::new(0, 0) < KeyPos::new(0, 1));
         assert!(KeyPos::new(0, 9) < KeyPos::new(1, 0));
@@ -184,30 +169,10 @@ mod tests {
     }
 
     #[test]
-    fn press_and_release_differ_for_same_pos_and_time() {
-        let pos = KeyPos::new(0, 0);
-        assert_ne!(KeyEvent::press(pos, 0), KeyEvent::release(pos, 0));
-    }
-
-    #[test]
-    fn events_differ_by_timestamp() {
-        let pos = KeyPos::new(0, 0);
-        assert_ne!(KeyEvent::press(pos, 0), KeyEvent::press(pos, 1));
-    }
-
-    #[test]
     fn events_differ_by_position() {
         assert_ne!(
             KeyEvent::press(KeyPos::new(0, 0), 0),
             KeyEvent::press(KeyPos::new(0, 1), 0),
-        );
-    }
-
-    #[test]
-    fn encoder_directions_are_distinct() {
-        assert_ne!(
-            EncoderDirection::Clockwise,
-            EncoderDirection::CounterClockwise
         );
     }
 

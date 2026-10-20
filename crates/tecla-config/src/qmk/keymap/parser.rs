@@ -780,10 +780,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     #[test]
     fn meow65_mo_fn_resolves() {
         let kb = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../keyboards");
-        let path = kb.join("meow65/keymaps/default/keymap.c");
-        if !path.exists() {
-            return;
-        }
+        let path = kb.join("keyboards/meow65/keymaps/default/keymap.c");
+        assert!(
+            path.exists(),
+            "{path:?} not found — run `git submodule update --init`"
+        );
         let quantum = kb.join("quantum");
         let shared = QmkDefines::from_quantum_dir(&quantum);
         let layers = parse_keymap_c_with_includes(&path, &shared).unwrap();
@@ -821,9 +822,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     fn quantum_dir_includes_jp_bsls() {
         let kb = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../keyboards");
         let quantum = kb.join("quantum");
-        if !quantum.exists() {
-            return;
-        }
+        assert!(
+            quantum.exists(),
+            "{quantum:?} not found — run `git submodule update --init`"
+        );
         let shared = QmkDefines::from_quantum_dir(&quantum);
         assert_eq!(
             shared.defines().get("JP_BSLS").map(|s| s.as_str()),

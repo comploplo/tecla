@@ -51,6 +51,35 @@ pub const LAYER_CHANGE: &[Tone] = &[Tone::new(440, 50)];
 /// Two-tone error feedback.
 pub const ERROR: &[Tone] = &[Tone::new(200, 200), Tone::new(150, 200)];
 
+/// Computes a fractional PWM clock divider for a target tone frequency.
+///
+/// Returns the divider in 1/16ths (a 12.4 fixed-point value), which is the
+/// representation RP2040-style PWM peripherals use: 8 integer bits plus 4
+/// fractional. Solves `divider = sys_clk / (freq * top)`.
+///
+/// The result is clamped to `16..=4095` (1.0..=255.9375). A frequency below
+/// the representable range clamps to the lowest available pitch rather than
+/// wrapping to an unrelated one, and `freq == 0` (a rest) returns 1.0 rather
+/// than dividing by zero — callers should gate the output off for rests
+/// instead of relying on the divider.
+///
+/// Lives here rather than in a board crate so it is testable on the host;
+/// board crates convert the result to their HAL's fixed-point type.
+#[must_use]
+pub const fn pwm_divider_16ths(sys_clk_hz: u32, top: u16, freq: u16) -> u16 {
+    if freq == 0 || top == 0 {
+        return 16;
+    }
+    let sixteenths = (sys_clk_hz as u64 * 16) / (freq as u64 * top as u64);
+    if sixteenths < 16 {
+        16
+    } else if sixteenths > 4095 {
+        4095
+    } else {
+        sixteenths as u16
+    }
+}
+
 /// Audio control commands mapped to [`Action::Audio`](crate::action::Action::Audio).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AudioCommand {
@@ -148,30 +177,6 @@ mod tests {
     }
 
     #[test]
-    fn startup_melody_not_empty() {
-        assert!(!STARTUP.is_empty());
-    }
-
-    #[test]
-    fn layer_change_melody_not_empty() {
-        assert!(!LAYER_CHANGE.is_empty());
-    }
-
-    #[test]
-    fn error_melody_not_empty() {
-        assert!(!ERROR.is_empty());
-    }
-
-    #[test]
-    fn audio_command_variants_distinct() {
-        assert_ne!(AudioCommand::Stop, AudioCommand::Toggle);
-        assert_ne!(
-            AudioCommand::PlayTone(Tone::new(440, 100)),
-            AudioCommand::Stop
-        );
-    }
-
-    #[test]
     fn audio_controller_default_enabled() {
         let ctrl = AudioController::new();
         assert!(ctrl.enabled());
@@ -260,5 +265,74 @@ mod tests {
     fn tone_equality() {
         assert_eq!(Tone::new(440, 100), Tone::new(440, 100));
         assert_ne!(Tone::new(440, 100), Tone::new(441, 100));
+    }
+
+    // ── PWM divider ──────────────────────────────────────────────────────────
+
+    const RP2040_CLK: u32 = 125_000_000;
+    const TOP: u16 = 4000;
+
+    /// Inverts pwm_divider_16ths — what pitch does this divider actually give?
+    fn freq_for(sixteenths: u16) -> u32 {
+        ((u64::from(RP2040_CLK) * 16) / (u64::from(sixteenths) * u64::from(TOP))) as u32
+    }
+
+    #[test]
+    fn divider_round_trips_to_the_requested_pitch() {
+        // Error must stay well under a semitone (~6%), or it is audibly the
+        // wrong note. C5 through C8.
+        for freq in [523u16, 587, 659, 698, 784, 880, 988, 1047, 2093, 4186] {
+            let got = freq_for(pwm_divider_16ths(RP2040_CLK, TOP, freq));
+            let err = (i64::from(got) - i64::from(freq)).unsigned_abs();
+            assert!(
+                err * 100 / u64::from(freq) < 6,
+                "{freq}Hz round-tripped to {got}Hz"
+            );
+        }
+    }
+
+    #[test]
+    fn divider_is_clamped_to_the_representable_range() {
+        // Below the range: clamp to the slowest divider (lowest pitch), never
+        // wrap around to a high one.
+        assert_eq!(pwm_divider_16ths(RP2040_CLK, TOP, 1), 4095);
+        // Above the range: clamp to the fastest divider. Needs a frequency
+        // above sys_clk / TOP to actually hit the floor.
+        assert_eq!(pwm_divider_16ths(RP2040_CLK, TOP, u16::MAX), 16);
+        for freq in [1u16, 100, 490, 1000, 20_000, u16::MAX] {
+            let d = pwm_divider_16ths(RP2040_CLK, TOP, freq);
+            assert!((16..=4095).contains(&d), "{freq}Hz produced divider {d}");
+        }
+    }
+
+    #[test]
+    fn rest_and_zero_top_do_not_divide_by_zero() {
+        assert_eq!(pwm_divider_16ths(RP2040_CLK, TOP, 0), 16);
+        assert_eq!(pwm_divider_16ths(RP2040_CLK, 0, 440), 16);
+    }
+
+    #[test]
+    fn every_builtin_melody_tone_is_playable() {
+        for melody in [STARTUP, LAYER_CHANGE, ERROR] {
+            for tone in melody {
+                if tone.frequency_hz == 0 {
+                    continue;
+                }
+                let got = freq_for(pwm_divider_16ths(RP2040_CLK, TOP, tone.frequency_hz));
+                let err = (i64::from(got) - i64::from(tone.frequency_hz)).unsigned_abs();
+                assert!(
+                    err * 100 / u64::from(tone.frequency_hz) < 6,
+                    "builtin melody tone {}Hz would play as {got}Hz",
+                    tone.frequency_hz
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_slower_clock_needs_a_smaller_divider_for_the_same_pitch() {
+        let fast = pwm_divider_16ths(125_000_000, TOP, 440);
+        let slow = pwm_divider_16ths(64_000_000, TOP, 440);
+        assert!(slow < fast, "slower sys_clk should divide less");
     }
 }

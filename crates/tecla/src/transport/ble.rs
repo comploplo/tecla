@@ -6,7 +6,7 @@
 //! peers, switchable at runtime via
 //! [`Action::BleHostSwitch`](crate::action::Action::BleHostSwitch).
 //!
-//! See also: [`power`](crate::power) for deep sleep and battery monitoring.
+//! See also: [`power`](crate::pipeline::power) for deep sleep and battery monitoring.
 
 /// BLE-specific errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,18 +225,23 @@ impl<const MAX_HOSTS: usize> Default for BleHostManager<MAX_HOSTS> {
 #[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
+    use core::fmt::Write;
 
     #[test]
-    fn ble_command_variants_distinct() {
-        assert_ne!(BleCommand::Advertise, BleCommand::Disconnect);
-        assert_ne!(BleCommand::SwitchHost(0), BleCommand::SwitchHost(1));
-        assert_ne!(BleCommand::Advertise, BleCommand::SwitchHost(0));
-    }
-
-    #[test]
-    fn ble_error_variants_distinct() {
-        assert_ne!(BleError::NotConnected, BleError::AdvertisingFailed);
-        assert_ne!(BleError::BondStorageFull, BleError::ConnectionFailed);
+    fn ble_error_messages() {
+        for (err, msg) in [
+            (BleError::NotConnected, "no active BLE connection"),
+            (
+                BleError::AdvertisingFailed,
+                "BLE advertising failed to start",
+            ),
+            (BleError::BondStorageFull, "all bond storage slots are full"),
+            (BleError::ConnectionFailed, "BLE connection attempt failed"),
+        ] {
+            let mut s = heapless::String::<64>::new();
+            write!(s, "{err}").unwrap();
+            assert_eq!(s, msg);
+        }
     }
 
     #[test]
@@ -336,41 +341,6 @@ mod tests {
         let b = BleHostManager::<4>::default();
         assert_eq!(a.active_host(), b.active_host());
         assert_eq!(a.bond_count(), b.bond_count());
-    }
-
-    #[test]
-    fn ble_error_display_non_empty() {
-        use core::fmt::Write;
-        struct Buf([u8; 64], usize);
-        impl Write for Buf {
-            fn write_str(&mut self, s: &str) -> core::fmt::Result {
-                let b = s.as_bytes();
-                let end = self.1 + b.len();
-                let dest = self.0.get_mut(self.1..end).ok_or(core::fmt::Error)?;
-                dest.copy_from_slice(b);
-                self.1 = end;
-                Ok(())
-            }
-
-            fn write_char(&mut self, c: char) -> core::fmt::Result {
-                self.write_str(c.encode_utf8(&mut [0; 4]))
-            }
-
-            fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> core::fmt::Result {
-                core::fmt::write(self, args)
-            }
-        }
-        let variants = [
-            BleError::NotConnected,
-            BleError::AdvertisingFailed,
-            BleError::BondStorageFull,
-            BleError::ConnectionFailed,
-        ];
-        for v in &variants {
-            let mut buf = Buf([0; 64], 0);
-            write!(buf, "{v}").unwrap();
-            assert!(buf.1 > 0);
-        }
     }
 
     #[test]

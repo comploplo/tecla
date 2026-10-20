@@ -1,6 +1,6 @@
 //! Telemetry facade.
 //!
-//! Implementation lives in [`core`]; this module keeps the public surface
+//! Implementation lives in `core`; this module keeps the public surface
 //! shallow and re-exports the telemetry types.
 
 mod core;

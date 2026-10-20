@@ -8,8 +8,8 @@ members = [
     "crates/tecla-stm32f4",
     "crates/tecla-stm32f3",
 ]
-# esp-hal 1.0 + esp-rom-sys has an i8::to_ascii_lowercase bug on the current
-# espup toolchain (1.93.0.0). Re-include once upstream fixes land.
+# ESP32 uses a separate Xtensa toolchain; re-include after its firmware build
+# and hardware behavior are validated.
 exclude = [
     "crates/tecla-esp32s3",
 ]
@@ -18,6 +18,7 @@ resolver = "2"
 [workspace.package]
 authors = ["Gabe Oppenheimer"]
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/comploplo/tecla"
 readme = "README.md"
 keywords = ["keyboard", "firmware", "embedded", "hid", "no-std"]
 categories = ["embedded", "hardware-support", "no-std"]
@@ -45,35 +46,40 @@ embedded-hal-async = "1"
 embassy-executor = { version = "0.10", features = ["executor-thread"] }
 embassy-time     = "0.5"
 embassy-usb      = "0.6"
-embassy-sync     = "0.7"
+embassy-sync     = "0.8"
 
 # no_std utilities
-heapless = "0.8"
+heapless = "0.9"
 
 # Embedded logging (zero-overhead, RTT-based)
 defmt = "1"
 
 # Serialization (std-only, used by tecla core for config round-tripping)
-serde      = { version = "1", features = ["derive"] }
+# default-features = false: tecla is no_std and uses serde via postcard for
+# flash storage. With std on, the `storage`/`via` features cannot compile for
+# any embedded target at all. Host crates opt back into std explicitly.
+serde      = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
-serde_yml  = "0.0.12"
+noyalib    = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }
 nom        = "8"
-toml       = "0.8"
+toml       = "1"
 
 # Persistent storage
 embedded-storage-async = "0.4"
-sequential-storage     = { version = "7", features = ["heapless"] }
-embedded-io-async      = "0.6"
+# heapless-09, not heapless: v8 ships a Value impl per heapless generation and
+# this workspace is on heapless 0.9.
+sequential-storage     = { version = "8", features = ["heapless-09"] }
+embedded-io-async      = "0.7"
 postcard               = { version = "1", default-features = false, features = ["heapless"] }
 
 # Proc macro utilities (tecla-macros)
-syn        = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 quote      = "1"
 proc-macro2 = "1"
 
 # RP2040 board support
 embassy-rp  = { version = "0.10", features = ["defmt", "time-driver", "critical-section-impl", "rp2040"] }
-embassy-nrf = { version = "0.10", features = ["nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac"] }
+embassy-nrf = { version = "0.11", features = ["nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac"] }
 embassy-stm32 = { version = "0.6", features = ["stm32f411ce", "time-driver-any", "exti", "unstable-pac"] }
 cortex-m    = { version = "0.7", features = ["inline-asm"] }
 cortex-m-rt = "0.7"
@@ -81,22 +87,16 @@ defmt-rtt   = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
 static_cell = "2"
 
-# ESP32-S3 board support
-esp-hal         = { version = "1", features = ["esp32s3"] }
-esp-hal-embassy = { version = "0.9", features = ["esp32s3"] }
-esp-println     = { version = "0.14", features = ["esp32s3"] }
-esp-backtrace   = { version = "0.15", features = ["esp32s3", "panic-handler"] }
-
 # Tree-sitter (C parser for QMK keymap transpiler)
-tree-sitter   = "0.26"
+tree-sitter   = "0.27"
 tree-sitter-c = "0.24"
 
 # Testing
-similar-asserts = "1"
+similar-asserts = "2"
 trybuild        = { version = "1", features = ["diff"] }
 insta           = { version = "1", features = ["glob"] }
 proptest        = "1"
-criterion       = "0.5"
+criterion       = "0.8"
 
 [profile.release]
 debug         = 2

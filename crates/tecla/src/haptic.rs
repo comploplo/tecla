@@ -37,6 +37,97 @@ pub enum HapticCommand {
     Toggle,
 }
 
+// ── DRV2605L ──────────────────────────────────────────────────────────────────
+//
+// Register map and waveform mapping for the TI DRV2605L, the usual haptic
+// driver on a keyboard. Kept here rather than in a board crate so it is
+// testable on the host: a board crate only compiles for its MCU target, so
+// tests living there would never run.
+
+/// DRV2605L I2C device address (fixed by the part).
+pub const DRV2605L_ADDR: u8 = 0x5A;
+
+/// DRV2605L register addresses used by the driver.
+pub mod drv2605l {
+    /// Mode register: standby bit and trigger mode.
+    pub const REG_MODE: u8 = 0x01;
+    /// Fires a waveform when MODE is set to internal trigger.
+    pub const REG_GO: u8 = 0x0C;
+    /// First of the eight waveform-sequence slots.
+    pub const REG_WAVEFORM_SEQ0: u8 = 0x04;
+    /// Real-time playback amplitude, used for `Custom` effects.
+    pub const REG_RTP_INPUT: u8 = 0x02;
+    /// Library selection (1–5 ERM, 6 LRA).
+    pub const REG_LIBRARY: u8 = 0x03;
+    /// Feedback control: ERM vs LRA selection.
+    pub const REG_FEEDBACK: u8 = 0x1A;
+
+    /// MODE value for internal-trigger waveform playback.
+    pub const MODE_INTERNAL_TRIGGER: u8 = 0x00;
+    /// MODE value for real-time playback (amplitude written to RTP_INPUT).
+    pub const MODE_REALTIME: u8 = 0x05;
+    /// MODE value for standby (lowest power).
+    pub const MODE_STANDBY: u8 = 0x40;
+    /// Terminates a waveform sequence.
+    pub const WAVEFORM_END: u8 = 0x00;
+    /// ERM library 1 — the general-purpose click library.
+    pub const LIBRARY_ERM_A: u8 = 0x01;
+}
+
+/// How a [`HapticEffect`] is realised on a DRV2605L.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drv2605lPlayback {
+    /// Fire up to two ROM waveform effects in sequence, then GO.
+    ///
+    /// The values are effect IDs from the DRV2605L's internal library;
+    /// `None` in the second slot means a single-effect sequence.
+    Waveform {
+        /// First waveform slot.
+        first: u8,
+        /// Second waveform slot, if the effect is a double.
+        second: Option<u8>,
+    },
+    /// Drive the actuator directly at a fixed amplitude for a duration.
+    RealTime {
+        /// Amplitude written to `REG_RTP_INPUT`.
+        amplitude: u8,
+        /// How long to hold it, in milliseconds.
+        duration_ms: u16,
+    },
+}
+
+impl HapticEffect {
+    /// Maps this effect onto the DRV2605L's playback modes.
+    ///
+    /// The waveform IDs are from the DRV2605L ROM library:
+    /// 1 = "Strong Click 100%", 7 = "Soft Bump 100%", 10 = "Double Click 100%".
+    #[must_use]
+    pub const fn drv2605l_playback(self) -> Drv2605lPlayback {
+        match self {
+            Self::Click => Drv2605lPlayback::Waveform {
+                first: 1,
+                second: None,
+            },
+            Self::Bump => Drv2605lPlayback::Waveform {
+                first: 7,
+                second: None,
+            },
+            // Waveform 10 is a double click on its own; no second slot needed.
+            Self::DoubleClick => Drv2605lPlayback::Waveform {
+                first: 10,
+                second: None,
+            },
+            Self::Custom {
+                strength,
+                duration_ms,
+            } => Drv2605lPlayback::RealTime {
+                amplitude: strength,
+                duration_ms,
+            },
+        }
+    }
+}
+
 /// Async haptic hardware driver (DRV2605L-style).
 #[cfg(feature = "embassy")]
 #[expect(
@@ -109,26 +200,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn haptic_effect_variants_distinct() {
-        assert_ne!(HapticEffect::Click, HapticEffect::Bump);
-        assert_ne!(HapticEffect::Bump, HapticEffect::DoubleClick);
-    }
-
-    #[test]
     fn haptic_effect_custom() {
         let e = HapticEffect::Custom {
             strength: 128,
             duration_ms: 50,
         };
         assert!(matches!(e, HapticEffect::Custom { .. }));
-    }
-
-    #[test]
-    fn haptic_command_variants_distinct() {
-        assert_ne!(
-            HapticCommand::Play(HapticEffect::Click),
-            HapticCommand::Toggle
-        );
     }
 
     #[test]
@@ -212,5 +289,110 @@ mod tests {
         let a = HapticController::new();
         let b = HapticController::default();
         assert_eq!(a.enabled(), b.enabled());
+    }
+
+    // ── DRV2605L mapping ─────────────────────────────────────────────────────
+
+    #[test]
+    fn builtin_effects_use_rom_waveforms_not_realtime() {
+        // ROM waveforms are tuned per-actuator by the part; driving them via
+        // real-time playback instead would feel wrong and waste power.
+        for effect in [
+            HapticEffect::Click,
+            HapticEffect::Bump,
+            HapticEffect::DoubleClick,
+        ] {
+            assert!(
+                matches!(
+                    effect.drv2605l_playback(),
+                    Drv2605lPlayback::Waveform { .. }
+                ),
+                "{effect:?} should map to a ROM waveform"
+            );
+        }
+    }
+
+    #[test]
+    fn each_builtin_effect_maps_to_a_distinct_waveform() {
+        let ids: [u8; 3] = [
+            HapticEffect::Click,
+            HapticEffect::Bump,
+            HapticEffect::DoubleClick,
+        ]
+        .map(|e| match e.drv2605l_playback() {
+            Drv2605lPlayback::Waveform { first, .. } => first,
+            Drv2605lPlayback::RealTime { .. } => 0,
+        });
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+        assert_ne!(ids[0], ids[2]);
+        // Waveform 0 terminates a sequence — using it as an effect plays nothing.
+        assert!(
+            ids.iter().all(|&id| id != drv2605l::WAVEFORM_END),
+            "no effect may map to the sequence terminator"
+        );
+    }
+
+    #[test]
+    fn waveform_ids_are_within_the_rom_library() {
+        // The DRV2605L ROM libraries define effects 1..=123.
+        for effect in [
+            HapticEffect::Click,
+            HapticEffect::Bump,
+            HapticEffect::DoubleClick,
+        ] {
+            if let Drv2605lPlayback::Waveform { first, second } = effect.drv2605l_playback() {
+                assert!((1..=123).contains(&first), "{effect:?}: waveform {first}");
+                if let Some(s) = second {
+                    assert!((1..=123).contains(&s), "{effect:?}: waveform {s}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn custom_effects_use_realtime_playback_and_keep_their_parameters() {
+        let e = HapticEffect::Custom {
+            strength: 200,
+            duration_ms: 45,
+        };
+        assert_eq!(
+            e.drv2605l_playback(),
+            Drv2605lPlayback::RealTime {
+                amplitude: 200,
+                duration_ms: 45,
+            }
+        );
+    }
+
+    #[test]
+    fn a_zero_strength_custom_effect_stays_zero() {
+        // Silence must not be quietly turned into a buzz.
+        assert_eq!(
+            HapticEffect::Custom {
+                strength: 0,
+                duration_ms: 10,
+            }
+            .drv2605l_playback(),
+            Drv2605lPlayback::RealTime {
+                amplitude: 0,
+                duration_ms: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn mode_constants_are_distinct() {
+        // Writing the wrong one leaves the part in standby and nothing buzzes.
+        let modes = [
+            drv2605l::MODE_INTERNAL_TRIGGER,
+            drv2605l::MODE_REALTIME,
+            drv2605l::MODE_STANDBY,
+        ];
+        for i in 0..modes.len() {
+            for j in (i + 1)..modes.len() {
+                assert_ne!(modes[i], modes[j]);
+            }
+        }
     }
 }

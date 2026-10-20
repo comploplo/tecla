@@ -58,7 +58,7 @@ pub struct CoreTelemetry<const KEYS: usize> {
     prev_press_pos: Option<u8>,
     last_press_pos: Option<u8>,
     last_press_ms: u64,
-    last_release_ms: u64,
+    held_count: u8,
     rollover_count: u32,
     total_presses: u32,
     delta_presses: u16,
@@ -113,7 +113,7 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
             prev_press_pos: None,
             last_press_pos: None,
             last_press_ms: 0,
-            last_release_ms: 0,
+            held_count: 0,
             rollover_count: 0,
             total_presses: 0,
             delta_presses: 0,
@@ -155,9 +155,13 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
         }
         let _ = self.wpm_ring.push_back(now_ms);
 
-        if self.last_release_ms > 0 && now_ms.saturating_sub(self.last_release_ms) == 0 {
+        // Rollover = this key went down while another was still held. The
+        // debouncer only emits edges, so press/release strictly alternate per
+        // key and a running count is enough.
+        if self.held_count > 0 {
             self.rollover_count = self.rollover_count.saturating_add(1);
         }
+        self.held_count = self.held_count.saturating_add(1);
 
         if let Some(prev_flat) = self.last_press_pos {
             let pp_ms = now_ms.saturating_sub(self.last_press_ms);
@@ -209,15 +213,20 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
             if hold_ms < u64::from(u16::MAX) {
                 let sample = hold_ms as u16;
                 let prev = self.hold_time_ema[flat];
-                self.hold_time_ema[flat] = ema_update(prev, sample);
-                let diff = sample.abs_diff(prev);
-                self.hold_time_var[flat] = ema_update(self.hold_time_var[flat], diff);
+                // 0 means "no sample yet": seed with the first hold (as the
+                // bigram EMA does) instead of decaying up from zero, which
+                // under-reported hold time by ~half for the first dozen presses.
+                if prev == 0 {
+                    self.hold_time_ema[flat] = sample;
+                } else {
+                    self.hold_time_ema[flat] = ema_update(prev, sample);
+                    let diff = sample.abs_diff(prev);
+                    self.hold_time_var[flat] = ema_update(self.hold_time_var[flat], diff);
+                }
             }
         }
 
-        if now_ms > self.last_press_ms {
-            self.last_release_ms = now_ms;
-        }
+        self.held_count = self.held_count.saturating_sub(1);
     }
 
     /// Record a backspace (error indicator for the previously pressed key).
@@ -284,7 +293,11 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
         let avg_pp_ms = pp_sum.checked_div(pp_count).unwrap_or(0) as u16;
 
         let total_errors: u32 = self.error_count.iter().map(|&e| u32::from(e)).sum();
-        let error_rate = (total_errors * 100)
+        // Scaled to 0-255 like every other rate in this crate (rollover here,
+        // the steno rates, pointing, accessibility). This alone used to scale
+        // to 0-100, so anything decoding the snapshot uniformly read it 2.55x
+        // low.
+        let error_rate = (total_errors * 255)
             .checked_div(self.total_presses)
             .unwrap_or(0)
             .min(255) as u8;
@@ -396,6 +409,30 @@ mod tests {
     const COLS: usize = 3;
 
     #[test]
+    fn overlapping_presses_count_as_rollover() {
+        use crate::telemetry::TelemetryExt;
+        let mut t = CoreTelemetry::<6>::new();
+        // A down, B down while A still held, then both up.
+        t.record_press(pos(0, 0), 0, COLS);
+        t.record_press(pos(0, 1), 10, COLS);
+        t.record_release(pos(0, 0), 20, COLS);
+        t.record_release(pos(0, 1), 30, COLS);
+        // 1 of 2 presses overlapped ⇒ 255/2.
+        assert_eq!(t.collect().rollover_ratio, 127);
+    }
+
+    #[test]
+    fn sequential_presses_are_not_rollover() {
+        use crate::telemetry::TelemetryExt;
+        let mut t = CoreTelemetry::<6>::new();
+        t.record_press(pos(0, 0), 0, COLS);
+        t.record_release(pos(0, 0), 10, COLS);
+        t.record_press(pos(0, 1), 20, COLS);
+        t.record_release(pos(0, 1), 30, COLS);
+        assert_eq!(t.collect().rollover_ratio, 0);
+    }
+
+    #[test]
     fn press_increments_count() {
         let mut t = CoreTelemetry::<6>::new();
         t.record_press(pos(0, 0), 0, COLS);
@@ -408,7 +445,7 @@ mod tests {
         let mut t = CoreTelemetry::<6>::new();
         t.record_press(pos(0, 0), 100, COLS);
         t.record_release(pos(0, 0), 200, COLS);
-        assert!(t.hold_time_ema[0] > 0);
+        assert_eq!(t.hold_time_ema[0], 100);
     }
 
     #[test]
@@ -496,10 +533,12 @@ mod tests {
         }
         t.record_error();
         let snap = t.snapshot();
-        assert!(snap.wpm > 0);
+        assert_eq!(snap.wpm, 120);
         assert!(snap.total_presses == 20);
-        assert!(snap.avg_hold_ms > 0);
-        assert!(snap.error_rate > 0);
+        assert_eq!(snap.avg_hold_ms, 50);
+        // Every rate in this crate is 0-255, not 0-100: one error in twenty
+        // presses is 1/20th of full scale (12), not 5.
+        assert_eq!(snap.error_rate, 255 / 20);
     }
 
     #[test]
@@ -540,14 +579,14 @@ mod tests {
     #[test]
     fn hold_time_variance_tracks_jitter() {
         let mut t = CoreTelemetry::<6>::new();
-        t.record_press(pos(0, 0), 0, COLS);
-        t.record_release(pos(0, 0), 100, COLS);
-        t.record_press(pos(0, 0), 200, COLS);
-        t.record_release(pos(0, 0), 350, COLS);
-        assert!(
-            t.hold_time_var[0] > 0,
-            "variance should be non-zero with jittery hold times"
-        );
+        // Holds of 100 then 150ms: EMA seeds at 100, moves to (7*100+150)/8,
+        // and the 50ms deviation enters the variance EMA as 50/8.
+        t.record_press(pos(0, 0), 100, COLS);
+        t.record_release(pos(0, 0), 200, COLS);
+        t.record_press(pos(0, 0), 300, COLS);
+        t.record_release(pos(0, 0), 450, COLS);
+        assert_eq!(t.hold_time_ema[0], 106);
+        assert_eq!(t.hold_time_var[0], 6);
     }
 
     #[test]

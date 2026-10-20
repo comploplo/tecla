@@ -61,12 +61,17 @@ use embassy_usb::class::hid::{HidWriter, State};
 use embassy_usb::{Builder, Config};
 use panic_probe as _;
 use static_cell::StaticCell;
+use tecla::audio::AudioCommand;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, keymap};
-use tecla_rp2040::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_rp2040::{
+    CompositeUsbReporter, GpioMatrixScanner, PwmBuzzer, CONSUMER_REPORT_DESCRIPTOR,
+    CONSUMER_REPORT_SIZE, KEYBOARD_REPORT_DESCRIPTOR, KEYBOARD_REPORT_SIZE,
+    MOUSE_REPORT_DESCRIPTOR, MOUSE_REPORT_SIZE,
+};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -77,8 +82,14 @@ const COLS: usize = 12;
 
 static EVENT_CHANNEL: StaticCell<EventChannel<NoopRawMutex, 16>> = StaticCell::new();
 static REPORT_CHANNEL: StaticCell<ReportChannel<NoopRawMutex, 8>> = StaticCell::new();
+/// Feedback tones queue here on their way to the buzzer task, off the
+/// real-time key path.
+type AudioChannel = embassy_sync::channel::Channel<NoopRawMutex, AudioCommand, 4>;
+static AUDIO_CHANNEL: StaticCell<AudioChannel> = StaticCell::new();
 
 static HID_STATE: StaticCell<State> = StaticCell::new();
+static CONSUMER_STATE: StaticCell<State> = StaticCell::new();
+static MOUSE_STATE: StaticCell<State> = StaticCell::new();
 static USB_DEVICE_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONFIG_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_BOS_BUF: StaticCell<[u8; 256]> = StaticCell::new();
@@ -114,8 +125,36 @@ async fn main(spawner: Spawner) {
         hid_subclass: embassy_usb::class::hid::HidSubclass::Boot,
         hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::Keyboard,
     };
-    let hid_writer: HidWriter<'_, _, 8> =
+    let hid_writer: HidWriter<'_, _, KEYBOARD_REPORT_SIZE> =
         HidWriter::new(&mut builder, HID_STATE.init(State::new()), hid_config);
+
+    // Media keys and mouse actions each need their own HID interface. Without
+    // these, Action::Consumer and Action::Mouse have no endpoint to go to and
+    // the reporter rejects them.
+    let consumer_writer: HidWriter<'_, _, CONSUMER_REPORT_SIZE> = HidWriter::new(
+        &mut builder,
+        CONSUMER_STATE.init(State::new()),
+        embassy_usb::class::hid::Config {
+            report_descriptor: CONSUMER_REPORT_DESCRIPTOR,
+            request_handler: None,
+            poll_ms: 10,
+            max_packet_size: CONSUMER_REPORT_SIZE as u16,
+            hid_subclass: embassy_usb::class::hid::HidSubclass::No,
+            hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::None,
+        },
+    );
+    let mouse_writer: HidWriter<'_, _, MOUSE_REPORT_SIZE> = HidWriter::new(
+        &mut builder,
+        MOUSE_STATE.init(State::new()),
+        embassy_usb::class::hid::Config {
+            report_descriptor: MOUSE_REPORT_DESCRIPTOR,
+            request_handler: None,
+            poll_ms: 1,
+            max_packet_size: MOUSE_REPORT_SIZE as u16,
+            hid_subclass: embassy_usb::class::hid::HidSubclass::No,
+            hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::None,
+        },
+    );
 
     let usb = builder.build();
 
@@ -159,14 +198,29 @@ async fn main(spawner: Spawner) {
     };
 
     let processor = KeyboardProcessor::new(keymap, TapHoldConfig::default());
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer)
+        .with_consumer(consumer_writer)
+        .with_mouse(mouse_writer);
+    defmt::info!(
+        "USB interfaces: {}",
+        defmt::Debug2Format(&reporter.capabilities())
+    );
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());
+    let audio_ch = AUDIO_CHANNEL.init(AudioChannel::new());
+
+    // Passive buzzer on GPIO16 (PWM slice 0, channel A).
+    let buzzer = PwmBuzzer::new_a(p.PWM_SLICE0, p.PIN_16);
 
     spawner.spawn(usb_device_task(usb).unwrap());
     spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
-    spawner.spawn(keyboard_task(event_ch, processor, report_ch).unwrap());
+    spawner.spawn(keyboard_task(event_ch, processor, report_ch, audio_ch).unwrap());
+    spawner.spawn(buzzer_task(audio_ch, buzzer).unwrap());
+
+    // Prove the whole audio path at boot: keymap-independent, so a silent
+    // startup means the wiring is wrong, not the keymap.
+    let _ = audio_ch.try_send(AudioCommand::PlayMelody(tecla::audio::STARTUP));
     tecla::task::usb_task(report_ch.receiver(), reporter).await;
 }
 
@@ -189,6 +243,21 @@ async fn keyboard_task(
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
     mut processor: KeyboardProcessor<ROWS, COLS, 2, 48>,
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
+    audio_ch: &'static AudioChannel,
 ) -> ! {
-    tecla::task::keyboard_task(event_ch.receiver(), &mut processor, report_ch.sender()).await
+    // The _feedback variant is what moves Action::Audio out of the processor
+    // and into the buzzer task; plain keyboard_task would leave it parked.
+    tecla::task::keyboard_task_feedback::<_, ROWS, COLS, 2, 48, (), 16, 8, 4, 1>(
+        event_ch.receiver(),
+        &mut processor,
+        report_ch.sender(),
+        Some(audio_ch.sender()),
+        None,
+    )
+    .await
+}
+
+#[embassy_executor::task]
+async fn buzzer_task(audio_ch: &'static AudioChannel, buzzer: PwmBuzzer<'static>) -> ! {
+    tecla::task::audio_task(audio_ch.receiver(), buzzer).await
 }

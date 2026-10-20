@@ -33,7 +33,13 @@ fn all_shield_dirs() -> Vec<(String, PathBuf)> {
 #[test]
 fn every_shield_produces_a_board_config() {
     let mut failures = Vec::new();
-    for (name, path) in all_shield_dirs() {
+    let shields = all_shield_dirs();
+    assert!(
+        shields.len() > 50,
+        "only {} ZMK shields discovered — run `git submodule update --init`",
+        shields.len()
+    );
+    for (name, path) in shields {
         if let Err(e) = parse_shield(&path) {
             failures.push(format!("{name}: {e}"));
         }
@@ -49,23 +55,26 @@ fn every_shield_produces_a_board_config() {
 #[test]
 fn every_shield_has_matrix_dimensions() {
     let mut failures = Vec::new();
+    let mut checked = 0;
     for (name, path) in all_shield_dirs() {
-        let shield_type = if let Ok(config) = parse_shield(&path) {
-            if config.matrix_size == (0, 0) && !config.has_feature("keys") {
-                continue;
-            }
-            Some(config)
-        } else {
-            None
-        };
-
-        if shield_type.is_none() {
-            failures.push(format!("{name}: matrix_size is (0, 0)"));
+        let config = parse_shield(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // Shields with no `keys` feature (dongles, adapters) have no matrix.
+        if !config.has_feature("keys") {
+            continue;
+        }
+        checked += 1;
+        let (rows, cols) = config.matrix_size;
+        if rows == 0 || cols == 0 {
+            failures.push(format!("{name}: matrix_size is {:?}", config.matrix_size));
         }
     }
     assert!(
+        checked > 0,
+        "no keyboard shields discovered — is the ZMK submodule checked out?"
+    );
+    assert!(
         failures.is_empty(),
-        "{} shields missing matrix dimensions:\n{}",
+        "{} of {checked} shields missing matrix dimensions:\n{}",
         failures.len(),
         failures.join("\n")
     );

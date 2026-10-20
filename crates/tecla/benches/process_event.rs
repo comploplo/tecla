@@ -12,8 +12,9 @@
 
 #![allow(missing_docs, reason = "criterion bench harness")]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use heapless::Vec as HVec;
+use std::hint::black_box;
 use tecla::action::{Action, KeyCode, ModifierKey};
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;

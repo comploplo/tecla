@@ -6,6 +6,7 @@ publish = false
 description = "Repository-local hardware-in-the-loop tests for Tecla"
 authors = ["Gabe Oppenheimer"]
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/comploplo/tecla"
 
 [workspace]
 

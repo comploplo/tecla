@@ -43,7 +43,9 @@ defmt::timestamp!("");
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     debug::exit(EXIT_FAILURE);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }
 
 #[entry]
@@ -68,7 +70,9 @@ fn main() -> ! {
     hil_marker();
     hprintln!("HIL OK");
     debug::exit(EXIT_SUCCESS);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }
 
 #[inline(never)]

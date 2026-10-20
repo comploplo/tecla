@@ -1,12 +1,15 @@
 //! Persistent storage for keyboard state.
 //!
-//! Saves and restores [`KeyboardProcessor`](crate::keyboard::KeyboardProcessor)
-//! state across power cycles using [`sequential_storage`] for wear-leveled
+//! Saves and restores [`crate::keyboard::KeyboardProcessor`]
+//! state across power cycles using `sequential_storage` for wear-leveled
 //! flash access.
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! Sketch — `flash` and `FLASH_RANGE` come from the board crate, so this is not
+//! a compilable example. See `examples/` in any `tecla-*` board crate.
+//!
+//! ```text
 //! use tecla::storage::{load_state, save_state, StorageKey};
 //! use sequential_storage::cache::NoCache;
 //! use sequential_storage::map::{MapConfig, MapStorage};
@@ -32,7 +35,7 @@
 
 use embedded_storage_async::nor_flash::NorFlash;
 use heapless::Deque;
-use sequential_storage::cache::KeyCacheImpl;
+use sequential_storage::cache::CacheImpl;
 use sequential_storage::map::{Key, MapStorage, SerializationError};
 
 use crate::action::KeyCode;
@@ -144,7 +147,7 @@ impl PersistedState {
 /// Loads persisted keyboard state from flash.
 ///
 /// Missing keys return defaults. Corrupted data is silently ignored.
-pub async fn load_state<S: NorFlash, C: KeyCacheImpl<StorageKey>>(
+pub async fn load_state<S: NorFlash, C: CacheImpl<StorageKey>>(
     storage: &mut MapStorage<StorageKey, S, C>,
     buf: &mut [u8],
 ) -> PersistedState {
@@ -216,7 +219,7 @@ pub async fn load_state<S: NorFlash, C: KeyCacheImpl<StorageKey>>(
 /// Saves keyboard state to flash.
 pub async fn save_state<
     S: NorFlash,
-    C: KeyCacheImpl<StorageKey>,
+    C: CacheImpl<StorageKey>,
     const ROWS: usize,
     const COLS: usize,
     const LAYERS: usize,
@@ -263,7 +266,7 @@ pub async fn save_state<
 }
 
 /// Saves BLE bond state to flash.
-pub async fn save_ble_bonds<S: NorFlash, C: KeyCacheImpl<StorageKey>>(
+pub async fn save_ble_bonds<S: NorFlash, C: CacheImpl<StorageKey>>(
     storage: &mut MapStorage<StorageKey, S, C>,
     buf: &mut [u8],
     bonds: &[Option<BondInfo>; 4],

@@ -7,7 +7,6 @@
 #![no_std]
 #![no_main]
 #![allow(unsafe_code)]
-#![expect(clippy::unwrap_used)]
 
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug::{self, EXIT_FAILURE, EXIT_SUCCESS};
@@ -82,10 +81,12 @@ fn main() -> ! {
         },
     );
 
-    let _ = hprintln!("SEQ:{seq}");
-    let _ = hprintln!("HIL OK");
+    hprintln!("SEQ:{seq}");
+    hprintln!("HIL OK");
     debug::exit(EXIT_SUCCESS);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }
 
 fn capture(report: HidReport, seq: &mut String<32>) {
@@ -108,7 +109,9 @@ fn usage_to_char(usage_id: u8, _mods: u8) -> Option<char> {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    let _ = hprintln!("PANIC: {}", info);
+    hprintln!("PANIC: {}", info);
     debug::exit(EXIT_FAILURE);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }

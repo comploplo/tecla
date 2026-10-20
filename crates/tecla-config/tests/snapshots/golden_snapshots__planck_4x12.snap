@@ -4,21 +4,18 @@ expression: output
 ---
 // 3 layer(s), 48 keys (4 rows x 12 cols)
 keymap! {
-    #[rustfmt::skip]
     layer!(_BASE,
         Tab        , Q       , W       , E       , R            , T       , Y       , U       , I       , O        , P         , Backspace,
         Escape     , A       , S       , D       , F            , G       , H       , J       , K       , L        , Semicolon , Enter,
         LShift     , Z       , X       , C       , V            , B       , N       , M       , Comma   , Dot      , Slash     , RShift,
         LCtrl      , LGui    , LAlt    , MO(1)   , LT!(2, Space), Space   , Space   , RShift  , Left    , Down     , Up        , Right,
     ),
-    #[rustfmt::skip]
     layer!(_LOWER,
         Grave      , N1      , N2      , N3      , N4           , N5      , N6      , N7      , N8      , N9       , N0        , Delete,
         TRNS       , F1      , F2      , F3      , F4           , F5      , F6      , Minus   , Equal   , LeftBrace, RightBrace, Backslash,
         TRNS       , F7      , F8      , F9      , F10          , F11     , F12     , TRNS    , TRNS    , TRNS     , TRNS      , TRNS,
         TRNS       , TRNS    , TRNS    , TRNS    , TRNS         , TRNS    , TRNS    , TRNS    , TRNS    , TRNS     , TRNS      , TRNS,
     ),
-    #[rustfmt::skip]
     layer!(_RAISE,
         LSFT(Grave), LSFT(N1), LSFT(N2), LSFT(N3), LSFT(N4)     , LSFT(N5), LSFT(N6), LSFT(N7), LSFT(N8), LSFT(N9) , LSFT(N0)  , Delete,
         TRNS       , TRNS    , TRNS    , TRNS    , TRNS         , TRNS    , TRNS    , Minus   , Equal   , LeftBrace, RightBrace, Backslash,

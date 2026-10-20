@@ -1,9 +1,10 @@
 //! The [`Recognizer`] trait — the unifying primitive for all input patterns.
 //!
-//! Every time-sensitive input behaviour (tap-hold, leader sequences, combos,
-//! tap-dance, steno chords) is an implementation of [`Recognizer`]. The
-//! keyboard orchestrator runs all active recognizers on the same event stream
-//! and dispatches on the result.
+//! A time-sensitive input behaviour that must disambiguate an incomplete
+//! pattern against a deadline implements [`Recognizer`]. Today that is
+//! [`TapHoldRecognizer`](crate::devices::keyboard::tapping::TapHoldRecognizer);
+//! the trait exists so board crates and downstream consumers can add their own
+//! and drive them from the same event stream.
 //!
 //! # Design
 //!
@@ -31,7 +32,10 @@
 //! 5. Buffer any events that arrive while `Pending` so they can be replayed by
 //!    the orchestrator after a `Failed` or `Matched` result.
 //!
-//! ```rust,ignore
+//! ```rust
+//! use tecla::pipeline::event::{KeyEvent, KeyPos};
+//! use tecla::pipeline::recognizer::{Recognition, Recognizer};
+//!
 //! struct DoubleTap {
 //!     first_press_ms: Option<u64>,
 //!     window_ms: u64,
@@ -41,14 +45,22 @@
 //!     type Output = ();
 //!
 //!     fn observe(&mut self, event: KeyEvent, now_ms: u64) -> Recognition<()> {
-//!         if !event.is_press() { return Recognition::Pending; }
+//!         if !event.pressed {
+//!             return Recognition::Pending;
+//!         }
 //!         match self.first_press_ms {
-//!             None => { self.first_press_ms = Some(now_ms); Recognition::Pending }
+//!             None => {
+//!                 self.first_press_ms = Some(now_ms);
+//!                 Recognition::Pending
+//!             }
 //!             Some(t) if now_ms - t <= self.window_ms => {
 //!                 self.reset();
 //!                 Recognition::Matched(())
 //!             }
-//!             _ => { self.reset(); Recognition::Failed }
+//!             _ => {
+//!                 self.reset();
+//!                 Recognition::Failed
+//!             }
 //!         }
 //!     }
 //!
@@ -61,8 +73,15 @@
 //!         self.first_press_ms.map(|t| t + self.window_ms)
 //!     }
 //!
-//!     fn reset(&mut self) { self.first_press_ms = None; }
+//!     fn reset(&mut self) {
+//!         self.first_press_ms = None;
+//!     }
 //! }
+//!
+//! let key = KeyPos::new(0, 0);
+//! let mut rec = DoubleTap { first_press_ms: None, window_ms: 200 };
+//! assert!(rec.observe(KeyEvent::press(key, 0), 0).is_pending());
+//! assert!(matches!(rec.observe(KeyEvent::press(key, 50), 50), Recognition::Matched(())));
 //! ```
 
 use super::event::KeyEvent;
@@ -266,10 +285,5 @@ mod tests {
     fn never_match_tick_returns_failed() {
         let result = NeverMatch { deadline: None }.tick(0);
         assert!(result.is_failed());
-    }
-
-    #[test]
-    fn always_match_reset_is_callable() {
-        AlwaysMatch.reset();
     }
 }

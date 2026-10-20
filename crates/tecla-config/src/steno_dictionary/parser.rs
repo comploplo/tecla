@@ -180,11 +180,19 @@ fn parse_stroke(stroke: &str) -> Option<u64> {
         match ch {
             '#' => set_bit(&mut mask, BIT_NUMBER),
             '-' => side = HandSide::Right,
-            '*' => set_bit(&mut mask, BIT_STAR),
-            'A' => set_bit(&mut mask, BIT_A),
-            'O' => set_bit(&mut mask, BIT_O),
-            'E' => set_bit(&mut mask, BIT_E),
-            'U' => set_bit(&mut mask, BIT_U),
+            // The vowels and `*` sit between the hands: any key after them
+            // is right-hand, so `KAT` is K- A -T, not K- A T-.
+            '*' | 'A' | 'O' | 'E' | 'U' => {
+                let bit = match ch {
+                    '*' => BIT_STAR,
+                    'A' => BIT_A,
+                    'O' => BIT_O,
+                    'E' => BIT_E,
+                    _ => BIT_U,
+                };
+                set_bit(&mut mask, bit);
+                side = HandSide::Right;
+            }
             'F' => {
                 set_bit(&mut mask, BIT_F);
                 side = HandSide::Right;
@@ -863,26 +871,66 @@ mod tests {
     }
 
     #[test]
+    fn keys_after_a_vowel_or_star_are_right_hand() {
+        let bits = |b: &[u8]| b.iter().fold(0u64, |m, &i| m | (1u64 << i));
+        assert_eq!(
+            parse_outline("KAT"),
+            Some(vec![bits(&[BIT_K, BIT_A, BIT_RT])])
+        );
+        assert_eq!(
+            parse_outline("SEUS"),
+            Some(vec![bits(&[BIT_LS, BIT_E, BIT_U, BIT_RS])])
+        );
+        assert_eq!(
+            parse_outline("TK*PB"),
+            Some(vec![bits(&[BIT_LT, BIT_K, BIT_STAR, BIT_RP, BIT_B])])
+        );
+        // A left-hand consonant after the split is not a valid stroke.
+        assert_eq!(parse_outline("AK"), None);
+    }
+
+    #[test]
     fn compile_translation_supports_plain_text_tokens() {
         let encoded = compile_translation("{^}.sh").expect("translation should compile");
         assert!(encoded.starts_with(&[OP_NO_SPACE]));
         assert!(encoded.windows(3).any(|window| window == b".sh"));
-        assert!(compile_translation("{;}{:}").is_some());
-        assert!(compile_translation("{&0}").is_some());
+        assert_eq!(
+            compile_translation("{;}{:}").unwrap(),
+            [OP_TEXT, 1, b';', OP_TEXT, 1, b':']
+        );
+        assert_eq!(compile_translation("{&0}").unwrap(), [OP_TEXT, 1, b'0']);
     }
 
     #[test]
     fn compile_translation_supports_commands() {
-        assert!(compile_translation("{#Home}").is_some());
-        assert!(compile_translation("{#Control_L(Shift_l(Left))}").is_some());
-        assert!(compile_translation("{MODE:SET_SPACE:}").is_some());
-        assert!(compile_translation("{:case:cap_first_word}").is_some());
+        assert_eq!(
+            compile_translation("{#Home}").unwrap(),
+            [OP_HOST_CHORD, 0, 0x4A]
+        );
+        assert_eq!(
+            compile_translation("{#Control_L(Shift_l(Left))}").unwrap(),
+            [OP_HOST_CHORD, 0x03, 0x50]
+        );
+        assert_eq!(
+            compile_translation("{MODE:SET_SPACE:}").unwrap(),
+            [OP_SET_SPACE]
+        );
+        assert_eq!(
+            compile_translation("{:case:cap_first_word}").unwrap(),
+            [OP_SET_CASE, 1]
+        );
     }
 
     #[test]
     fn compile_translation_supports_repeat_and_undo() {
-        assert!(compile_translation("=repeat_last_translation").is_some());
-        assert!(compile_translation("=undo").is_some());
+        assert_eq!(
+            compile_translation("=repeat_last_translation").unwrap(),
+            [OP_REPEAT_LAST_TRANSLATION]
+        );
+        assert_eq!(
+            compile_translation("=undo").unwrap(),
+            [OP_UNDO_LAST_TRANSLATION]
+        );
     }
 
     #[test]
@@ -896,7 +944,10 @@ mod tests {
         assert_eq!(stitched[0], OP_STITCH);
         assert!(stitched.windows(1).any(|window| window == b"."));
 
-        assert!(compile_translation("{^alise}").is_some());
+        assert_eq!(
+            compile_translation("{^alise}").unwrap(),
+            [OP_NO_SPACE, OP_TEXT, 5, b'a', b'l', b'i', b's', b'e']
+        );
         assert!(compile_translation("{Mc^}{-|}").is_some());
     }
 }

@@ -57,6 +57,7 @@ pub struct VoyagerScanner<'d, I2C> {
     left_cols: [Input<'d>; COLS],
     mcp: Mcp23018<I2C>,
     mcp_ok: bool,
+    right_scan_succeeded: bool,
     /// Last good right-half column read, held across I2C errors so a transient
     /// bus glitch can't momentarily release held right-hand keys (which would
     /// break the host's key auto-repeat).
@@ -84,8 +85,18 @@ impl<'d, I2C: I2c> VoyagerScanner<'d, I2C> {
             left_cols,
             mcp,
             mcp_ok: false,
+            right_scan_succeeded: false,
             last_right_raw: [0u8; COLS],
         }
+    }
+
+    /// Whether the most recent scan read the complete right half successfully.
+    ///
+    /// Stale held keys remain in the ordinary matrix result after a bus error;
+    /// instruments can use this flag for bounded note cleanup and rearming.
+    #[must_use]
+    pub const fn right_scan_succeeded(&self) -> bool {
+        self.right_scan_succeeded
     }
 
     /// Port A all outputs (row select); port B low six inputs with pull-ups,
@@ -94,6 +105,12 @@ impl<'d, I2C: I2c> VoyagerScanner<'d, I2C> {
     async fn init_expander(mcp: &mut Mcp23018<I2C>) -> Result<(), I2C::Error> {
         mcp.set_config(Port::A, 0b0000_0000).await?;
         mcp.set_config(Port::B, 0b0011_1111).await?;
+        // Port B's two output bits are the status LEDs and never change, so set
+        // them once here rather than rewriting the same constant on every scan
+        // step. It is not optional: the expander's OLAT powers on at 0x00, which
+        // would light the active-low LEDs. After the direction bits above, so
+        // the pins are already outputs.
+        mcp.set_output(Port::B, PORTB_LEDS_OFF).await?;
         Ok(())
     }
 
@@ -102,11 +119,12 @@ impl<'d, I2C: I2c> VoyagerScanner<'d, I2C> {
     async fn scan_right(&mut self) -> Result<[u8; COLS], I2C::Error> {
         let mut right_raw = [0u8; COLS];
         for (step, slot) in right_raw.iter_mut().enumerate() {
-            // Active-low select on port A; keep both LED bits off on port B.
+            // Active-low select on port A. Port B's LED bits are set once in
+            // `init_expander` and latched by the expander, so they do not need
+            // rewriting here — that was a third of this loop's bus traffic.
             self.mcp
                 .set_output(Port::A, 0b0111_1111 & !(1 << step))
                 .await?;
-            self.mcp.set_output(Port::B, PORTB_LEDS_OFF).await?;
             Timer::after_micros(RIGHT_SETTLE_US).await;
             let rx = self.mcp.read_port(Port::B).await?;
             // Low six bits are columns, active-low → invert to active-high.
@@ -133,12 +151,16 @@ impl<'d, I2C: I2c> AsyncMatrixScanner<ROWS, COLS> for VoyagerScanner<'d, I2C> {
         }
 
         // Right half via the expander; retry init if it had dropped offline.
+        self.right_scan_succeeded = false;
         if !self.mcp_ok {
             self.mcp_ok = Self::init_expander(&mut self.mcp).await.is_ok();
         }
         if self.mcp_ok {
             match self.scan_right().await {
-                Ok(right_raw) => self.last_right_raw = right_raw,
+                Ok(right_raw) => {
+                    self.last_right_raw = right_raw;
+                    self.right_scan_succeeded = true;
+                }
                 // Keep `last_right_raw` (hold state) and re-init next scan.
                 // ponytail: during a sustained I2C outage a physically-released
                 // key stays "held" until the bus recovers — acceptable vs.

@@ -6,7 +6,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! Sketch — the scanner and reporter are board-specific, so this is not a
+//! compilable example. See `examples/` in any `tecla-*` board crate.
+//!
+//! ```text
 //! #[embassy_executor::main]
 //! async fn main(_spawner: Spawner) {
 //!     let scanner  = MyMatrixScanner::new(/* GPIO pins */);
@@ -25,7 +28,7 @@
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{with_timeout, Duration, Instant, Ticker};
 use heapless::Vec;
 
 use crate::action::Action;
@@ -58,10 +61,9 @@ pub type EventChannel<M, const N: usize> = Channel<M, KeyEvent, N>;
 ///
 /// `M` is the mutex type (see [`EventChannel`] for guidance).
 ///
-/// `N` is the channel capacity. 8 is a reasonable default: consecutive reports
-/// are coalesced inside [`usb_task`] so the queue depth rarely exceeds 2–3
-/// in practice. Increase it if your USB polling rate is much lower than your
-/// scan rate.
+/// `N` is the channel capacity. 8 is a reasonable default for keyboard state;
+/// MIDI events and relative mouse movement must all be delivered. Increase it
+/// when bursts can outpace the transport.
 pub type ReportChannel<M, const N: usize> = Channel<M, HidReport, N>;
 
 /// A channel for routing [`TelemetryFrame`](crate::telemetry::transport::TelemetryFrame)s
@@ -90,7 +92,9 @@ where
     Db: Debouncer<ROWS, COLS>,
 {
     let mut prev: MatrixState<ROWS, COLS> = MatrixState::new();
+    let mut ticker = Ticker::every(Duration::from_millis(MATRIX_SCAN_MS));
     loop {
+        ticker.next().await;
         let Ok(raw) = scanner.scan().await else {
             continue;
         };
@@ -205,6 +209,183 @@ where
     loop {
         receive_and_process(&event_rx, processor, &report_tx, None).await;
     }
+}
+
+/// Like [`keyboard_task`] but also delivers audio and haptic feedback.
+///
+/// Pair with [`audio_task`] and [`haptic_task`] on the other end of the
+/// channels. Without this variant, `Action::Audio` and `Action::Haptic` park a
+/// command on the processor that nothing ever collects.
+///
+/// Pass `None` for a channel the board does not have; the keycode then logs a
+/// warning instead of silently doing nothing.
+pub async fn keyboard_task_feedback<
+    M,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+    const EN: usize,
+    const RN: usize,
+    const AN: usize,
+    const HN: usize,
+>(
+    event_rx: Receiver<'_, M, KeyEvent, EN>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    report_tx: Sender<'_, M, HidReport, RN>,
+    audio_tx: Option<Sender<'_, M, crate::audio::AudioCommand, AN>>,
+    haptic_tx: Option<Sender<'_, M, crate::haptic::HapticEffect, HN>>,
+) -> !
+where
+    M: RawMutex,
+    Ext: Copy + PartialEq,
+{
+    loop {
+        receive_and_process(&event_rx, processor, &report_tx, None).await;
+        let _ = drain_feedback(processor, audio_tx.as_ref(), haptic_tx.as_ref());
+    }
+}
+
+/// Applies one pending Via command, if the host sent one.
+///
+/// The USB half runs in `transport::usb::via_usb_task` (feature `usb`);
+/// this is the half that needs `&mut KeyboardProcessor`, so it runs inside the
+/// keyboard task where the processor already lives. Non-blocking: returns
+/// immediately when no command is waiting, so it is safe to call every loop.
+///
+/// Returns `true` if a command was handled.
+#[cfg(feature = "via")]
+pub fn service_via<
+    M: RawMutex,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext: Copy + PartialEq + 'static,
+    const N: usize,
+>(
+    via: &mut crate::storage::via::ViaProtocol<COLS>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    req_rx: &Receiver<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], N>,
+    resp_tx: &Sender<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], N>,
+) -> bool {
+    let Ok(request) = req_rx.try_receive() else {
+        return false;
+    };
+    via.set_uptime(Instant::now().as_millis());
+    let mut response = [0u8; crate::pipeline::report::VIA_REPORT_SIZE];
+    via.process_command(&request, &mut response, processor);
+    if resp_tx.try_send(response).is_err() {
+        // The USB half is always waiting on this channel when it has a request
+        // outstanding, so a full channel means the host went away mid-exchange.
+        defmt::warn!("via: response dropped, host not reading");
+    }
+    true
+}
+
+/// Like [`keyboard_task`] but also services Via keymap-editing commands.
+///
+/// Pair with `transport::usb::via_usb_task` (feature `usb`).
+#[cfg(feature = "via")]
+pub async fn keyboard_task_via<
+    M,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+    const EN: usize,
+    const RN: usize,
+    const VN: usize,
+>(
+    event_rx: Receiver<'_, M, KeyEvent, EN>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    report_tx: Sender<'_, M, HidReport, RN>,
+    via: &mut crate::storage::via::ViaProtocol<COLS>,
+    via_req_rx: Receiver<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], VN>,
+    via_resp_tx: Sender<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], VN>,
+) -> !
+where
+    M: RawMutex,
+    Ext: Copy + PartialEq + 'static,
+{
+    loop {
+        // Bound the event wait so a Via command sent while the keyboard is
+        // idle is still answered promptly rather than waiting for a keypress.
+        receive_and_process(&event_rx, processor, &report_tx, Some(VIA_POLL_MS)).await;
+        service_via(via, processor, &via_req_rx, &via_resp_tx);
+    }
+}
+
+/// How long the Via-enabled keyboard task will block on key events before
+/// checking for a pending host command.
+#[cfg(feature = "via")]
+const VIA_POLL_MS: u64 = 10;
+
+/// Matrix scan interval.
+///
+/// Every scan loop is paced by this. Left free-running they scan as fast as the
+/// hardware allows — tens of thousands of times a second on a GPIO matrix, with
+/// the MCU never idling, and on a board whose other half is an I2C expander the
+/// scan consumes every byte of bus time it can get and starves anything sharing
+/// that bus. Debounce windows are 5-12ms and the debouncer quantises to
+/// milliseconds, so the discarded scans bought nothing: pacing costs no latency.
+const MATRIX_SCAN_MS: u64 = 1;
+
+/// Drains the feedback commands a keymap produced into their hardware tasks.
+///
+/// [`Action::Audio`](crate::action::Action::Audio),
+/// [`Action::Haptic`](crate::action::Action::Haptic) and
+/// [`Action::OutputSelect`](crate::action::Action::OutputSelect) park a pending
+/// command on the processor rather than acting directly, because the hardware
+/// they drive lives in other tasks. Something has to move them across, or the
+/// keycodes do nothing at all — call this every loop iteration.
+///
+/// Uses `try_send`, so a full channel drops the command rather than stalling
+/// the real-time key path. A dropped beep is better than a dropped keystroke.
+/// Returns any pending [`OutputMode`](crate::pipeline::hid::OutputMode) switch
+/// for the caller to apply to its
+/// [`DualReporter`](crate::pipeline::hid::DualReporter).
+pub fn drain_feedback<
+    M: RawMutex,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext: Copy + PartialEq,
+    const AN: usize,
+    const HN: usize,
+>(
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    audio_tx: Option<&Sender<'_, M, crate::audio::AudioCommand, AN>>,
+    haptic_tx: Option<&Sender<'_, M, crate::haptic::HapticEffect, HN>>,
+) -> Option<crate::pipeline::hid::OutputMode> {
+    if let Some(cmd) = processor.pending_audio_command() {
+        match audio_tx {
+            Some(tx) => {
+                if tx.try_send(cmd).is_err() {
+                    defmt::warn!("audio command dropped: channel full");
+                }
+            }
+            None => defmt::warn!("Action::Audio used but no audio task is wired up"),
+        }
+    }
+    // Toggle is controller state, not an effect to play; only Play carries
+    // something the driver can act on.
+    if let Some(crate::haptic::HapticCommand::Play(effect)) = processor.pending_haptic_command() {
+        {
+            match haptic_tx {
+                Some(tx) => {
+                    if tx.try_send(effect).is_err() {
+                        defmt::warn!("haptic effect dropped: channel full");
+                    }
+                }
+                None => defmt::warn!("Action::Haptic used but no haptic task is wired up"),
+            }
+        }
+    }
+    processor.pending_output_mode()
 }
 
 /// Runs an autocorrect engine off the keyboard's real-time path.
@@ -382,11 +563,62 @@ where
     }
 }
 
+/// Like [`keyboard_task_rgb`], but also answers Via host commands.
+///
+/// Both behaviours have to live in one task because both need `&mut` on the
+/// processor: RGB reads the pending command it produced, Via reads and rewrites
+/// its keymap. Pair with `transport::usb::via_usb_task` (feature `usb`).
+#[cfg(feature = "via")]
+#[expect(clippy::too_many_arguments, reason = "one task, two host-facing roles")]
+pub async fn keyboard_task_rgb_via<
+    M,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+    const EN: usize,
+    const RN: usize,
+    const EN2: usize,
+    const CN: usize,
+    const VN: usize,
+>(
+    event_rx: Receiver<'_, M, KeyEvent, EN>,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    report_tx: Sender<'_, M, HidReport, RN>,
+    rgb_event_tx: Sender<'_, M, KeyEvent, EN2>,
+    rgb_cmd_tx: Sender<'_, M, crate::rgb::RgbCommand, CN>,
+    via: &mut crate::storage::via::ViaProtocol<COLS>,
+    via_req_rx: Receiver<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], VN>,
+    via_resp_tx: Sender<'_, M, [u8; crate::pipeline::report::VIA_REPORT_SIZE], VN>,
+) -> !
+where
+    M: RawMutex,
+    Ext: Copy + PartialEq + 'static,
+{
+    loop {
+        // Bounded wait, as in `keyboard_task_via`: a host command sent while
+        // the keyboard is idle must not wait for the next keypress.
+        if let Some(event) =
+            receive_and_process(&event_rx, processor, &report_tx, Some(VIA_POLL_MS)).await
+        {
+            if event.pressed {
+                let _ = rgb_event_tx.try_send(event);
+            }
+        }
+        if let Some(cmd) = processor.pending_rgb_command() {
+            let _ = rgb_cmd_tx.try_send(cmd);
+        }
+        service_via(via, processor, &via_req_rx, &via_resp_tx);
+    }
+}
+
 /// Like [`keyboard_task`] but periodically collects telemetry snapshots and
 /// sends them to `telem_tx`.
 ///
 /// The telemetry interval is 250ms. If the processor has telemetry enabled
-/// (via [`KeyboardProcessor::with_telemetry`]), a [`TelemetryFrame`] is
+/// (via [`KeyboardProcessor::with_telemetry`]), a
+/// [`TelemetryFrame`](crate::telemetry::transport::TelemetryFrame) is
 /// collected and sent each interval. If telemetry is not enabled, no frames
 /// are sent.
 ///
@@ -423,7 +655,10 @@ where
         let now = Instant::now().as_millis();
         if now.saturating_sub(last_telem_ms) >= TELEM_INTERVAL_MS {
             if let Some(t) = processor.telemetry_mut() {
-                let frame = crate::telemetry::transport::collect_frame(t);
+                // ponytail: encoders are scanned in their own task with their
+                // own collector; boards that want encoder metrics in the frame
+                // call collect_frame directly with that snapshot.
+                let frame = crate::telemetry::transport::collect_frame(t, None);
                 let _ = telem_tx.try_send(frame);
             }
             last_telem_ms = now;
@@ -432,7 +667,8 @@ where
 }
 
 /// Receives [`TelemetryFrame`](crate::telemetry::transport::TelemetryFrame)s
-/// and writes serialized bytes to an [`AsyncTelemetryWriter`].
+/// and writes serialized bytes to an
+/// [`AsyncTelemetryWriter`](crate::telemetry::transport::AsyncTelemetryWriter).
 ///
 /// Pair with [`keyboard_task_telemetry`] to form the telemetry pipeline.
 ///
@@ -455,9 +691,9 @@ where
 
 /// Receives [`HidReport`]s and sends them to the USB reporter.
 ///
-/// Consecutive identical reports are coalesced — the reporter is only called
-/// when the report content actually changes. This eliminates redundant USB
-/// transfers within a scan cycle.
+/// Identical consecutive state reports are coalesced after successful delivery.
+/// MIDI events and relative mouse movement are always sent, including repeats.
+/// A failed send invalidates the cache so a subsequent matching report is retried.
 ///
 /// This function never returns.
 pub async fn usb_task<M, R, const N: usize>(
@@ -471,9 +707,21 @@ where
     let mut last: Option<HidReport> = None;
     loop {
         let report = receiver.receive().await;
-        if Some(report) != last {
-            let _ = reporter.send(&report).await;
-            last = Some(report);
+        let state_report = matches!(
+            report,
+            HidReport::Keyboard(_)
+                | HidReport::NkroKeyboard(_)
+                | HidReport::Consumer(_)
+                | HidReport::Gamepad(_)
+        );
+        if !state_report || Some(report) != last {
+            match reporter.send(&report).await {
+                Ok(()) => last = Some(report),
+                Err(e) => {
+                    last = None;
+                    defmt::warn!("usb_task: report dropped: {}", defmt::Debug2Format(&e));
+                }
+            }
         }
     }
 }
@@ -489,6 +737,12 @@ where
 ///
 /// When a tap-hold is pending, the scan is raced against the deadline timer.
 /// A timeout calls [`KeyboardProcessor::tick`] before resuming the scan loop.
+///
+/// This is the single-task path: there are no channels, so audio and haptic
+/// feedback have nowhere to go. `Action::Audio` / `Action::Haptic` in a keymap
+/// run on this path log a warning rather than doing nothing quietly — use the
+/// task topology with [`keyboard_task_feedback`] if the board has a buzzer or
+/// a haptic driver.
 ///
 /// This function never returns.
 pub async fn run<
@@ -513,7 +767,9 @@ where
     Ext: Copy + PartialEq,
 {
     let mut prev: MatrixState<ROWS, COLS> = MatrixState::new();
+    let mut ticker = Ticker::every(Duration::from_millis(MATRIX_SCAN_MS));
     loop {
+        ticker.next().await;
         let mut reports: Vec<HidReport, 16> = Vec::new();
 
         let raw_opt = if let Some(deadline_ms) = processor.next_deadline_ms() {
@@ -547,8 +803,17 @@ where
         }
 
         for report in &reports {
-            let _ = reporter.send(report).await;
+            if let Err(e) = reporter.send(report).await {
+                defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
+            }
         }
+
+        // No channels on this path — this warns if a keymap uses a feedback
+        // action the single-task topology cannot deliver.
+        let _ =
+            drain_feedback::<embassy_sync::blocking_mutex::raw::NoopRawMutex, _, _, _, _, _, 1, 1>(
+                processor, None, None,
+            );
     }
 }
 
@@ -617,7 +882,8 @@ where
 /// (layer resolution, modifiers, etc.).
 ///
 /// Each encoder tick produces a press event immediately followed by a release
-/// event at a virtual [`KeyPos`] computed by [`encoder_key_pos`]. The user's
+/// event at a virtual [`KeyPos`](crate::pipeline::event::KeyPos) computed by
+/// [`encoder_key_pos`]. The user's
 /// keymap must include actions at those positions (see [`encoder_key_pos`]
 /// for the indexing scheme).
 ///
@@ -723,8 +989,8 @@ fn encoder_action_to_report<Ext: Copy + PartialEq>(action: Action<Ext>) -> Optio
             match ma {
                 MouseAction::Move { dx, dy } => Some(HidReport::Mouse(MouseReport {
                     buttons: 0,
-                    dx,
-                    dy,
+                    dx: dx.into(),
+                    dy: dy.into(),
                     scroll: 0,
                 })),
                 MouseAction::Scroll(amount) => Some(HidReport::Mouse(MouseReport {
@@ -748,27 +1014,23 @@ fn encoder_release_report<Ext: Copy + PartialEq>(action: Action<Ext>) -> Option<
     }
 }
 
-/// Converts a [`PointingEvent`] into a [`HidReport::Mouse`].
+/// Converts a [`PointingEvent`](crate::pipeline::event::PointingEvent) into a
+/// [`HidReport::Mouse`](crate::pipeline::report::HidReport::Mouse).
 ///
-/// Movement values are clamped to the `i8` range.
+/// Movement passes through at full 16-bit width — the report carries it.
 #[must_use]
-#[expect(clippy::as_conversions, reason = "clamped values cast to i8")]
 pub fn pointing_event_to_report(event: &crate::pipeline::event::PointingEvent) -> HidReport {
-    #[expect(clippy::cast_possible_truncation, reason = "clamped to i8 range")]
-    let dx = event.dx.clamp(-128, 127) as i8;
-    #[expect(clippy::cast_possible_truncation, reason = "clamped to i8 range")]
-    let dy = event.dy.clamp(-128, 127) as i8;
     HidReport::Mouse(MouseReport {
         buttons: event.buttons,
-        dx,
-        dy,
+        dx: event.dx,
+        dy: event.dy,
         scroll: event.scroll,
     })
 }
 
 /// Scans a pointing device and emits [`HidReport::Mouse`] reports.
 ///
-/// Movement values are clamped to the `i8` range before being sent.
+/// Movement passes through at full 16-bit width.
 ///
 /// This function never returns.
 pub async fn pointing_task<M, S, const N: usize>(
@@ -835,7 +1097,9 @@ where
     Db: Debouncer<ROWS, COLS>,
 {
     let mut prev: MatrixState<ROWS, COLS> = MatrixState::new();
+    let mut ticker = Ticker::every(Duration::from_millis(MATRIX_SCAN_MS));
     loop {
+        ticker.next().await;
         let Ok(raw) = scanner.scan().await else {
             continue;
         };
@@ -962,6 +1226,101 @@ mod tests {
     use crate::pipeline::event::KeyPos;
     use crate::pipeline::keymap::{Layer, LayerStack};
     use crate::pipeline::report::HidReport;
+
+    fn deliver_usb_reports(reports: &[HidReport], fail_first: bool) -> std::vec::Vec<HidReport> {
+        use core::cell::RefCell;
+        use core::future::Future;
+        use core::task::{Context, Waker};
+        use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
+        struct RecordingReporter<'a> {
+            attempts: &'a RefCell<std::vec::Vec<HidReport>>,
+            fail_next: bool,
+        }
+
+        impl AsyncReporter for RecordingReporter<'_> {
+            async fn send(
+                &mut self,
+                report: &HidReport,
+            ) -> Result<(), crate::pipeline::hid::ReportError> {
+                self.attempts.borrow_mut().push(*report);
+                if core::mem::take(&mut self.fail_next) {
+                    Err(crate::pipeline::hid::ReportError::NotConnected)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let channel = Channel::<NoopRawMutex, HidReport, 8>::new();
+        for report in reports {
+            channel.try_send(*report).unwrap();
+        }
+        let attempts = RefCell::new(std::vec::Vec::new());
+        {
+            let reporter = RecordingReporter {
+                attempts: &attempts,
+                fail_next: fail_first,
+            };
+            let mut task = core::pin::pin!(usb_task(channel.receiver(), reporter));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(task.as_mut().poll(&mut context).is_pending());
+        }
+        attempts.into_inner()
+    }
+
+    #[test]
+    fn usb_delivery_preserves_repeated_midi_events() {
+        use crate::pipeline::report::MidiEvent;
+
+        let on = HidReport::Midi(MidiEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 100,
+        });
+        let off = HidReport::Midi(MidiEvent::NoteOff {
+            channel: 0,
+            note: 60,
+        });
+        let reports = [on, on, off, off];
+        assert_eq!(deliver_usb_reports(&reports, false), reports);
+    }
+
+    #[test]
+    fn usb_delivery_preserves_repeated_relative_movement() {
+        let movement = HidReport::Mouse(MouseReport {
+            dx: 4,
+            ..MouseReport::default()
+        });
+        let reports = [movement, movement];
+        assert_eq!(deliver_usb_reports(&reports, false), reports);
+    }
+
+    #[test]
+    fn usb_delivery_coalesces_successful_state_reports() {
+        use crate::pipeline::report::{GamepadReport, NkroKeyboardReport};
+
+        let states = [
+            HidReport::Keyboard(KeyboardReport::new()),
+            HidReport::NkroKeyboard(NkroKeyboardReport::new()),
+            HidReport::Consumer(ConsumerReport::new()),
+            HidReport::Gamepad(GamepadReport::default()),
+        ];
+        let mut reports = std::vec::Vec::new();
+        for state in states {
+            reports.extend([state, state]);
+        }
+        assert_eq!(deliver_usb_reports(&reports, false), states);
+    }
+
+    #[test]
+    fn usb_delivery_does_not_cache_failed_sends() {
+        let report = HidReport::Keyboard(KeyboardReport::new());
+        assert_eq!(
+            deliver_usb_reports(&[report, report, report], true),
+            [report, report]
+        );
+    }
 
     struct PassthroughDebouncer;
 
@@ -1141,7 +1500,6 @@ mod tests {
     #[test]
     fn encoder_action_key_produces_keyboard_report() {
         let report = encoder_action_to_report::<()>(Action::Key(KeyCode::A));
-        assert!(report.is_some());
         let codes = keycodes(&report.unwrap());
         assert_eq!(codes[0], KeyCode::A.usage_id());
     }
@@ -1149,7 +1507,6 @@ mod tests {
     #[test]
     fn encoder_action_key_release_clears_report() {
         let release = encoder_release_report::<()>(Action::Key(KeyCode::A));
-        assert!(release.is_some());
         let codes = keycodes(&release.unwrap());
         assert_eq!(codes, [0; 6]);
     }
@@ -1159,7 +1516,6 @@ mod tests {
     fn encoder_action_consumer_produces_consumer_report() {
         use crate::action::ConsumerCode;
         let report = encoder_action_to_report::<()>(Action::Consumer(ConsumerCode::VolumeUp));
-        assert!(report.is_some());
         match report.unwrap() {
             HidReport::Consumer(r) => assert_eq!(r.keycode, Some(ConsumerCode::VolumeUp)),
             _ => panic!("expected consumer report"),
@@ -1171,7 +1527,6 @@ mod tests {
     fn encoder_action_consumer_release_clears() {
         use crate::action::ConsumerCode;
         let release = encoder_release_report::<()>(Action::Consumer(ConsumerCode::VolumeUp));
-        assert!(release.is_some());
         match release.unwrap() {
             HidReport::Consumer(r) => assert_eq!(r.keycode, None),
             _ => panic!("expected consumer report"),
@@ -1183,7 +1538,6 @@ mod tests {
     fn encoder_action_mouse_scroll_produces_mouse_report() {
         use crate::action::MouseAction;
         let report = encoder_action_to_report::<()>(Action::Mouse(MouseAction::Scroll(1)));
-        assert!(report.is_some());
         match report.unwrap() {
             HidReport::Mouse(r) => {
                 assert_eq!(r.scroll, 1);
@@ -1237,7 +1591,7 @@ mod tests {
 
     #[test]
     #[expect(clippy::panic, reason = "test code")]
-    fn pointing_event_clamps_large_positive_dx() {
+    fn pointing_event_passes_large_movement_through() {
         let event = crate::pipeline::event::PointingEvent {
             dx: 200,
             dy: -200,
@@ -1247,8 +1601,8 @@ mod tests {
         let report = pointing_event_to_report(&event);
         match report {
             HidReport::Mouse(r) => {
-                assert_eq!(r.dx, 127);
-                assert_eq!(r.dy, -128);
+                assert_eq!(r.dx, 200);
+                assert_eq!(r.dy, -200);
                 assert_eq!(r.buttons, 0x01);
                 assert_eq!(r.scroll, 2);
             }

@@ -15,6 +15,12 @@ pub enum ReportError {
     NotConnected,
     /// The send buffer is full; the report was dropped.
     BufferFull,
+    /// This transport has no HID interface for that report variant.
+    ///
+    /// Returned rather than silently succeeding so a keymap that emits, say,
+    /// [`HidReport::Consumer`] on a board
+    /// that only enumerates a keyboard interface fails loudly.
+    Unsupported,
 }
 
 impl core::fmt::Display for ReportError {
@@ -22,6 +28,47 @@ impl core::fmt::Display for ReportError {
         match self {
             Self::NotConnected => write!(f, "transport not connected"),
             Self::BufferFull => write!(f, "send buffer full, report dropped"),
+            Self::Unsupported => write!(f, "report variant not supported by this transport"),
+        }
+    }
+}
+
+/// Which [`HidReport`] variants a reporter can actually deliver.
+///
+/// A transport carries only the variants it has an interface or characteristic
+/// for. Reporters expose this so a board can log its real capabilities at boot
+/// rather than discovering a missing interface when a keymap first emits a
+/// report nothing can carry.
+///
+/// Lives here rather than next to the USB reporter so it stays testable on the
+/// host: `embassy-usb` pulls in `ssmarshal`, which cannot build with `std`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    /// 6KRO boot-protocol keyboard — always present.
+    pub keyboard: bool,
+    /// NKRO bitmap keyboard.
+    pub nkro: bool,
+    /// Consumer control (media keys).
+    pub consumer: bool,
+    /// Mouse.
+    pub mouse: bool,
+    /// Gamepad.
+    pub gamepad: bool,
+    /// USB-MIDI.
+    pub midi: bool,
+}
+
+impl Capabilities {
+    /// Returns `true` if `report` has an interface to be delivered on.
+    #[must_use]
+    pub const fn supports(self, report: &HidReport) -> bool {
+        match report {
+            HidReport::Keyboard(_) => self.keyboard,
+            HidReport::NkroKeyboard(_) => self.nkro,
+            HidReport::Consumer(_) => self.consumer,
+            HidReport::Mouse(_) => self.mouse,
+            HidReport::Gamepad(_) => self.gamepad,
+            HidReport::Midi(_) => self.midi,
         }
     }
 }
@@ -124,9 +171,26 @@ impl<U: AsyncReporter, B: AsyncReporter> AsyncReporter for DualReporter<U, B> {
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test code")]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
+    use core::fmt::Write;
+
+    #[test]
+    fn report_error_messages() {
+        for (err, msg) in [
+            (ReportError::NotConnected, "transport not connected"),
+            (ReportError::BufferFull, "send buffer full, report dropped"),
+            (
+                ReportError::Unsupported,
+                "report variant not supported by this transport",
+            ),
+        ] {
+            let mut s = heapless::String::<64>::new();
+            write!(s, "{err}").unwrap();
+            assert_eq!(s, msg);
+        }
+    }
     use crate::pipeline::report::KeyboardReport;
 
     struct OkReporter {
@@ -162,47 +226,90 @@ mod tests {
         let report = HidReport::Keyboard(KeyboardReport::new());
         assert_eq!(r.send(&report), Err(ReportError::NotConnected));
     }
+}
 
-    #[test]
-    fn report_error_variants_are_distinct() {
-        assert_ne!(ReportError::NotConnected, ReportError::BufferFull);
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+    use crate::pipeline::report::{
+        ConsumerReport, GamepadReport, KeyboardReport, MidiEvent, MouseReport, NkroKeyboardReport,
+    };
+
+    const ALL: Capabilities = Capabilities {
+        keyboard: true,
+        nkro: true,
+        consumer: true,
+        mouse: true,
+        gamepad: true,
+        midi: true,
+    };
+
+    const KEYBOARD_ONLY: Capabilities = Capabilities {
+        keyboard: true,
+        nkro: false,
+        consumer: false,
+        mouse: false,
+        gamepad: false,
+        midi: false,
+    };
+
+    fn one_of_each() -> [HidReport; 6] {
+        [
+            HidReport::Keyboard(KeyboardReport::new()),
+            HidReport::NkroKeyboard(NkroKeyboardReport::new()),
+            HidReport::Consumer(ConsumerReport::new()),
+            HidReport::Mouse(MouseReport::default()),
+            HidReport::Gamepad(GamepadReport::default()),
+            HidReport::Midi(MidiEvent::NoteOff {
+                channel: 0,
+                note: 60,
+            }),
+        ]
     }
 
     #[test]
-    fn report_error_display_non_empty_and_distinct() {
-        use core::fmt::Write;
-        struct Buf([u8; 64], usize);
-        impl Write for Buf {
-            fn write_str(&mut self, s: &str) -> core::fmt::Result {
-                let b = s.as_bytes();
-                let end = self.1 + b.len();
-                let dest = self.0.get_mut(self.1..end).ok_or(core::fmt::Error)?;
-                dest.copy_from_slice(b);
-                self.1 = end;
-                Ok(())
-            }
+    fn a_fully_populated_transport_supports_every_variant() {
+        for r in &one_of_each() {
+            assert!(ALL.supports(r), "{r:?} should be supported");
+        }
+    }
 
-            fn write_char(&mut self, c: char) -> core::fmt::Result {
-                self.write_str(c.encode_utf8(&mut [0; 4]))
-            }
+    #[test]
+    fn a_keyboard_only_transport_supports_exactly_the_keyboard_report() {
+        for r in &one_of_each() {
+            assert_eq!(
+                KEYBOARD_ONLY.supports(r),
+                matches!(r, HidReport::Keyboard(_)),
+                "keyboard-only transport gave the wrong answer for {r:?}"
+            );
+        }
+    }
 
-            fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> core::fmt::Result {
-                core::fmt::write(self, args)
+    #[test]
+    fn each_flag_gates_exactly_its_own_variant() {
+        // Flip one flag on at a time; only that variant may become supported.
+        type SetFlag = fn(&mut Capabilities);
+        type IsTarget = fn(&HidReport) -> bool;
+        let flags: [(SetFlag, IsTarget); 5] = [
+            (
+                |c| c.nkro = true,
+                |r| matches!(r, HidReport::NkroKeyboard(_)),
+            ),
+            (
+                |c| c.consumer = true,
+                |r| matches!(r, HidReport::Consumer(_)),
+            ),
+            (|c| c.mouse = true, |r| matches!(r, HidReport::Mouse(_))),
+            (|c| c.gamepad = true, |r| matches!(r, HidReport::Gamepad(_))),
+            (|c| c.midi = true, |r| matches!(r, HidReport::Midi(_))),
+        ];
+        for (set, is_target) in flags {
+            let mut caps = KEYBOARD_ONLY;
+            set(&mut caps);
+            for r in &one_of_each() {
+                let expected = matches!(r, HidReport::Keyboard(_)) || is_target(r);
+                assert_eq!(caps.supports(r), expected, "wrong gating for {r:?}");
             }
         }
-        let mut buf_a = Buf([0; 64], 0);
-        let mut buf_b = Buf([0; 64], 0);
-        write!(buf_a, "{}", ReportError::NotConnected).expect("write failed");
-        write!(buf_b, "{}", ReportError::BufferFull).expect("write failed");
-        assert!(buf_a.1 > 0);
-        assert!(buf_b.1 > 0);
-        let slice_a = buf_a.0.get(..buf_a.1).expect("invalid range");
-        let slice_b = buf_b.0.get(..buf_b.1).expect("invalid range");
-        assert!(slice_a != slice_b);
-    }
-
-    #[test]
-    fn output_mode_variants_distinct() {
-        assert_ne!(OutputMode::Usb, OutputMode::Ble);
     }
 }

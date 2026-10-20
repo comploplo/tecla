@@ -7,6 +7,7 @@
 //! firmware.
 
 pub mod board;
+pub mod flash;
 pub mod proximity;
 pub mod qmk;
 pub mod steno_dictionary;

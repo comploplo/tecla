@@ -25,7 +25,9 @@ fn workspace_root() -> PathBuf {
 
 fn walk_files(dir: &Path, name: &str, results: &mut Vec<(String, bool)>) {
     if dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(dir) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
+        {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
@@ -76,6 +78,10 @@ fn parse_all_qmk_info_json() {
         }
     }
 
+    assert!(
+        total > 3000,
+        "only {total} QMK info.json/keyboard.json files discovered — run `git submodule update --init`"
+    );
     assert_eq!(failed, 0, "info.json: {failed}/{total} failed to parse");
 }
 
@@ -106,5 +112,9 @@ fn parse_all_qmk_keymap_c() {
         }
     }
 
+    assert!(
+        total > 3000,
+        "only {total} QMK keymap.c files discovered — run `git submodule update --init`"
+    );
     assert_eq!(failed, 0, "keymap.c: {failed}/{total} failed to parse");
 }

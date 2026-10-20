@@ -383,11 +383,6 @@ mod tests {
     }
 
     #[test]
-    fn modifier_lctrl_is_not_empty() {
-        assert!(!ModifierKey::LCTRL.is_empty());
-    }
-
-    #[test]
     fn modifier_default_equals_none() {
         assert_eq!(ModifierKey::default(), ModifierKey::NONE);
     }

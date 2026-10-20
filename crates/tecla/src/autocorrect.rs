@@ -561,7 +561,6 @@ mod tests {
         engine.process_keycode(KeyCode::E, 10);
         engine.process_keycode(KeyCode::H, 20);
         let result = engine.process_keycode(KeyCode::Space, 30);
-        assert!(result.is_some());
         let c = result.unwrap();
         assert_eq!(c.backspaces, 3);
         assert_eq!(c.replacement_slice(), &[0x17, 0x0B, 0x08]);
@@ -628,7 +627,10 @@ mod tests {
         engine.process_keycode(KeyCode::T, 0);
         engine.process_keycode(KeyCode::E, 10);
         engine.process_keycode(KeyCode::H, 20);
-        assert!(engine.process_keycode(KeyCode::Enter, 30).is_some());
+        let result = engine.process_keycode(KeyCode::Enter, 30);
+        let c = result.unwrap();
+        assert_eq!(c.backspaces, 3);
+        assert_eq!(c.replacement_slice(), &[0x17, 0x0B, 0x08]); // t, h, e
     }
 
     #[test]
@@ -639,7 +641,9 @@ mod tests {
         engine.process_keycode(KeyCode::E, 10);
         engine.process_keycode(KeyCode::H, 19);
         let result = engine.check_transposed();
-        assert!(result.is_some());
+        let c = result.unwrap();
+        assert_eq!(c.backspaces, 3);
+        assert_eq!(c.replacement_slice(), &[0x17, 0x0B, 0x08]); // t, h, e
     }
 
     #[test]
@@ -678,7 +682,9 @@ mod tests {
         engine.process_keycode(KeyCode::E, 7010);
         engine.process_keycode(KeyCode::H, 7020);
         let result = engine.process_keycode(KeyCode::Space, 7030);
-        assert!(result.is_some());
+        let c = result.unwrap();
+        assert_eq!(c.backspaces, 3);
+        assert_eq!(c.replacement_slice(), &[0x17, 0x0B, 0x08]); // t, h, e
     }
 
     #[test]
@@ -733,7 +739,6 @@ mod tests {
         engine.process_keycode(KeyCode::A, 10);
         engine.process_keycode(KeyCode::T, 20);
         let result = engine.process_keycode(KeyCode::Space, 30);
-        assert!(result.is_some());
         let c = result.unwrap();
         assert_eq!(c.replacement_slice(), &[0x06, 0x04, 0x17]);
     }
@@ -770,7 +775,6 @@ mod tests {
         engine.process_keycode(KeyCode::A, 10);
         engine.process_keycode(KeyCode::T, 20);
         let result = engine.process_keycode(KeyCode::Space, 30);
-        assert!(result.is_some());
         let c = result.unwrap();
         let expected = &[
             KeyCode::S.usage_id(),
@@ -788,7 +792,6 @@ mod tests {
         engine.process_keycode(KeyCode::A, 10);
         engine.process_keycode(KeyCode::T, 20);
         let result = engine.process_keycode(KeyCode::Space, 30);
-        assert!(result.is_some());
         let c = result.unwrap();
         let expected = &[
             KeyCode::P.usage_id(),

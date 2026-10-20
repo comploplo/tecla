@@ -7,69 +7,91 @@
 //!
 //! # Architecture
 //!
-//! The pipeline has three stages, each in its own module:
-//!
 //! ```text
-//! ┌──────────────┐     KeyEvent      ┌───────────────────┐     HidReport    ┌────────────┐
-//! │  matrix.rs   │ ───────────────▶  │  keyboard.rs      │ ───────────────▶ │  hid.rs    │
-//! │  debounce.rs │                   │  keymap.rs        │                  │  report.rs │
-//! └──────────────┘                   │  tapping.rs  ...  │                  └────────────┘
-//!                                    └───────────────────┘
+//!  matrix::           keyboard::                 pipeline::
+//!  ┌───────────────┐  ┌──────────────────────┐   ┌──────────────┐
+//!  │ scanner.rs    │  │ processor.rs         │   │ report.rs    │
+//!  │ debounce.rs   │──▶ (+ devices::*)       │──▶│ hid.rs       │
+//!  │ split.rs      │  │ steno_playback.rs    │   │              │
+//!  └───────────────┘  └──────────────────────┘   └──────────────┘
+//!         KeyEvent                                    HidReport
 //! ```
 //!
-//! - **[`matrix`]** — [`MatrixScanner`](matrix::MatrixScanner) /
-//!   `AsyncMatrixScanner` traits; raw key state.
-//! - **[`debounce`]** — [`Debouncer`](debounce::Debouncer) implementations
-//!   that convert noisy GPIO transitions into clean [`KeyEvent`](event::KeyEvent)s.
-//! - **[`keymap`]** — [`Layer`](keymap::Layer) and [`LayerStack`](keymap::LayerStack);
-//!   multi-layer action resolution with transparent fallthrough.
-//! - **[`tapping`]** — [`TapHoldRecognizer`](tapping::TapHoldRecognizer);
-//!   mod-tap and layer-tap disambiguation.
-//! - **[`recognizer`]** — The [`Recognizer`](recognizer::Recognizer) trait shared
-//!   by all input-pattern modules (combos, leader, tap-dance, steno).
+//! - **[`matrix`]** — [`MatrixScanner`](matrix::MatrixScanner) and
+//!   [`Debouncer`](matrix::debounce::Debouncer): raw key state in,
+//!   clean [`KeyEvent`](pipeline::event::KeyEvent)s out. Also
+//!   [`split`](matrix::split) for multi-half boards and
+//!   [`analog`](matrix::analog) for Hall-effect / continuous-travel scanning.
+//! - **[`pipeline`]** — the stage-agnostic types: [`event`](pipeline::event),
+//!   [`keymap`](pipeline::keymap) ([`Layer`](pipeline::keymap::Layer),
+//!   [`LayerStack`](pipeline::keymap::LayerStack)),
+//!   [`modifier`](pipeline::modifier),
+//!   [`recognizer`](pipeline::recognizer),
+//!   [`report`](pipeline::report) ([`KeyboardReport`](pipeline::report::KeyboardReport),
+//!   [`NkroKeyboardReport`](pipeline::report::NkroKeyboardReport),
+//!   [`HidReport`](pipeline::report::HidReport)),
+//!   [`hid`](pipeline::hid) ([`Reporter`](pipeline::hid::Reporter)) and
+//!   [`power`](pipeline::power).
 //! - **[`keyboard`]** — [`KeyboardProcessor`](keyboard::KeyboardProcessor);
 //!   the synchronous event→report core, no Embassy dependency.
-//! - **`task`** *(feature `embassy`)* — async Embassy tasks and channels
-//!   that wire the pipeline into a three-task topology.
-//! - **[`hid`]** — [`Reporter`](hid::Reporter) / `AsyncReporter`
-//!   output boundary traits.
-//! - **[`report`]** — [`KeyboardReport`](report::KeyboardReport) (6KRO),
-//!   [`NkroKeyboardReport`](report::NkroKeyboardReport) (128-key bitmap),
-//!   [`ConsumerReport`](report::ConsumerReport), [`HidReport`](report::HidReport).
+//! - **[`devices`]** — one module per input modality
+//!   ([`keyboard`](devices::keyboard) tap-hold and combos,
+//!   [`steno`](devices::steno), [`midi`](devices::midi),
+//!   [`mouse`](devices::mouse), [`gamepad`](devices::gamepad),
+//!   [`encoder`](devices::encoder)).
 //! - **[`action`]** — [`Action<Ext>`](action::Action), [`KeyCode`](action::KeyCode),
 //!   [`ModifierKey`](action::ModifierKey), [`LayerOp`](action::LayerOp).
-//! - **[`modifier`]** — [`ModifierState`](modifier::ModifierState); real, weak,
-//!   and one-shot modifier stacks.
+//! - **[`task`]** *(feature `embassy`)* — async Embassy tasks and channels
+//!   that wire the pipeline into a multi-task topology.
+//! - **[`telemetry`]**, **[`storage`]**, **[`transport`]**, **[`rgb`]**,
+//!   **[`audio`]**, **[`haptic`]**, **[`accessibility`]** — optional
+//!   subsystems a board crate opts into.
 //!
 //! # Quick start
 //!
-//! ```rust,ignore
-//! use tecla::prelude::*;
-//! use tecla_macros::keymap;
+//! The keymap and the processor are pure logic — no executor, no hardware —
+//! so the core of a board crate looks like this and runs anywhere:
 //!
-//! static KEYMAP: LayerStack<2, 48, ()> = keymap! {
-//!     layer!(Base, A, B, C, ..., LT!(Fn, SPC)),
-//!     layer!(Fn,  F1, F2, F3, ..., TRNS),
+//! ```rust
+//! use tecla::prelude::*;
+//! use tecla_macros::{keymap, layer, LT};
+//!
+//! // 2 layers × 4 keys. `TRNS` falls through to the layer below.
+//! let keymap: LayerStack<2, 4, ()> = keymap! {
+//!     layer!(Base, A, B, C, LT!(1, SPC)),
+//!     layer!(Fn,   F1, F2, F3, TRNS),
 //! };
 //!
-//! #[keyboard_main]
-//! async fn main(spawner: embassy_executor::Spawner) {
-//!     let (event_ch, report_ch) = /* static channels */;
-//!     spawner.spawn(matrix_task(scanner, debouncer, event_ch.sender())).unwrap();
-//!     spawner.spawn(keyboard_task(event_ch.receiver(), processor, report_ch.sender())).unwrap();
-//!     usb_task(report_ch.receiver(), reporter).await;
-//! }
+//! let mut processor: KeyboardProcessor<1, 4, 2, 4> =
+//!     KeyboardProcessor::new(keymap, TapHoldConfig::default());
+//!
+//! let mut reports = Vec::new();
+//! processor.process_event(KeyEvent::press(KeyPos::new(0, 0), 0), 0, &mut |r| {
+//!     reports.push(r);
+//! });
+//! assert_eq!(reports.len(), 1);
 //! ```
+//!
+//! A board crate then supplies a [`MatrixScanner`](matrix::MatrixScanner) and a
+//! [`Reporter`](pipeline::hid::Reporter) for its hardware and, with the
+//! `embassy` feature, hands both to [`task::run`] — see the `examples/`
+//! directory of any `tecla-*` board crate for a complete firmware binary.
 //!
 //! # Feature flags
 //!
 //! | Flag | Default | Effect |
 //! |------|---------|--------|
+//! | `autocorrect` | **on** | Trie-based typo correction (`AutocorrectEngine`). |
+//! | `autocomplete` | **on** | Trie-based prefix completion (`AutocompleteEngine`). |
 //! | `std` | off | Enables `std`-dependent code paths (used in host tests). |
-//! | `embassy` | off | Enables the `task` module and `AsyncReporter` / `AsyncMatrixScanner` re-exports. |
+//! | `testing` | off | Alias for `std`, used by the coverage and integration-test targets. |
+//! | `embassy` | off | Enables the [`task`] module and the async scanner / reporter traits. |
+//! | `storage` | off | Persistent keymap and setting storage on internal flash. |
+//! | `via` | off | Via protocol command decoding (implies `storage`). |
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod matrix;
+pub mod music;
 pub mod pipeline;
 pub mod storage;
 pub mod telemetry;

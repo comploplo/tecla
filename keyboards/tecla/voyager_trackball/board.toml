@@ -1,0 +1,8 @@
+name = "voyager_trackball"
+crate = "tecla-stm32f3"
+example = "voyager_trackball"
+target = "thumbv7em-none-eabihf"
+flash = "dfu"
+vendor = "ZSA Technology Labs"
+dfu_vid_pid = "3297:0791"
+dfu_address = "0x08002000:leave"

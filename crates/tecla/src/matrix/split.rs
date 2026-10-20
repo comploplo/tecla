@@ -6,6 +6,8 @@
 //! parameters such as the host flag and column offsets for key-position
 //! remapping.
 
+use crate::pipeline::event::KeyPos;
+
 /// Identifies one tile in a multi-piece keyboard topology (a traditional
 /// two-half split, or N modular tiles that snap together in varying counts
 /// and arrangements). Tile 0 is host by convention for the
@@ -29,7 +31,7 @@ pub struct SplitConfig {
     /// (`true`), or only scans its local matrix and forwards events to the
     /// host tile (`false`). Exactly one tile in a topology should be host.
     pub is_host: bool,
-    /// Added to every [`KeyPos`](crate::event::KeyPos) column index before
+    /// Added to every [`KeyPos`] column index before
     /// the event enters the pipeline. Typically `0` for the host tile and
     /// nonzero for other tiles.
     pub col_offset: u8,
@@ -65,6 +67,24 @@ impl SplitConfig {
     #[must_use]
     pub const fn is_host(self) -> bool {
         self.is_host
+    }
+
+    /// Maps a tile-local key position into the unified keymap coordinate space.
+    ///
+    /// Call this on the host tile for every event received over the split
+    /// transport, using the *sending* tile's config, before feeding the event
+    /// to the processor. The row is unchanged; only the column is offset.
+    ///
+    /// ```rust
+    /// use tecla::matrix::split::SplitConfig;
+    /// use tecla::pipeline::event::KeyPos;
+    ///
+    /// let remote = SplitConfig::secondary(6);
+    /// assert_eq!(remote.remap(KeyPos::new(1, 0)), KeyPos::new(1, 6));
+    /// ```
+    #[must_use]
+    pub const fn remap(self, pos: KeyPos) -> KeyPos {
+        KeyPos::new(pos.row, pos.col.saturating_add(self.col_offset))
     }
 }
 
@@ -127,18 +147,5 @@ mod tests {
     #[test]
     fn configs_differ_by_offset() {
         assert_ne!(SplitConfig::secondary(5), SplitConfig::secondary(6));
-    }
-
-    #[test]
-    fn config_clone_equals_original() {
-        let cfg = SplitConfig::secondary(6);
-        #[expect(clippy::clone_on_copy, reason = "testing Clone impl")]
-        let cloned = cfg.clone();
-        assert_eq!(cfg, cloned);
-    }
-
-    #[test]
-    fn config_debug_is_implemented() {
-        let _ = core::format_args!("{:?}", SplitConfig::primary());
     }
 }

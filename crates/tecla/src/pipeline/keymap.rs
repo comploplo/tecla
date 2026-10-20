@@ -225,19 +225,45 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
         clippy::as_conversions,
         reason = "u32::leading_zeros to u8 and u8 to usize for layer indexing"
     )]
+    /// The layer-stack bit for layer `n`, or `None` if `n` cannot be one.
+    ///
+    /// The stack is a `u32`, so shifting by 32 or more is undefined as a layer
+    /// selection: debug builds panic and release builds silently mask the shift,
+    /// which quietly toggles a *different* layer than the one asked for. `n`
+    /// reaches here from Via over USB as well as from the keymap, so it is not
+    /// necessarily a value the firmware author chose.
+    const fn layer_bit(n: u8) -> Option<u32> {
+        if (n as usize) < LAYERS && n < u32::BITS as u8 {
+            Some(1u32 << n)
+        } else {
+            None
+        }
+    }
+
+    /// Applies a [`LayerOp`] to the layer stack.
+    ///
+    /// Operations naming a layer that does not exist are ignored.
     pub fn apply(&mut self, op: LayerOp) {
         match op {
             LayerOp::Momentary(n) | LayerOp::On(n) => {
-                self.state |= 1 << u32::from(n);
+                if let Some(bit) = Self::layer_bit(n) {
+                    self.state |= bit;
+                }
             }
             LayerOp::Off(n) => {
-                self.state &= !(1 << u32::from(n));
+                if let Some(bit) = Self::layer_bit(n) {
+                    self.state &= !bit;
+                }
             }
             LayerOp::Toggle(n) => {
-                self.state ^= 1 << u32::from(n);
+                if let Some(bit) = Self::layer_bit(n) {
+                    self.state ^= bit;
+                }
             }
             LayerOp::SetDefault(n) => {
-                self.default_state = 1 << u32::from(n);
+                if let Some(bit) = Self::layer_bit(n) {
+                    self.default_state = bit;
+                }
             }
             LayerOp::Next => {
                 let combined = self.state | self.default_state;
@@ -391,6 +417,31 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_layer_ops_are_ignored() {
+        // `n` arrives from Via over USB as well as from the keymap. A shift of
+        // 32 or more is masked in release builds, so `Toggle(32)` used to
+        // silently toggle layer 0 — the base layer — and `Toggle(33)` layer 1.
+        let mut stack: LayerStack<2, 6> = make_stack(&[Action::NoOp; 6], None);
+        let before = stack.state();
+        for n in [2u8, 31, 32, 33, 64, 255] {
+            stack.apply(LayerOp::Toggle(n));
+            stack.apply(LayerOp::On(n));
+            stack.apply(LayerOp::Momentary(n));
+        }
+        assert_eq!(stack.state(), before, "no out-of-range op may alter state");
+    }
+
+    #[test]
+    fn set_default_does_not_accept_a_nonexistent_layer() {
+        let mut stack: LayerStack<2, 6> = make_stack(&[Action::NoOp; 6], None);
+        stack.apply(LayerOp::SetDefault(1));
+        stack.apply(LayerOp::SetDefault(40));
+        // Still layer 1, not clobbered to a bit that names nothing.
+        assert_eq!(stack.resolve(KeyPos::new(0, 0), 6), Action::NoOp);
+        stack.apply(LayerOp::SetDefault(0));
+    }
+
+    #[test]
     fn set_default_changes_base_layer() {
         let mut stack: LayerStack<2, 6> = make_stack(&[Action::NoOp; 6], None);
         stack.apply(LayerOp::SetDefault(1));
@@ -444,7 +495,6 @@ mod tests {
     fn layer_api_is_accessible() {
         let layer: Layer = Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
         assert_eq!(layer.len(), 2);
-        assert!(!layer.is_empty());
         assert_eq!(layer.actions.first(), Some(&Action::Key(KeyCode::A)));
         assert_eq!(layer.get(2), None);
     }

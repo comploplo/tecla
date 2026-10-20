@@ -5,6 +5,7 @@ edition = "2021"
 description = "Proc macros for tecla — keymap!, steno!, layer!, MT!, LT!, and #[keyboard_main]"
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -25,4 +26,7 @@ proc-macro2 = { workspace = true }
 similar-asserts = { workspace = true }
 heapless        = { workspace = true }
 trybuild        = { workspace = true }
-tecla = { version = "0.1.0", path = "../tecla", features = ["std"] }
+# Path-only (no version): tecla dev-depends on tecla-macros too, so a
+# version requirement here would make the pair unpublishable. Cargo strips
+# path-only dev-dependencies from the packaged manifest.
+tecla = { path = "../tecla", features = ["std"] }

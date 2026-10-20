@@ -3,6 +3,10 @@
 An embedded Rust keyboard firmware core — `no_std`, async-first via Embassy,
 MCU-agnostic via `embedded-hal` and `embedded-hal-async`.
 
+Also growing into an instrument firmware SDK: reusable input, musical behavior,
+and timing components for building new physical MIDI instruments. Phases 21–26
+cover this track; sound comes from external instruments or host software.
+
 **Primary targets:** RP2040, STM32, nRF52840, ESP32-S3 — modern MCUs
 with ample flash and RAM, all served by mature Rust HAL ecosystems.
 
@@ -10,13 +14,15 @@ with ample flash and RAM, all served by mature Rust HAL ecosystems.
 
 - Match and exceed QMK's keyboard input core with a type-safe, memory-safe,
   fully-tested Rust implementation
-- One unified `Recognizer` trait for all input disambiguation — tap-hold,
-  combo, leader, tap-dance, steno share a single interface
+- One `Recognizer` trait for deadline-driven input disambiguation, so board
+  crates and downstream consumers can add their own
 - `Action<Ext>` generic extension point: third-party features without forking
 - Embassy async pipeline eliminates busy-waiting; scan → process → report
   with zero CPU burn between events
 - `unsafe_code = deny` across the entire workspace — memory safety by
   construction, not convention
+- Support instrument programs alongside the keyboard processor, sharing drivers
+  and runtime services while keeping playing techniques and musical rules explicit
 
 **AVR (ATmega32u4):** stretch goal, feature-flagged, after all primary phases.
 
@@ -73,10 +79,12 @@ ______________________________________________________________________
 
 ## Phase 6 — Extended Recognizers ✅
 
-- [x] `LeaderRecognizer` — Emacs-style nested trie sequences, per-branch
-  timeouts, which-key metadata for display integration
-- [x] `ComboRecognizer` — simultaneous key-set within a configurable window
-  (standalone, currently unused by the processor — see live model below)
+- [ ] `LeaderRecognizer` — Emacs-style nested trie sequences, per-branch
+  timeouts, which-key metadata for display integration. Written once, then
+  deleted before publication: nothing in the pipeline ever reached it.
+- [ ] `ComboRecognizer` — eager/windowed simultaneous key-set. Superseded by
+  the live chord model below and deleted; re-add only if a board needs the
+  windowed semantics.
 - [x] Live combo (chord) model in `KeyboardProcessor` — no timing window,
   press-to-fire: the action presses (held and repeating exactly like any
   other key, including host typematic repeat) the instant the held set
@@ -84,9 +92,13 @@ ______________________________________________________________________
   non-combo key press before any match aborts and replays the chord as
   normal keys; after a match it's ordinary rollover. Falls back to
   replaying buffered taps if the full set releases with no match
-- [x] `TapDanceRecognizer` — counted rapid taps → action per count
-- [x] `StenoRecognizer` — chord until all-release, GeminiPR / TXBOLT wire
-  format (dictionary stays on host in Plover)
+- [ ] `TapDanceRecognizer` — counted rapid taps → action per count. Written
+  once, then deleted before publication: nothing in the pipeline ever reached
+  it, same as `LeaderRecognizer` above.
+- [x] Steno — chord until all-release, GeminiPR / TXBOLT wire format
+  (dictionary stays on host in Plover). Lives in `devices::steno::StenoEngine`,
+  not as a `Recognizer`: the recognizer version was deleted with the others.
+  `TapHoldRecognizer` is currently the trait's only production implementor.
 
 ______________________________________________________________________
 
@@ -179,7 +191,7 @@ Half of the custom keyboard market. Needs its own phase.
 - [x] `SplitTransport` trait — async send/recv for `KeyEvent`s
 - [x] `remote_event_task` — primary half receives from transport into EventChannel
 - [x] `secondary_task` — secondary half scans + debounces + sends over transport
-- [x] Half-identification — `SplitRole` enum + `SplitConfig` with col_offset remapping
+- [x] Half-identification — `TileId` + `SplitConfig { is_host, col_offset }`, with `SplitConfig::remap`
 - [x] USB arbitration — split.rs example shows primary-only USB enumeration
 - [x] `UartTransport` — async UART impl over `embedded-io-async`, 11-byte framed KeyEvent
 - [ ] Validated targets: Corne (3×6), Kyria (3×6+5t), Lily58 (4×6)
@@ -236,7 +248,15 @@ Parser and protocol work is pure Rust — no hardware deps.
 - [x] `tecla-config` crate — parse QMK `info.json` (matrix, pins, USB VID/PID)
 - [x] `keymap.c` transpiler — parse QMK keycodes, emit `keymap!`/`layer!` Rust source
 - [x] Compile-time validation — dimension checks, unknown keycodes, layer consistency
-- [x] Via / Vial protocol — `ViaProtocol` in core, dynamic keymap get/set over USB HID
+- [x] Via command decoder — protocol version, keyboard values, layer count,
+  per-key get/set, keymap reset. Command IDs and byte layouts corrected against
+  QMK's `quantum/via.h` and pinned there by `tests/via_protocol_ids.rs`; the
+  original table had most IDs wrong (0x04 was read as "get layer count" when
+  Via defines it as "get keycode"), so no real Via host could have talked to it.
+- [x] Raw-HID transport — `VIA_REPORT_DESCRIPTOR` + `via_usb_task`/`service_via`
+- [ ] Remaining Via commands: dynamic macros (0x0C–0x10), bulk keymap buffer
+  (0x12/0x13), encoders (0x14/0x15), custom/lighting values, bootloader jump
+- [ ] Vial protocol — not started
 
 ______________________________________________________________________
 
@@ -289,7 +309,9 @@ Blocked on hardware.
   stack budget so a future regression fails the build instead of hard-faulting
   silently on hardware
 - [ ] CH32V3 support (`ch32-hal`, ultra-low-cost RISC-V)
-- [x] ESP32-S3 support — `tecla-esp32s3` board crate written, excluded pending upstream esp-hal bug
+- [ ] ESP32-S3 validation — the standalone `tecla-esp32s3` crate now targets
+  current `esp-hal`/`esp-rtos` APIs and resolves its dependencies, but still
+  needs an Xtensa firmware build and hardware validation; excluded from CI
 - [ ] Shared HAL abstraction layer
 
 ______________________________________________________________________
@@ -330,8 +352,8 @@ module as a self-contained template.
 
 - [x] Create `pipeline/` — event, recognizer, modifier, keymap, hid, report, power
 - [x] Create `matrix/` — scanner traits, debounce, split
-- [x] Create `devices/keyboard/` — tap-hold, combo, tap-dance, leader
-- [x] Create `devices/steno/` — recognizer, engine, protocol, chord types
+- [x] Create `devices/keyboard/` — tap-hold, combo
+- [x] Create `devices/steno/` — engine, protocol, chord types
 - [x] Create `devices/midi/` — MidiEvent helpers
 - [x] Create `devices/mouse/` — pointing scanner trait
 - [x] Create `devices/encoder/` — EncoderMapping, encoder_key_pos
@@ -348,6 +370,250 @@ module as a self-contained template.
 Goal: a user building a custom MIDI foot controller reads `devices/midi/`
 and sees the complete MIDI path in one place. They create
 `devices/pressure_pad/` following the same pattern.
+
+______________________________________________________________________
+
+## Instrument Firmware SDK — Phases 21–26
+
+Build playable instruments on existing hardware, then share code where those
+instruments demonstrate the same need. These milestones describe working programs,
+not a catalogue of engines, a universal sensor model, or a new execution framework.
+
+**Scope:** external sound sources over MIDI first. Internal synthesis, samplers,
+audio recording/looping, and audio DSP are out of scope for this track. Existing
+Phase 16 buzzer sounds remain interface feedback.
+
+**Already available:** Phase 13's note/CC/pressure events and USB packet encoding,
+keyboard-triggered note-off, existing pad/key/encoder/pointing drivers, the
+synchronous processing pattern with injected time, Embassy timers/channels, and
+host-test infrastructure. Reuse these; they are not new SDK deliverables. The
+Asterisk USB-MIDI pad example plays on hardware; AutoChord uses the same board
+and transport, with physical validation of its musical controls pending.
+Storage helpers do not yet constitute wired instrument persistence.
+
+Start with Phase 21. Phase 22 uses that board/output path; Phase 23 adds the first
+timed program. Phase 24 combines those results; Phase 25 uses the timing needed
+for one event looper. Phase 26 documents and validates each working example as it
+lands. Optional follow-ons below do not block these completion gates or require
+finishing the keyboard/research backlog.
+
+## Phase 21 — USB-MIDI Pad Controller
+
+One existing pad/key board plays fixed-velocity notes on an external synth.
+Use the existing MIDI types and encoding; no new message family is needed.
+
+- [x] Add a MIDI-only board example using the existing scanner and USB-MIDI class;
+  register its profile/features and include the example in board builds
+- [x] Correct delivery on the path it uses: preserve repeated MIDI events, make
+  buffer exhaustion/send failures visible, and avoid marking failed output as sent
+- [x] Validate its configured channel/notes and define cleanup of its held notes
+  on stop and reconnect, without replaying stale attacks
+- [x] Test message/release ordering, invalid configuration, repeated events,
+  overflow, and disconnect/reconnect recovery
+
+Implemented in [`asterisk_v1_4_midi`](keyboards/tecla/asterisk_v1_4_midi/): the
+existing capacitive scanner and `KeyboardProcessor` play notes 48–72 at velocity
+100 on channel 1; GPIO13 stops the notes. Checked scan batches go directly to the
+existing USB-MIDI class using the shared packet encoding. A fixed-map note-off
+sweep handles stop and USB recovery; pending writes cannot cross USB sessions.
+Host tests exercise the same keymap, packing, and session guard as the firmware.
+
+**Completion gate:** pads play and release an external sound source on one board;
+host monitoring and deterministic delivery tests verify the actual output path.
+**Hardware:** basic pad playing confirmed by the user. Full mapping, Stop, and
+disconnect/reconnect checks remain to be confirmed using the profile's checklist.
+
+______________________________________________________________________
+
+## Phase 22 — Four-Voice AutoChord
+
+An instrument program owns its musical state independently of keyboard actions.
+The player chooses bass and melody; Tecla supplies connected tenor and alto
+voices, automatic harmonic movement, and momentary controls for the phrase and
+its harmonic vocabulary.
+
+- [x] Add an allocation-free `music` module: diatonic keys and steps, pitch-class
+  sets, triads/sevenths, chord roles, and bounded four-part voicing search
+- [x] Preserve played anchors, voice identities, common tones, and exact MIDI
+  ownership; keep generated voice pairs strict while identifying unavoidable
+  outer-voice parallels and doubled leading tones forced by the player's notes
+- [x] Give physical bass/melody presses ownership of their attacks; harmony
+  commands articulate generated inner voices without interrupting held outer notes
+- [x] Sound the lowest held left note and highest held right note literally;
+  use remaining held keys as harmonic guidance for two generated parts, with
+  smooth anchor handoffs and no direct extra-note attacks
+- [x] Interpret melodic flow, repeated/spaced attacks, and saved arrivals before
+  voicing selection; use recent onset timing only at player events, with no
+  autonomous chord changes, tempo controls, or delayed note attacks
+- [x] Support named fifth omissions while retaining diminished tritones; keep
+  the last successful harmonic history through an unsuccessful search
+- [x] Support independent tenor/alto catches in the program API, including chromatic
+  notes and sevenths; keep saved targets and resolve each on release while the
+  other catch continues
+- [x] Map eight left and ten right letter pads to in-key notes; use A/O/E/U for
+  Prepare/Intensify/Arrive/Substitute; keep both played pitches literal for every gesture
+- [x] Make each # bar directly reinterpret its hand's played note, with momentary
+  held preference and independent thumb meanings; both # pads Stop
+- [x] Add a bounded chromatic chord palette, revoicings, named colour tones and
+  fifth omissions, common substitutions, and checked local resolution destinations;
+  use independent star permissions for borrowing and suspended/extended colours,
+  including tritone substitutions, sus2/sus4, ninths, and thirteenths
+- [x] Let an established dominant root become implied over a continuous prepared
+  bass when its actual inner guide pair and destination remain intact; retain
+  all other structural tones and clear the permission when its proof is lost
+- [x] Follow ordinary keyboard motion through predominant, dominant, and tonic
+  harmony; retain phrase direction, applied destinations, and each inner voice's
+  leading-tone or seventh resolution through rolled changes and catches
+- [x] Distinguish contextual six-four inversions and prepared melody ornaments;
+  give cadential six-fours voice-specific 4–3/6–5 targets and bass doubling;
+  connect seventh-chord and diminished-tritone guides without doubling generated
+  tendency tones, including raised leading tones in applied major triads
+- [x] Let prepared melody decorations keep a steady triad beneath them and
+  survive reharm commands; admit prepared step-resolving melody tensions over
+  a new harmony while preserving literal pitches and inner-voice obligations
+- [x] Prepare held tonic/dominant pedals, follow short directional bass figures,
+  and give inner voices event-driven passing/neighbour steps with saved endpoints
+- [x] Separate functional pull from chord colour; make held A/O/E steering
+  and U substitution momentary while retaining musical debts; star releases end
+  their permissions without cutting off or silently reharmonizing the heard chord
+- [x] Reuse Phase 21's scanner, USB-MIDI encoding, bounded delivery, and recovery
+  in a shared board loop; register `asterisk_v1_4_autochord` without
+  `KeyboardProcessor`, a generic program trait, or new dependencies
+- [x] Test musical policy, connected note slides, partial catch release, repeated
+  commands, inversion, MIDI ownership, overlapping held shapes, raw touch filtering,
+  Stop, and offline recovery; preserve keyboard and MIDI profile coverage
+
+When no supported four-voice result exists, selected anchors and any caught
+inner notes continue; other inner voices are silent. Additional held keys guide
+chord choices without sounding extra voices or supplying missing chord tones.
+The initial physical note layout is C major, with chromatic harmony available
+around those literal notes.
+Tension chords retain destinations even while the current played notes prevent
+arrival. Ordinary note changes can unlock those arrivals without an Arrive press;
+thumbs steer subsequent changes, # bars reinterpret the played notes, and stars
+permit borrowing and richer chord colours. Physical stars no longer catch voices;
+the program's explicit voice-catch API remains available and tested.
+Phrase tests cover classical cadences, jazz ii–V–I guide tones, inversions,
+pedal harmony, ascending/descending bass figures, inner passing lines,
+prepared ornaments, and applied dominants. Idle scans and modifier releases do
+not advance a line; releasing a thumb ends its steering without changing the
+sounding harmony. This is a declared, bounded performance
+vocabulary rather than a complete Baroque or jazz grammar.
+
+The [`AutoChord profile`](keyboards/tecla/asterisk_v1_4_autochord/) documents the
+current playing map. **Software gate passed:** workspace host tests, host and
+RP2040 Clippy, the `no_std` target check, release profile build, and UF2 generation.
+Physical testing of an earlier AutoChord revision does not validate this control
+revision. **Physical completion gate pending:** play
+connected phrases, try each thumb and direct bar, compare independent/combined
+star permissions, and verify both-# Stop and USB recovery with
+an external sound source. Add timed execution with its first consumer in Phase 23.
+
+______________________________________________________________________
+
+## Phase 23 — Single-Pattern MIDI Sequencer
+
+One monophonic lane, one RAM-resident pattern, internal tempo, and physical
+start/stop. Initial editing can happen while stopped.
+
+- [ ] Store a bounded pattern of notes and gate lengths; implement step position,
+  next-step deadline, and the currently active note/gate state
+- [ ] Adapt the existing injected-time/deadline-wakeup pattern for this program;
+  service due work even under input load, with explicit late-step behavior
+- [ ] On stop, release sounding notes; preserve each gate's actual note identity
+  until its note-off rather than looking it up again from an edited pattern
+- [ ] Test event order, gate endings, pattern wrap, tempo changes, and stop with
+  fake time; record basic step/gate timing on the board
+
+**Completion gate:** one pattern drives an external synth without physical input,
+with correct gate timing and stop behavior. Program-local deadlines are sufficient;
+a general scheduler, independent lanes, or launch-queue system is not a prerequisite.
+
+______________________________________________________________________
+
+## Phase 24 — Chord Selection and Strumming
+
+Extend the Phase 22 program: one control group selects root, chord quality, and
+inversion; another triggers either a block chord or a low-to-high strum.
+
+- [ ] Add bounded chord/voicing calculations for the demonstrated controls, using
+  ordinary MIDI note numbers and checking note-range limits
+- [ ] Keep the selected harmony separate from the notes captured at attack; define
+  how release or a new attack ends an in-progress strum
+- [ ] Reuse Phase 23 timing where it fits; extract a shared deadline helper only
+  when it removes real duplication between the two programs
+- [ ] Test chord changes while held, strum order, retrigger, and release; demonstrate
+  both articulations through external MIDI on the existing board
+
+**Completion gate:** the same selected chord can be played as a block or strum,
+with correct releases. This does not require a tuning framework, MPE allocator,
+all playing techniques, or a general harmony/counterpoint solver.
+
+______________________________________________________________________
+
+## Phase 25 — MIDI Event Looper
+
+Record and repeat the note events produced by the reference instrument. Start
+with one loop in RAM and record/replace/play/stop/clear controls.
+
+- [ ] Store its emitted MIDI events with relative timestamps in a bounded buffer;
+  make loop length and full-buffer behavior explicit
+- [ ] Replay using the timing already demonstrated in Phase 23; define recording
+  end and loop-boundary behavior so partial notes do not remain sounding
+- [ ] Release active notes on stop/clear/replacement and test repeated playback,
+  capacity exhaustion, and interruption with injected time
+
+**Completion gate:** a played phrase records and loops on an external synth with
+documented capacity and correct note endings. Overdub, undo, gesture interpolation,
+generic automation, tracker editing, and flash persistence are separate follow-ons.
+
+______________________________________________________________________
+
+## Phase 26 — Reproducible Instrument Examples
+
+Document and validate the examples as they land. Shared SDK code is the result
+of demonstrated reuse, not a completion target of its own.
+
+- [ ] Document each example's controls, board wiring, build/flash commands, external
+  MIDI setup, tests, capacities, and known limits; include calibration or feedback
+  only where that instrument actually uses them
+- [ ] Reuse the current board-profile discovery, host tests, and build tooling;
+  ensure feature-gated MIDI examples are actually selected in CI/board builds
+- [ ] Distinguish host-tested, cross-built, and physically validated support;
+  record firmware size and relevant timing measurements on the tested board
+- [ ] Extract helpers where working programs duplicate behavior, keeping state
+  specific to the programs that use it; port to a second compatible board when
+  there is a real adapter/use case rather than requiring new hardware for this gate
+
+**Completion gate:** a working reference instrument has reproducible instructions,
+host tests, and a recorded hardware demonstration. A mandatory two-family hardware
+campaign, all-inclusive template, new feature-flag matrix, and persistence layer
+are not prerequisites.
+
+### Instrument Follow-ons — Choose When a Reference Instrument Needs Them
+
+These preserve the exploration directions without making every one a prerequisite
+for a playable controller, sequencer, chord instrument, or looper:
+
+- **External synchronization:** MIDI input and clock/start/stop handling when the
+  sequencer must follow a host/device; then define clock loss and resumption
+- **Expressive pitch:** pitch bend, fine tuning, release velocity, and MPE when a
+  concrete control technique needs them; test against a compatible receiving synth
+- **More composition tools:** arpeggiation, generative rhythm, independent lanes,
+  and queued pattern changes when the chosen playing/editing controls need them
+- **Tracker:** extend Phase 23 playback with a cell editor, reusable phrases, and
+  phrase ordering; begin with edits while stopped and an external MIDI sound source
+- **Gesture recording / richer looping:** use a real moving control to justify
+  capturing original sensor/control values; add overdub, undo, interpolation,
+  parameter locks, or automation only for the selected interaction
+- **Baroque harmony/counterpoint:** a separate four-voice experiment with named
+  supported rules, voice history, prepared suspensions, and infeasible-input tests;
+  keep its policy independent of output and timing
+- **Save/restore:** one versioned, program-owned record using existing storage
+  dependencies when material must survive power cycles; wire a real board flash
+  region before claiming persistence
+- **Additional hardware/transports:** specific sensor drivers, DIN/BLE-MIDI, or
+  CV/gate for a chosen instrument/board; no arbitrary-sensor support promise
 
 ______________________________________________________________________
 
@@ -418,9 +684,14 @@ another's observations.
   `delta_slow_accepts`, `delta_slow_rejects`, `delta_bounce_rejects`,
   `delta_sticky_uses` (plus cumulative totals). Drop `hold_time_samples`
   deque — that signal already lives in `CoreTelemetry::hold_time_ema/var`
-- [ ] Fix `AccessibilityTelemetry::reset_deltas` (currently a no-op) to
-  zero the delta fields so the adaptation tick sees recent behavior,
-  not lifetime totals
+- [x] Fix `AccessibilityTelemetry::reset_deltas` (was a no-op) to zero the
+  delta fields so the adaptation tick sees recent behavior, not lifetime
+  totals. Added `delta_slow_accepts/rejects`, `delta_bounce_rejects`,
+  `delta_sticky_uses`; rates now report over the delta window and
+  `delta_sticky_uses` rides the wire alongside every other snapshot's
+  delta. Fixed the bounce denominator at the same time — it was
+  `bounce_rejects + slow_accepts`, omitting slow-rejected presses that
+  the bounce filter had already passed, which inflated the rate
 - [x] Remove doc reference to "medication cycle detection" from
   `accessibility.rs` module doc — not our claim to make
 
@@ -440,10 +711,7 @@ another's observations.
 *Step 3 — Recognizer runtime setters:*
 
 - [ ] `KeyboardProcessor::set_tapping_term(&mut self, ms: u64)`
-- [ ] `ComboRecognizer::set_combo_term(&mut self, ms: u64)`
-- [ ] `TapDanceRecognizer::set_inter_tap(&mut self, ms: u64)`
-- [ ] `LeaderRecognizer::set_timeout(&mut self, ms: u64)`
-- [ ] `StenoRecognizer` — add optional `settle_ms: Option<u64>` for
+- [ ] Steno chord accumulation — add optional `settle_ms: Option<u64>` for
   rolled chord detection (currently pure structural all-release)
 - [ ] `AutocorrectEngine` — extract hard-coded 30ms transposition
   threshold to configurable field with setter
@@ -673,12 +941,14 @@ engine and `Recognizer` trait make chord-like input first-class.
 - [ ] Conditionals in macros — if-held, if-layer, wait-for-key
 - [ ] Tiny bytecode interpreter for firmware-side macro logic
 
-**MIDI controllers** — demonstration vertical
+**Instrument firmware** — platform track
 
-- [ ] Dedicated control surface platform — grid pads, faders (via ADC),
-  encoders-to-CC, velocity-sensitive keys
-- [ ] MIDI sysex for firmware-side patch selection and routing
-- Great showcase for `Action<Ext>` extensibility, not a core research thrust
+- See [Instrument Firmware SDK — Phases 21–26](#instrument-firmware-sdk--phases-2126)
+  for delivery milestones, reference instruments, and hardware validation
+- Grid pads, faders, encoders, and velocity-sensitive keys are example controls;
+  musical behavior belongs to instrument programs rather than keyboard actions
+- SysEx patch selection/routing remains an extension when a concrete instrument
+  requires it; internal sound generation is out of scope for this track
 
 **Gesture input**
 
@@ -753,6 +1023,18 @@ Transport:
 - [x] `AsyncTelemetryWriter` trait for board-crate transport implementations
 - [x] `CdcTelemetryWriter` (RP2040) — CDC ACM virtual serial for telemetry output
 - [x] `TelemetryChannel` type for frame routing between tasks
+- [x] Composite USB HID reporter — descriptors and wire encoding for NKRO,
+  consumer, mouse, and gamepad, plus USB-MIDI behind the `usb-midi` feature.
+  Shared in core (`transport::usb`) rather than per board.
+- [ ] Haptic driver implementation for a board (DRV2605L); the trait, the
+  controller, and the task plumbing exist but nothing drives real hardware
+- [x] BLE builds again — the `ble` feature had rotted while nothing compiled
+  it: stale `tecla::ble`/`tecla::power` paths from the module refactor, and
+  crates.io's `nrf-sdc 0.3` pinned to bt-hci 0.4 against trouble-host's 0.9.
+  Now on published trouble-host 0.8 + bt-hci 0.10 + embassy-nrf 0.11, with
+  nrf-sdc/nrf-mpsl 0.4, and gated by a CI job.
+- [ ] BLE hardware validation — building and linking do not validate the radio
+- [ ] Publish `tecla-nrf52840` after hardware validation
 - [ ] CDC ACM USB endpoint in remaining board crates (nRF52840, STM32, ESP32)
 - [ ] Host companion: Ratatui TUI (phase 1), web dashboard (phase 2)
 - [ ] Expose ability profile to host for software-side adaptation

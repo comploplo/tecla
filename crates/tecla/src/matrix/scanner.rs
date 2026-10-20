@@ -6,7 +6,7 @@
 /// The raw pressed/released state of every switch in the matrix.
 ///
 /// Internally stored as a row-major 2-D boolean array. All access goes
-/// through safe [`get`](MatrixState::get) / [`set`](MatrixState::set)
+/// through safe `get` / `set`
 /// methods — no direct indexing.
 pub type MatrixState<const ROWS: usize, const COLS: usize> =
     crate::matrix::state::Matrix<bool, ROWS, COLS>;
@@ -147,5 +147,135 @@ mod tests {
         let mut state = MatrixState::<4, 12>::new();
         state.set(2, 5, true);
         assert_eq!(state.get(2, 5), Some(true));
+    }
+
+    // ── GpioMatrixScanner ────────────────────────────────────────────────────
+    //
+    // Fake pins that record the strobe sequence, so the row-strobe /
+    // column-read protocol itself is exercised on the host.
+
+    use core::cell::RefCell;
+
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    struct FakeError;
+
+    impl embedded_hal::digital::Error for FakeError {
+        fn kind(&self) -> embedded_hal::digital::ErrorKind {
+            embedded_hal::digital::ErrorKind::Other
+        }
+    }
+
+    /// A row pin. Records how many times it was strobed low.
+    struct FakeRow<'a> {
+        index: usize,
+        /// Which row is currently strobed low, shared by every pin.
+        active: &'a RefCell<Option<usize>>,
+        strobes: &'a RefCell<[u8; 3]>,
+        fail: bool,
+    }
+
+    impl embedded_hal::digital::ErrorType for FakeRow<'_> {
+        type Error = FakeError;
+    }
+
+    impl embedded_hal::digital::OutputPin for FakeRow<'_> {
+        fn set_low(&mut self) -> Result<(), FakeError> {
+            if self.fail {
+                return Err(FakeError);
+            }
+            *self.active.borrow_mut() = Some(self.index);
+            self.strobes.borrow_mut()[self.index] += 1;
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), FakeError> {
+            if self.fail {
+                return Err(FakeError);
+            }
+            *self.active.borrow_mut() = None;
+            Ok(())
+        }
+    }
+
+    /// A column pin. Reads low (pressed) only for the `(row, col)` pairs in
+    /// `pressed`, and only while that row is the one strobed low.
+    struct FakeCol<'a> {
+        index: usize,
+        active: &'a RefCell<Option<usize>>,
+        pressed: &'a [(usize, usize)],
+    }
+
+    impl embedded_hal::digital::ErrorType for FakeCol<'_> {
+        type Error = FakeError;
+    }
+
+    impl embedded_hal::digital::InputPin for FakeCol<'_> {
+        fn is_low(&mut self) -> Result<bool, FakeError> {
+            let row = self.active.borrow().ok_or(FakeError)?;
+            Ok(self.pressed.contains(&(row, self.index)))
+        }
+
+        fn is_high(&mut self) -> Result<bool, FakeError> {
+            self.is_low().map(|low| !low)
+        }
+    }
+
+    #[test]
+    fn gpio_scan_reports_exactly_the_pressed_keys() {
+        let active = RefCell::new(None);
+        let strobes = RefCell::new([0u8; 3]);
+        let pressed = [(0usize, 1usize), (2, 0)];
+
+        let rows = [0, 1, 2].map(|index| FakeRow {
+            index,
+            active: &active,
+            strobes: &strobes,
+            fail: false,
+        });
+        let cols = [0, 1].map(|index| FakeCol {
+            index,
+            active: &active,
+            pressed: &pressed,
+        });
+
+        let mut scanner = GpioMatrixScanner::new(rows, cols);
+        // Fully qualified: with the `embassy` feature on, AsyncMatrixScanner
+        // also has a `scan` method on this type.
+        let state = MatrixScanner::scan(&mut scanner).expect("scan failed");
+
+        for r in 0..3 {
+            for c in 0..2 {
+                assert_eq!(
+                    state.get(r, c),
+                    Some(pressed.contains(&(r, c))),
+                    "wrong state at ({r},{c})"
+                );
+            }
+        }
+        // Every row strobed exactly once, and the last one was released.
+        assert_eq!(*strobes.borrow(), [1, 1, 1]);
+        assert_eq!(*active.borrow(), None, "row left strobed low after scan");
+    }
+
+    #[test]
+    fn gpio_scan_propagates_row_pin_errors() {
+        let active = RefCell::new(None);
+        let strobes = RefCell::new([0u8; 3]);
+        let pressed: [(usize, usize); 0] = [];
+
+        let rows = [0, 1, 2].map(|index| FakeRow {
+            index,
+            active: &active,
+            strobes: &strobes,
+            fail: true,
+        });
+        let cols = [0, 1].map(|index| FakeCol {
+            index,
+            active: &active,
+            pressed: &pressed,
+        });
+
+        let mut scanner = GpioMatrixScanner::new(rows, cols);
+        assert_eq!(MatrixScanner::scan(&mut scanner), Err(FakeError));
     }
 }

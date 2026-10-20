@@ -1,0 +1,6 @@
+name = "asterisk_v1_4_keytest"
+crate = "tecla-rp2040"
+example = "asterisk_v1_4_keytest"
+target = "thumbv6m-none-eabi"
+flash = "uf2"
+vendor = "stenokeyboards"

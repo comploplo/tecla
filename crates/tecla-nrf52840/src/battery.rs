@@ -6,7 +6,7 @@
 use embassy_nrf::saadc::{self, ChannelConfig, Config, Saadc, VddInput};
 use embassy_nrf::{bind_interrupts, peripherals, Peri};
 use embassy_time::Timer;
-use tecla::power::BatteryLevel;
+use tecla::pipeline::power::BatteryLevel;
 
 use crate::ble_reporter::HidGattServer;
 

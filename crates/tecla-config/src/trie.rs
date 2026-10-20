@@ -260,16 +260,19 @@ mod tests {
         ];
         let trie = compile_trie(&words);
 
-        assert!(walk_trie(&trie, &[0x17, 0x0B, 0x08]).is_some());
-        assert!(walk_trie(&trie, &[0x17, 0x0B, 0x08, 0x10]).is_some());
-        assert!(walk_trie(&trie, &[0x0B, 0x0C]).is_some());
+        assert_eq!(walk_trie(&trie, &[0x17, 0x0B, 0x08]), Some((true, 0)));
+        assert_eq!(
+            walk_trie(&trie, &[0x17, 0x0B, 0x08, 0x10]),
+            Some((true, 10))
+        );
+        assert_eq!(walk_trie(&trie, &[0x0B, 0x0C]), Some((true, 5)));
         assert!(walk_trie(&trie, &[0x17, 0x0B]).is_none());
     }
 
     #[test]
     fn compile_steno_dictionary_keeps_encoded_payload() {
         let trie = compile_steno_dictionary(&[(vec![0x01], vec![0x01, 0x00, 0x02])]);
-        assert!(!trie.is_empty());
+        assert!(trie.windows(3).any(|w| w == [0x01, 0x00, 0x02]));
     }
 
     fn walk_trie(trie: &[u8], keycodes: &[u8]) -> Option<(bool, u8)> {

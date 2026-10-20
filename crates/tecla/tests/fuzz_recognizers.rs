@@ -210,10 +210,11 @@ proptest! {
         prop_assert!(r.is_matched(), "tick at deadline+{} returned {:?}", slack_ms, r);
     }
 
-    /// Mod-tap resolved decisions stay within the 4 valid variants. (Sanity
-    /// check that no UB ever produces garbage.)
+    /// A mod-tap recognizer only ever resolves to a mod-tap outcome. The
+    /// layer variants belong to layer-tap and must never appear here — a
+    /// `matches!` against all four variants would be true by construction.
     #[test]
-    fn resolved_decision_is_one_of_four_variants(
+    fn mod_tap_never_resolves_to_a_layer_decision(
         mode in mode_strategy(),
         term in 50u64..500,
         specs in proptest::collection::vec(other_event_strategy(), 0..16),
@@ -222,13 +223,12 @@ proptest! {
         let mut rec = make_mod_tap(mode, term, press_ms);
         let events = realize(press_ms, &specs);
         let result = drive(&mut rec, &events, press_ms + term + 1);
-        if let Some(dec) = result.matched() {
-            prop_assert!(matches!(dec,
-                TapHoldDecision::Tap(_)
-                | TapHoldDecision::HoldMod(_)
-                | TapHoldDecision::HoldLayer(_)
-                | TapHoldDecision::TapToggleLayer(_)),
-                "unexpected decision variant: {:?}", dec);
-        }
+        let dec = result.matched();
+        prop_assume!(dec.is_some());
+        let dec = dec.expect("checked above");
+        prop_assert!(
+            matches!(dec, TapHoldDecision::Tap(_) | TapHoldDecision::HoldMod(_)),
+            "mod-tap resolved to a layer decision: {:?}", dec
+        );
     }
 }

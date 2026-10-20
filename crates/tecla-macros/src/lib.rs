@@ -12,8 +12,8 @@
 //! | [`LT!`] | Layer-tap shorthand: hold = momentary layer, tap = key. |
 //! | [`keyboard_main`] | Entry-point attribute; wraps `async fn` with `#[embassy_executor::main]`. |
 //!
-//! [`LayerStack`]: tecla::keymap::LayerStack
-//! [`Layer`]: tecla::keymap::Layer
+//! [`LayerStack`]: https://docs.rs/tecla/latest/tecla/pipeline/keymap/struct.LayerStack.html
+//! [`Layer`]: https://docs.rs/tecla/latest/tecla/pipeline/keymap/struct.Layer.html
 //!
 //! # Key identifiers
 //!
@@ -86,17 +86,30 @@
 //! | `TRNS`, `TRANSPARENT` | Fall through to the next active layer below. |
 //! | `NOOP`, `NoOp`, `XXXXXXX` | Explicitly block fallthrough — produce no key. |
 //!
+//! **Mouse identifiers** (also `layer!`/`keymap!` only):
+//!
+//! | Identifier | Meaning |
+//! |------------|---------|
+//! | `MS_BTN1` | Left click |
+//! | `MS_BTN2` | Right click |
+//! | `MS_BTN3` | Middle click |
+//! | `MS_WHUP` | Scroll wheel up |
+//! | `MS_WHDN` | Scroll wheel down |
+//!
 //! # Layer names in `LT!`
 //!
 //! Inside `keymap!`, the first argument to `LT!` may be either a numeric
 //! layer index **or a layer name** declared in the same `keymap!` block.
 //! Names are resolved at macro-expansion time with no runtime cost.
 //!
-//! ```rust,ignore
-//! keymap! {
+//! ```rust
+//! use tecla::pipeline::keymap::LayerStack;
+//! use tecla_macros::{keymap, layer, LT};
+//!
+//! let stack: LayerStack<2, 3, ()> = keymap! {
 //!     layer!(Base, A, B, LT!(Fn, SPC)),   // "Fn" → layer index 1
 //!     layer!(Fn,  F1, F2, TRNS),
-//! }
+//! };
 //! ```
 //!
 //! Forward references are supported — `Base` may reference `Fn` even though
@@ -151,7 +164,27 @@ fn special_token(name: &str) -> Option<TokenStream2> {
         "RGB_NEXT" => {
             Some(quote! { ::tecla::action::Action::<()>::Rgb(::tecla::rgb::RgbCommand::Next) })
         }
+        // Mouse buttons and wheel. A pointing device supplies motion but has no
+        // buttons of its own — the ZSA Navigator trackball has none at all — so
+        // without these a keymap can move the cursor and never click.
+        "MS_BTN1" => Some(mouse_click(1)),
+        "MS_BTN2" => Some(mouse_click(2)),
+        "MS_BTN3" => Some(mouse_click(3)),
+        "MS_WHUP" => Some(mouse_scroll(1)),
+        "MS_WHDN" => Some(mouse_scroll(-1)),
         _ => None,
+    }
+}
+
+fn mouse_click(button: u8) -> TokenStream2 {
+    quote! {
+        ::tecla::action::Action::<()>::Mouse(::tecla::action::MouseAction::Click(#button))
+    }
+}
+
+fn mouse_scroll(amount: i8) -> TokenStream2 {
+    quote! {
+        ::tecla::action::Action::<()>::Mouse(::tecla::action::MouseAction::Scroll(#amount))
     }
 }
 
@@ -794,15 +827,19 @@ impl Parse for StenoInput {
 /// anywhere in the same `keymap!`, including forward references.
 /// Numeric indices still work too. Duplicate layer names are a compile error.
 ///
-/// [`LayerStack`]: tecla::keymap::LayerStack
+/// [`LayerStack`]: https://docs.rs/tecla/latest/tecla/pipeline/keymap/struct.LayerStack.html
 ///
 /// # Example
 ///
-/// ```ignore
-/// let stack = keymap! {
+/// ```rust
+/// use tecla::pipeline::keymap::LayerStack;
+/// use tecla_macros::{keymap, layer, LT, MT};
+///
+/// let stack: LayerStack<2, 4, ()> = keymap! {
 ///     layer!(Base,  A, B, LT!(Fn, SPC), MT!(LSFT, ENT)),
 ///     layer!(Fn,   F1, F2, TRNS,        TRNS),
 /// };
+/// assert_eq!(stack.state(), 0);
 /// ```
 #[proc_macro]
 pub fn keymap(input: TokenStream) -> TokenStream {
@@ -882,18 +919,22 @@ pub fn keymap(input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// Build a complete [`LayerStack`] for steno keyboards from bit-index layers.
+/// Build a complete `LayerStack` for steno keyboards from bit-index layers.
 ///
 /// The syntax mirrors [`keymap!`], but each layer uses numeric bit positions
-/// instead of key identifiers. Each number becomes [`Action::Steno`] at the
+/// instead of key identifiers. Each number becomes `Action::Steno` at the
 /// matching key position.
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust
+/// use tecla::pipeline::keymap::LayerStack;
+/// use tecla_macros::{layer, steno};
+///
 /// let stack: LayerStack<1, 12, ()> = steno! {
 ///     layer!(Base, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 /// };
+/// assert_eq!(stack.state(), 0);
 /// ```
 #[proc_macro]
 pub fn steno(input: TokenStream) -> TokenStream {
@@ -965,11 +1006,14 @@ pub fn steno(input: TokenStream) -> TokenStream {
 /// context to resolve them against. Use a numeric index instead, or use
 /// `keymap!` if you want named references.
 ///
-/// [`Layer`]: tecla::keymap::Layer
+/// [`Layer`]: https://docs.rs/tecla/latest/tecla/pipeline/keymap/struct.Layer.html
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust
+/// use tecla::pipeline::keymap::Layer;
+/// use tecla_macros::{layer, LT, MT};
+///
 /// let l: Layer<()> = layer!(Base, A, B, MT!(LSFT, ENT), LT!(1, SPC));
 /// ```
 #[proc_macro]
@@ -992,13 +1036,17 @@ pub fn layer(input: TokenStream) -> TokenStream {
 ///
 /// Can be used standalone or inline inside `layer!` / `keymap!`.
 ///
-/// [`Action::ModTap`]: tecla::action::Action::ModTap
+/// [`Action::ModTap`]: https://docs.rs/tecla/latest/tecla/action/enum.Action.html#variant.ModTap
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust
+/// use tecla::action::{Action, KeyCode, ModifierKey};
+/// use tecla_macros::MT;
+///
 /// let a: Action<()> = MT!(LSFT, A);   // hold left-shift, tap A
 /// let b: Action<()> = MT!(RCTL, ESC); // hold right-ctrl, tap Escape
+/// assert_eq!(a, Action::ModTap { hold: ModifierKey::LSHIFT, tap: KeyCode::A });
 /// ```
 #[proc_macro]
 pub fn MT(input: TokenStream) -> TokenStream {
@@ -1056,17 +1104,22 @@ pub fn MT(input: TokenStream) -> TokenStream {
 /// name declared in the same `keymap!` block (including forward references).
 /// Outside of `keymap!` only numeric indices are accepted.
 ///
-/// [`Action::LayerTap`]: tecla::action::Action::LayerTap
+/// [`Action::LayerTap`]: https://docs.rs/tecla/latest/tecla/action/enum.Action.html#variant.LayerTap
 ///
 /// # Example
 ///
-/// ```ignore
-/// let a: Action<()> = LT!(1, SPC);  // hold layer 1, tap space
+/// ```rust
+/// use tecla::action::{Action, KeyCode};
+/// use tecla::pipeline::keymap::LayerStack;
+/// use tecla_macros::{keymap, layer, LT};
 ///
-/// keymap! {
+/// let a: Action<()> = LT!(1, SPC);  // hold layer 1, tap space
+/// assert_eq!(a, Action::LayerTap { layer: 1, tap: KeyCode::Space });
+///
+/// let stack: LayerStack<2, 3, ()> = keymap! {
 ///     layer!(Base, A, B, LT!(Fn, SPC)),  // name reference
 ///     layer!(Fn,  F1, F2, TRNS),
-/// }
+/// };
 /// ```
 #[proc_macro]
 pub fn LT(input: TokenStream) -> TokenStream {
@@ -1123,7 +1176,10 @@ pub fn LT(input: TokenStream) -> TokenStream {
 ///
 /// # Example
 ///
-/// ```ignore
+/// Sketch — the task functions and channels are board-specific, so this is not
+/// a compilable example. See `examples/` in any `tecla-*` board crate.
+///
+/// ```text
 /// #[keyboard_main]
 /// async fn main(spawner: embassy_executor::Spawner) {
 ///     spawner.spawn(matrix_task(/* … */)).unwrap();

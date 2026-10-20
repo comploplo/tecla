@@ -49,9 +49,16 @@ fn release(pos: KeyPos, ms: u64) -> KeyEvent {
     KeyEvent::release(pos, ms)
 }
 
+/// A full `KEYS`-wide layer: `actions` in flat order, the rest `NoOp`.
+fn padded(actions: &[Action]) -> Layer<()> {
+    let mut keys = [Action::NoOp; KEYS];
+    keys[..actions.len()].copy_from_slice(actions);
+    Layer::new(&keys)
+}
+
 fn make_processor(base: &[Action]) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
     let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
-    layers.push(Layer::new(base)).ok();
+    layers.push(padded(base)).ok();
     let stack: LayerStack<LAYERS, KEYS> = LayerStack::new(layers);
     KeyboardProcessor::new(stack, TapHoldConfig::default())
 }
@@ -61,8 +68,8 @@ fn make_processor_two_layers(
     overlay: &[Action],
 ) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
     let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
-    layers.push(Layer::new(base)).ok();
-    layers.push(Layer::new(overlay)).ok();
+    layers.push(padded(base)).ok();
+    layers.push(padded(overlay)).ok();
     let stack: LayerStack<LAYERS, KEYS> = LayerStack::new(layers);
     KeyboardProcessor::new(stack, TapHoldConfig::default())
 }
@@ -127,14 +134,7 @@ fn push_compact_len(bytes: &mut Vec<u8, 32>, len: usize) {
 
 #[test]
 fn press_key_emits_report_with_keycode() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -144,14 +144,7 @@ fn press_key_emits_report_with_keycode() {
 
 #[test]
 fn release_key_emits_report_without_keycode() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -233,14 +226,7 @@ fn stitch_preserves_spacing_state_for_following_text() {
 
 #[test]
 fn multiple_keys_pressed_simultaneously_appear_in_report() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::Key(KeyCode::B),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 1), 1), 1, emit);
@@ -255,15 +241,8 @@ fn multiple_keys_pressed_simultaneously_appear_in_report() {
 
 #[test]
 fn combo_suppresses_source_keys_and_fires_on_match_then_holds() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::D),
-        Action::Key(KeyCode::F),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_combos(df_combo_config());
+    let mut proc = make_processor(&[Action::Key(KeyCode::D), Action::Key(KeyCode::F)])
+        .with_combos(df_combo_config());
 
     // Pressing the first chord key alone emits nothing (still building).
     let building = collect_reports(|emit| {
@@ -307,9 +286,6 @@ fn combo_rollover_with_unrelated_key_after_match_is_independent() {
         Action::Key(KeyCode::D),
         Action::Key(KeyCode::F),
         Action::Key(KeyCode::C),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ])
     .with_combos(df_combo_config());
 
@@ -337,15 +313,8 @@ fn combo_modtap_action_fires_instantly_not_held() {
             tap: KeyCode::A,
         },
     )];
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::D),
-        Action::Key(KeyCode::F),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_combos(ComboConfig::new(COMBOS));
+    let mut proc = make_processor(&[Action::Key(KeyCode::D), Action::Key(KeyCode::F)])
+        .with_combos(ComboConfig::new(COMBOS));
 
     // Completing the chord taps `A` instantly — ModTap isn't holdable, it's
     // its own tap/hold decision, so it can't be driven by a synthetic press
@@ -405,15 +374,8 @@ fn combo_taptoggle_action_fires_instantly() {
 
 #[test]
 fn combo_can_tap_standard_action() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::D),
-        Action::Key(KeyCode::F),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_combos(df_shift_a_combo_config());
+    let mut proc = make_processor(&[Action::Key(KeyCode::D), Action::Key(KeyCode::F)])
+        .with_combos(df_shift_a_combo_config());
 
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
@@ -434,9 +396,6 @@ fn combo_failure_replays_buffered_key_before_new_press() {
         Action::Key(KeyCode::D),
         Action::Key(KeyCode::F),
         Action::Key(KeyCode::C),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ])
     .with_combos(df_combo_config());
 
@@ -454,15 +413,8 @@ fn combo_failure_replays_buffered_key_before_new_press() {
 
 #[test]
 fn combo_key_release_before_match_replays_press_and_release() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::D),
-        Action::Key(KeyCode::F),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_combos(df_combo_config());
+    let mut proc = make_processor(&[Action::Key(KeyCode::D), Action::Key(KeyCode::F)])
+        .with_combos(df_combo_config());
 
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
@@ -485,14 +437,7 @@ fn noop_key_emits_no_report() {
 
 #[test]
 fn duplicate_key_press_is_ignored() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     // A second press with no intervening release is debounce noise: no
     // report at all, and the key stays held and releasable.
@@ -510,14 +455,7 @@ fn duplicate_key_press_is_ignored() {
 
 #[test]
 fn modifier_press_sets_modifier_byte() {
-    let mut proc = make_processor(&[
-        Action::Modifier(ModifierKey::LSHIFT),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Modifier(ModifierKey::LSHIFT)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -534,14 +472,7 @@ fn bare_modifier_keycode_acts_as_held_modifier() {
     // token, which resolves to `Action::Key(KeyCode::LShift)` rather than
     // `Action::Modifier`) instead of `Action::Modifier`. It must still shift
     // a simultaneously-held key, not just occupy a keycode slot uselessly.
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::LShift),
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::LShift), Action::Key(KeyCode::A)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 1), 0), 0, emit);
@@ -554,14 +485,7 @@ fn bare_modifier_keycode_acts_as_held_modifier() {
 
 #[test]
 fn modifier_release_clears_modifier_byte() {
-    let mut proc = make_processor(&[
-        Action::Modifier(ModifierKey::LSHIFT),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Modifier(ModifierKey::LSHIFT)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -574,14 +498,7 @@ fn modifier_release_clears_modifier_byte() {
 #[test]
 fn consumer_press_emits_consumer_report() {
     use crate::action::ConsumerCode;
-    let mut proc = make_processor(&[
-        Action::Consumer(ConsumerCode::VolumeUp),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Consumer(ConsumerCode::VolumeUp)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -595,14 +512,7 @@ fn consumer_press_emits_consumer_report() {
 #[test]
 fn consumer_release_emits_empty_consumer_report() {
     use crate::action::ConsumerCode;
-    let mut proc = make_processor(&[
-        Action::Consumer(ConsumerCode::VolumeUp),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Consumer(ConsumerCode::VolumeUp)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -673,17 +583,10 @@ fn momentary_layer_key_release_deactivates_overlay() {
 
 #[test]
 fn tap_hold_tap_emits_press_and_release() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 100), 100, emit);
@@ -701,17 +604,10 @@ fn tap_hold_tap_emits_press_and_release() {
 
 #[test]
 fn tap_hold_tap_does_not_activate_modifier() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 100), 100, emit);
@@ -723,17 +619,10 @@ fn tap_hold_tap_does_not_activate_modifier() {
 
 #[test]
 fn tap_hold_hold_via_tick_activates_modifier() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.tick(200, emit);
@@ -747,17 +636,10 @@ fn tap_hold_hold_via_tick_activates_modifier() {
 
 #[test]
 fn tap_hold_hold_release_clears_modifier() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.tick(200, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -868,34 +750,23 @@ fn next_deadline_ms_is_none_with_no_tap_hold() {
 
 #[test]
 fn next_deadline_ms_is_some_while_tap_hold_pending() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
-    assert!(proc.next_deadline_ms().is_some());
+    assert_eq!(
+        proc.next_deadline_ms(),
+        Some(TapHoldConfig::default().tapping_term_ms)
+    );
 }
 
 #[test]
 fn next_deadline_ms_is_none_after_tap_hold_resolves() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.tick(200, &mut |_| {});
     assert!(proc.next_deadline_ms().is_none());
@@ -908,10 +779,6 @@ fn oneshot_mod_applies_to_next_key() {
     let mut proc = make_processor(&[
         Action::OneShotMod(ModifierKey::LSHIFT),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -946,9 +813,6 @@ fn oneshot_mod_is_cleared_after_next_key() {
         Action::OneShotMod(ModifierKey::LSHIFT),
         Action::Key(KeyCode::A),
         Action::Key(KeyCode::B),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
@@ -966,22 +830,8 @@ fn oneshot_mod_is_cleared_after_next_key() {
 #[test]
 fn oneshot_layer_press_activates_layer() {
     let mut proc = make_processor_two_layers(
-        &[
-            Action::OneShotLayer(1),
-            Action::Key(KeyCode::A),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
-        &[
-            Action::Transparent,
-            Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
+        &[Action::OneShotLayer(1), Action::Key(KeyCode::A)],
+        &[Action::Transparent, Action::Key(KeyCode::B)],
     );
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -993,22 +843,8 @@ fn oneshot_layer_press_activates_layer() {
 #[test]
 fn oneshot_layer_release_deactivates_layer() {
     let mut proc = make_processor_two_layers(
-        &[
-            Action::OneShotLayer(1),
-            Action::Key(KeyCode::A),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
-        &[
-            Action::Transparent,
-            Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
+        &[Action::OneShotLayer(1), Action::Key(KeyCode::A)],
+        &[Action::Transparent, Action::Key(KeyCode::B)],
     );
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
@@ -1028,10 +864,6 @@ fn second_key_during_tap_hold_is_buffered() {
             tap: KeyCode::A,
         },
         Action::Key(KeyCode::B),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let mut reports = heapless::Vec::<_, 16>::new();
@@ -1057,17 +889,10 @@ fn tick_with_no_tap_hold_does_nothing() {
 
 #[test]
 fn tick_before_deadline_returns_without_emitting() {
-    let mut proc = make_processor(&[
-        Action::ModTap {
-            hold: ModifierKey::LSHIFT,
-            tap: KeyCode::A,
-        },
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::ModTap {
+        hold: ModifierKey::LSHIFT,
+        tap: KeyCode::A,
+    }]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.tick(50, emit);
@@ -1107,14 +932,7 @@ fn keyboard_mods_returns_zero_for_nkro_report() {
 
 #[test]
 fn caps_word_shifts_alpha_keys() {
-    let mut proc = make_processor(&[
-        Action::CapsWord,
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::CapsWord, Action::Key(KeyCode::A)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -1127,14 +945,7 @@ fn caps_word_shifts_alpha_keys() {
 
 #[test]
 fn caps_word_does_not_shift_digits() {
-    let mut proc = make_processor(&[
-        Action::CapsWord,
-        Action::Key(KeyCode::N1),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::CapsWord, Action::Key(KeyCode::N1)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -1149,9 +960,6 @@ fn caps_word_deactivates_on_space() {
         Action::CapsWord,
         Action::Key(KeyCode::Space),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1169,9 +977,6 @@ fn caps_word_continues_on_backspace() {
         Action::CapsWord,
         Action::Key(KeyCode::Backspace),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1185,14 +990,7 @@ fn caps_word_continues_on_backspace() {
 
 #[test]
 fn caps_word_shift_does_not_persist_after_release() {
-    let mut proc = make_processor(&[
-        Action::CapsWord,
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::CapsWord, Action::Key(KeyCode::A)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
@@ -1207,22 +1005,8 @@ fn caps_word_shift_does_not_persist_after_release() {
 #[test]
 fn layer_lock_activates_and_persists() {
     let mut proc = make_processor_two_layers(
-        &[
-            Action::LayerLock(1),
-            Action::Key(KeyCode::A),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
-        &[
-            Action::Transparent,
-            Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
+        &[Action::LayerLock(1), Action::Key(KeyCode::A)],
+        &[Action::Transparent, Action::Key(KeyCode::B)],
     );
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1235,22 +1019,8 @@ fn layer_lock_activates_and_persists() {
 #[test]
 fn layer_lock_second_press_unlocks() {
     let mut proc = make_processor_two_layers(
-        &[
-            Action::LayerLock(1),
-            Action::Key(KeyCode::A),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
-        &[
-            Action::LayerLock(1),
-            Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
+        &[Action::LayerLock(1), Action::Key(KeyCode::A)],
+        &[Action::LayerLock(1), Action::Key(KeyCode::B)],
     );
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1266,14 +1036,7 @@ fn layer_lock_second_press_unlocks() {
 
 #[test]
 fn repeat_key_emits_last_keycode() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::RepeatKey,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A), Action::RepeatKey]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -1284,14 +1047,7 @@ fn repeat_key_emits_last_keycode() {
 
 #[test]
 fn repeat_key_noop_when_nothing_pressed() {
-    let mut proc = make_processor(&[
-        Action::RepeatKey,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::RepeatKey]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1300,14 +1056,7 @@ fn repeat_key_noop_when_nothing_pressed() {
 
 #[test]
 fn repeat_key_does_not_update_history() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::RepeatKey,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A), Action::RepeatKey]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
@@ -1320,14 +1069,7 @@ fn repeat_key_does_not_update_history() {
 
 #[test]
 fn repeat_key_release_emits_release() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::RepeatKey,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A), Action::RepeatKey]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
@@ -1435,13 +1177,11 @@ fn tri_layer_no_defs_is_noop() {
     let mut proc = make_processor(&[
         Action::Layer(LayerOp::Momentary(1)),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    assert_eq!(proc.layer_stack.state(), 0b10);
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
+    assert_eq!(proc.layer_stack.state(), 0);
 }
 
 // ── Key Overrides ────────────────────────────────────────────────────────
@@ -1457,10 +1197,6 @@ fn key_override_replaces_action_when_mods_match() {
     let mut proc = make_processor(&[
         Action::Modifier(ModifierKey::LSHIFT),
         Action::Key(KeyCode::Backspace),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ])
     .with_overrides(OVERRIDES);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
@@ -1478,15 +1214,7 @@ fn key_override_does_not_trigger_without_mods() {
         suppress_mods: ModifierKey::NONE,
         replacement: Action::Key(KeyCode::Delete),
     }];
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::Backspace),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_overrides(OVERRIDES);
+    let mut proc = make_processor(&[Action::Key(KeyCode::Backspace)]).with_overrides(OVERRIDES);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1495,14 +1223,7 @@ fn key_override_does_not_trigger_without_mods() {
 
 #[test]
 fn empty_overrides_has_no_effect() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1518,8 +1239,6 @@ fn macro_record_and_play() {
         Action::Key(KeyCode::A),
         Action::MacroStop,
         Action::MacroPlay(0),
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
@@ -1538,14 +1257,7 @@ fn macro_record_and_play() {
 
 #[test]
 fn macro_play_empty_slot_is_noop() {
-    let mut proc = make_processor(&[
-        Action::MacroPlay(0),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::MacroPlay(0)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1557,14 +1269,7 @@ fn macro_play_empty_slot_is_noop() {
 #[test]
 fn send_string_emits_keycodes() {
     static SEQ: &[KeyCode] = &[KeyCode::H, KeyCode::I];
-    let mut proc = make_processor(&[
-        Action::SendString(SEQ),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::SendString(SEQ)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1577,14 +1282,7 @@ fn send_string_emits_keycodes() {
 #[test]
 fn send_string_empty_is_noop() {
     static SEQ: &[KeyCode] = &[];
-    let mut proc = make_processor(&[
-        Action::SendString(SEQ),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::SendString(SEQ)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1595,14 +1293,7 @@ fn send_string_empty_is_noop() {
 
 #[test]
 fn mouse_click_emits_mouse_report() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Click(1)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Click(1))]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1620,14 +1311,7 @@ fn mouse_click_emits_mouse_report() {
 
 #[test]
 fn mouse_click_release_clears_button() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Click(1)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Click(1))]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -1645,14 +1329,7 @@ fn mouse_click_release_clears_button() {
 
 #[test]
 fn mouse_move_emits_delta() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Move { dx: 10, dy: -5 }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Move { dx: 10, dy: -5 })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1669,14 +1346,7 @@ fn mouse_move_emits_delta() {
 
 #[test]
 fn mouse_scroll_emits_scroll() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Scroll(3)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Scroll(3))]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -1695,14 +1365,7 @@ fn mouse_scroll_emits_scroll() {
 
 #[test]
 fn bootmagic_sets_flag() {
-    let mut proc = make_processor(&[
-        Action::Bootmagic,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Bootmagic]);
     assert!(!proc.bootmagic_triggered());
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     assert!(proc.bootmagic_triggered());
@@ -1710,14 +1373,7 @@ fn bootmagic_sets_flag() {
 
 #[test]
 fn ble_advertise_sets_pending_command() {
-    let mut proc = make_processor(&[
-        Action::BleAdvertise,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::BleAdvertise]);
     assert!(proc.pending_ble_command().is_none());
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     assert_eq!(
@@ -1729,14 +1385,7 @@ fn ble_advertise_sets_pending_command() {
 
 #[test]
 fn ble_disconnect_sets_pending_command() {
-    let mut proc = make_processor(&[
-        Action::BleDisconnect,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::BleDisconnect]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     assert_eq!(
         proc.pending_ble_command(),
@@ -1746,14 +1395,7 @@ fn ble_disconnect_sets_pending_command() {
 
 #[test]
 fn ble_host_switch_sets_pending_command() {
-    let mut proc = make_processor(&[
-        Action::BleHostSwitch(2),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::BleHostSwitch(2)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     assert_eq!(
         proc.pending_ble_command(),
@@ -1763,14 +1405,7 @@ fn ble_host_switch_sets_pending_command() {
 
 #[test]
 fn rgb_command_sets_pending_command() {
-    let mut proc = make_processor(&[
-        Action::Rgb(crate::rgb::RgbCommand::Next),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Rgb(crate::rgb::RgbCommand::Next)]);
     assert!(proc.pending_rgb_command().is_none());
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     assert_eq!(
@@ -1809,7 +1444,7 @@ fn macro_slot_returns_none_for_invalid() {
 #[test]
 fn macro_slot_returns_some_for_valid() {
     let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
-    assert!(proc.macro_slot(0).is_some());
+    assert_eq!(proc.macro_slot(0).map(Deque::len), Some(0));
 }
 
 #[test]
@@ -1859,14 +1494,7 @@ fn restore_state_applies_non_zero_default_layer() {
 
 #[test]
 fn restore_state_applies_macros() {
-    let mut proc = make_processor(&[
-        Action::MacroPlay(0),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::MacroPlay(0)]);
     let mut slot: Deque<KeyCode, 64> = Deque::new();
     slot.push_back(KeyCode::Z).ok();
     proc.restore_state(
@@ -1891,9 +1519,6 @@ fn caps_word_deactivates_on_enter() {
         Action::CapsWord,
         Action::Key(KeyCode::Enter),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1911,9 +1536,6 @@ fn caps_word_continues_on_digits() {
         Action::CapsWord,
         Action::Key(KeyCode::N5),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1931,9 +1553,6 @@ fn caps_word_continues_on_minus() {
         Action::CapsWord,
         Action::Key(KeyCode::Minus),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1951,9 +1570,6 @@ fn caps_word_continues_on_delete() {
         Action::CapsWord,
         Action::Key(KeyCode::Delete),
         Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
@@ -1969,40 +1585,23 @@ fn caps_word_continues_on_delete() {
 
 #[test]
 fn macro_stop_without_record_is_harmless() {
-    let mut proc = make_processor(&[
-        Action::MacroStop,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
-    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    let mut proc = make_processor(&[Action::MacroStop]);
+    let reports = collect_reports(|emit| proc.process_event(press(pos(0, 0), 0), 0, emit));
+    assert!(reports.is_empty());
+    assert_eq!(proc.macro_recording, None);
 }
 
 #[test]
 fn macro_record_invalid_slot_is_harmless() {
-    let mut proc = make_processor(&[
-        Action::MacroRecord(99),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
-    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    let mut proc = make_processor(&[Action::MacroRecord(99)]);
+    let reports = collect_reports(|emit| proc.process_event(press(pos(0, 0), 0), 0, emit));
+    assert!(reports.is_empty());
+    assert_eq!(proc.macro_recording, None);
 }
 
 #[test]
 fn macro_play_invalid_slot_is_harmless() {
-    let mut proc = make_processor(&[
-        Action::MacroPlay(99),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::MacroPlay(99)]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2017,7 +1616,6 @@ fn macro_records_multiple_keys_and_replays_in_order() {
         Action::Key(KeyCode::B),
         Action::MacroStop,
         Action::MacroPlay(0),
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
@@ -2048,10 +1646,6 @@ fn mouse_two_buttons_held_simultaneously() {
     let mut proc = make_processor(&[
         Action::Mouse(MouseAction::Click(1)),
         Action::Mouse(MouseAction::Click(2)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
@@ -2073,10 +1667,6 @@ fn mouse_release_one_button_keeps_other() {
     let mut proc = make_processor(&[
         Action::Mouse(MouseAction::Click(1)),
         Action::Mouse(MouseAction::Click(2)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(press(pos(0, 1), 10), 10, &mut |_| {});
@@ -2096,14 +1686,7 @@ fn mouse_release_one_button_keeps_other() {
 
 #[test]
 fn mouse_move_release_emits_nothing() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Move { dx: 5, dy: 5 }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Move { dx: 5, dy: 5 })]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2113,14 +1696,7 @@ fn mouse_move_release_emits_nothing() {
 
 #[test]
 fn mouse_scroll_release_emits_nothing() {
-    let mut proc = make_processor(&[
-        Action::Mouse(MouseAction::Scroll(-1)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Mouse(MouseAction::Scroll(-1))]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2132,15 +1708,7 @@ fn mouse_scroll_release_emits_nothing() {
 
 #[test]
 fn key_override_with_no_overrides_configured() {
-    let mut proc = make_processor(&[
-        Action::Key(KeyCode::A),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
-    .with_overrides(&[]);
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]).with_overrides(&[]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2152,14 +1720,7 @@ fn key_override_with_no_overrides_configured() {
 #[test]
 fn send_string_release_is_noop() {
     static SEQ: &[KeyCode] = &[KeyCode::A];
-    let mut proc = make_processor(&[
-        Action::SendString(SEQ),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::SendString(SEQ)]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2182,17 +1743,11 @@ fn integration_layer_lock_plus_key_override() {
             Action::LayerLock(1),
             Action::Modifier(ModifierKey::LSHIFT),
             Action::Key(KeyCode::A),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
         ],
         &[
             Action::Transparent,
             Action::Transparent,
             Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
         ],
     )
     .with_overrides(OVERRIDES);
@@ -2209,14 +1764,7 @@ fn integration_layer_lock_plus_key_override() {
 
 #[test]
 fn integration_caps_word_with_repeat_key() {
-    let mut proc = make_processor(&[
-        Action::CapsWord,
-        Action::Key(KeyCode::A),
-        Action::RepeatKey,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::CapsWord, Action::Key(KeyCode::A), Action::RepeatKey]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 10), 10, &mut |_| {});
     proc.process_event(press(pos(0, 1), 20), 20, &mut |_| {});
@@ -2286,7 +1834,6 @@ fn integration_macro_record_play_then_caps_word() {
         Action::MacroStop,
         Action::MacroPlay(0),
         Action::CapsWord,
-        Action::NoOp,
     ]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     proc.process_event(release(pos(0, 0), 5), 5, &mut |_| {});
@@ -2313,18 +1860,11 @@ fn integration_macro_record_play_then_caps_word() {
 fn midi_note_on_emits_midi_report() {
     use crate::action::MidiAction;
     use crate::pipeline::report::MidiEvent;
-    let mut proc = make_processor(&[
-        Action::Midi(MidiAction::NoteOn {
-            channel: 0,
-            note: 60,
-            velocity: 100,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Midi(MidiAction::NoteOn {
+        channel: 0,
+        note: 60,
+        velocity: 100,
+    })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2343,18 +1883,11 @@ fn midi_note_on_emits_midi_report() {
 fn midi_note_on_release_emits_note_off() {
     use crate::action::MidiAction;
     use crate::pipeline::report::MidiEvent;
-    let mut proc = make_processor(&[
-        Action::Midi(MidiAction::NoteOn {
-            channel: 0,
-            note: 60,
-            velocity: 100,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Midi(MidiAction::NoteOn {
+        channel: 0,
+        note: 60,
+        velocity: 100,
+    })]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2373,18 +1906,11 @@ fn midi_note_on_release_emits_note_off() {
 fn midi_cc_emits_midi_report() {
     use crate::action::MidiAction;
     use crate::pipeline::report::MidiEvent;
-    let mut proc = make_processor(&[
-        Action::Midi(MidiAction::Cc {
-            channel: 1,
-            controller: 7,
-            value: 64,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Midi(MidiAction::Cc {
+        channel: 1,
+        controller: 7,
+        value: 64,
+    })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2401,18 +1927,11 @@ fn midi_cc_emits_midi_report() {
 #[test]
 fn midi_cc_release_emits_nothing() {
     use crate::action::MidiAction;
-    let mut proc = make_processor(&[
-        Action::Midi(MidiAction::Cc {
-            channel: 1,
-            controller: 7,
-            value: 64,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Midi(MidiAction::Cc {
+        channel: 1,
+        controller: 7,
+        value: 64,
+    })]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2424,17 +1943,10 @@ fn midi_cc_release_emits_nothing() {
 fn midi_note_off_action_emits_note_off() {
     use crate::action::MidiAction;
     use crate::pipeline::report::MidiEvent;
-    let mut proc = make_processor(&[
-        Action::Midi(MidiAction::NoteOff {
-            channel: 2,
-            note: 48,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Midi(MidiAction::NoteOff {
+        channel: 2,
+        note: 48,
+    })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2453,14 +1965,7 @@ fn midi_note_off_action_emits_note_off() {
 fn gamepad_button_press_emits_report() {
     use crate::action::GamepadAction;
     use crate::pipeline::report::GamepadReport;
-    let mut proc = make_processor(&[
-        Action::Gamepad(GamepadAction::ButtonPress(0)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Gamepad(GamepadAction::ButtonPress(0))]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2478,14 +1983,7 @@ fn gamepad_button_press_emits_report() {
 fn gamepad_button_release_clears_bit() {
     use crate::action::GamepadAction;
     use crate::pipeline::report::GamepadReport;
-    let mut proc = make_processor(&[
-        Action::Gamepad(GamepadAction::ButtonPress(0)),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Gamepad(GamepadAction::ButtonPress(0))]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2504,17 +2002,10 @@ fn gamepad_button_release_clears_bit() {
 fn gamepad_axis_set_emits_report() {
     use crate::action::GamepadAction;
     use crate::pipeline::report::GamepadReport;
-    let mut proc = make_processor(&[
-        Action::Gamepad(GamepadAction::AxisSet {
-            axis: 0,
-            value: 127,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Gamepad(GamepadAction::AxisSet {
+        axis: 0,
+        value: 127,
+    })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2531,17 +2022,10 @@ fn gamepad_axis_set_emits_report() {
 #[test]
 fn gamepad_axis_release_does_not_emit() {
     use crate::action::GamepadAction;
-    let mut proc = make_processor(&[
-        Action::Gamepad(GamepadAction::AxisSet {
-            axis: 0,
-            value: 127,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Gamepad(GamepadAction::AxisSet {
+        axis: 0,
+        value: 127,
+    })]);
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
     let reports = collect_reports(|emit| {
         proc.process_event(release(pos(0, 0), 10), 10, emit);
@@ -2553,17 +2037,10 @@ fn gamepad_axis_release_does_not_emit() {
 fn gamepad_axis_out_of_range_ignored() {
     use crate::action::GamepadAction;
     use crate::pipeline::report::GamepadReport;
-    let mut proc = make_processor(&[
-        Action::Gamepad(GamepadAction::AxisSet {
-            axis: 10,
-            value: 127,
-        }),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ]);
+    let mut proc = make_processor(&[Action::Gamepad(GamepadAction::AxisSet {
+        axis: 10,
+        value: 127,
+    })]);
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
     });
@@ -2610,15 +2087,6 @@ fn keyboard_mods_returns_zero_for_gamepad_report() {
     use crate::pipeline::report::GamepadReport;
     let report = HidReport::Gamepad(GamepadReport::default());
     assert_eq!(keyboard_mods(report), 0);
-}
-
-#[test]
-#[cfg(feature = "autocorrect")]
-fn with_autocorrect_attaches_engine() {
-    let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
-    assert!(proc.autocorrect.is_none());
-    let proc = proc.with_autocorrect(crate::autocorrect::AutocorrectEngine::new(&[]));
-    assert!(proc.autocorrect.is_some());
 }
 
 #[test]
@@ -2689,15 +2157,6 @@ fn autocorrect_offload_buffers_typed_keycodes() {
 }
 
 #[test]
-#[cfg(feature = "autocomplete")]
-fn with_autocomplete_attaches_engine() {
-    let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
-    assert!(proc.autocomplete.is_none());
-    let proc = proc.with_autocomplete(crate::autocomplete::AutocompleteEngine::new(&[]));
-    assert!(proc.autocomplete.is_some());
-}
-
-#[test]
 fn set_action_and_get_action_roundtrip() {
     let mut proc = make_processor(&[Action::Key(KeyCode::A); 6]);
     assert_eq!(proc.get_action(0, 0), Some(Action::Key(KeyCode::A)));
@@ -2708,25 +2167,11 @@ fn set_action_and_get_action_roundtrip() {
 #[test]
 fn layer_mod_activates_layer_and_modifier_on_press() {
     let mut proc = make_processor_two_layers(
-        &[
-            Action::LayerMod {
-                layer: 1,
-                modifier: ModifierKey::LSHIFT,
-            },
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
-        &[
-            Action::Transparent,
-            Action::Key(KeyCode::B),
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-            Action::NoOp,
-        ],
+        &[Action::LayerMod {
+            layer: 1,
+            modifier: ModifierKey::LSHIFT,
+        }],
+        &[Action::Transparent, Action::Key(KeyCode::B)],
     );
     let reports = collect_reports(|emit| {
         proc.process_event(press(pos(0, 0), 0), 0, emit);
@@ -3066,14 +2511,6 @@ fn sticky_keys_toggle_action() {
 }
 
 #[test]
-fn with_accessibility_attaches_state() {
-    let proc = make_processor(&[Action::Key(KeyCode::A); 6]);
-    assert!(proc.accessibility.is_none());
-    let proc = proc.with_accessibility(crate::accessibility::AccessibilityConfig::default());
-    assert!(proc.accessibility.is_some());
-}
-
-#[test]
 fn bounce_keys_exact_boundary_accepted() {
     let config = crate::accessibility::AccessibilityConfig::default().with_bounce_keys(50);
     let mut proc = make_accessible_processor(&[Action::Key(KeyCode::A); 6], config);
@@ -3161,14 +2598,7 @@ fn dks2() -> DksKeys {
 }
 
 fn make_dks_processor() -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-    make_processor(&[
-        Action::Dks(dks1()),
-        Action::Dks(dks2()),
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-        Action::NoOp,
-    ])
+    make_processor(&[Action::Dks(dks1()), Action::Dks(dks2())])
 }
 
 #[test]
@@ -3341,4 +2771,85 @@ fn dks_ninth_concurrent_key_is_not_pressed_and_cannot_get_stuck() {
     });
     assert_eq!(reports.len(), 1);
     assert!(!keyboard_keycodes(reports[0]).contains(&KeyCode::A.usage_id()));
+}
+
+fn press_only_key(action: Action) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
+    let mut proc = make_processor(&[action]);
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc
+}
+
+#[test]
+fn audio_haptic_output_and_sleep_actions_set_and_drain_pending() {
+    let mut proc = press_only_key(Action::Audio(crate::audio::AudioCommand::Toggle));
+    assert_eq!(
+        proc.pending_audio_command(),
+        Some(crate::audio::AudioCommand::Toggle)
+    );
+    assert!(proc.pending_audio_command().is_none());
+
+    let mut proc = press_only_key(Action::Haptic(crate::haptic::HapticCommand::Toggle));
+    assert_eq!(
+        proc.pending_haptic_command(),
+        Some(crate::haptic::HapticCommand::Toggle)
+    );
+    assert!(proc.pending_haptic_command().is_none());
+
+    let mut proc = press_only_key(Action::OutputSelect(crate::pipeline::hid::OutputMode::Ble));
+    assert_eq!(
+        proc.pending_output_mode(),
+        Some(crate::pipeline::hid::OutputMode::Ble)
+    );
+    assert!(proc.pending_output_mode().is_none());
+
+    let mut proc = press_only_key(Action::Sleep);
+    assert!(proc.pending_sleep());
+    assert!(!proc.pending_sleep());
+}
+
+#[test]
+fn telemetry_frame_snapshots_without_clearing_until_clear_deltas() {
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]).with_telemetry();
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_event(release(pos(0, 0), 50), 50, &mut |_| {});
+
+    let telemetry = proc.telemetry_mut().unwrap();
+    let frame = telemetry.frame();
+    assert_eq!(frame.core.unwrap().delta_presses, 1);
+    assert!(frame.encoder.is_none());
+    // Reading a frame is non-destructive.
+    assert_eq!(telemetry.frame().core.unwrap().delta_presses, 1);
+
+    telemetry.clear_deltas();
+    let core = telemetry.frame().core.unwrap();
+    assert_eq!(core.delta_presses, 0);
+    assert_eq!(core.total_presses, 1);
+}
+
+#[test]
+fn tap_toggle_tap_latches_layer() {
+    let base = [
+        Action::TapToggle(1),
+        Action::Key(KeyCode::A),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ];
+    let overlay = [
+        Action::Transparent,
+        Action::Key(KeyCode::B),
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+        Action::NoOp,
+    ];
+    let mut proc = make_processor_two_layers(&base, &overlay);
+    proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
+    proc.process_event(release(pos(0, 0), 20), 20, &mut |_| {});
+    proc.tick(500, &mut |_| {});
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 1), 510), 510, emit);
+    });
+    assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
 }

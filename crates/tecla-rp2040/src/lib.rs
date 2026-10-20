@@ -8,8 +8,13 @@
 //!
 //! - [`scanner::GpioMatrixScanner`] — row-strobe / column-read GPIO matrix
 //!   scanner that implements [`tecla::matrix::scanner::AsyncMatrixScanner`].
-//! - [`reporter::UsbHidReporter`] — embassy-usb HID writer wrapper that
-//!   implements [`tecla::pipeline::hid::AsyncReporter`].
+//! - [`audio::PwmBuzzer`] — PWM passive-buzzer driver implementing
+//!   [`tecla::audio::BuzzerDriver`], for `Action::Audio` feedback.
+//! - [`haptic::Drv2605l`] — I²C DRV2605L driver implementing
+//!   [`tecla::haptic::HapticDriver`], for `Action::Haptic` feedback.
+//! - [`reporter::CompositeUsbReporter`] — routes each HID report variant to
+//!   its own USB interface (keyboard, NKRO, consumer, mouse, gamepad, MIDI)
+//!   and implements [`tecla::pipeline::hid::AsyncReporter`].
 //!
 //! # Wiring convention
 //!
@@ -25,12 +30,20 @@
 
 #![no_std]
 
+pub mod audio;
+pub mod haptic;
 pub mod reporter;
 pub mod scanner;
 pub mod telemetry;
 
-pub use reporter::UsbHidReporter;
+pub use audio::PwmBuzzer;
+pub use haptic::Drv2605l;
+pub use reporter::{Capabilities, CompositeUsbReporter, UsbHidReporter};
 pub use scanner::{CapTouchScanner, DirectPinScanner, GpioMatrixScanner};
 pub use telemetry::CdcTelemetryWriter;
 
-pub use tecla::pipeline::report::KEYBOARD_REPORT_DESCRIPTOR;
+pub use tecla::pipeline::report::{
+    CONSUMER_REPORT_DESCRIPTOR, CONSUMER_REPORT_SIZE, GAMEPAD_REPORT_DESCRIPTOR,
+    GAMEPAD_REPORT_SIZE, KEYBOARD_REPORT_DESCRIPTOR, KEYBOARD_REPORT_SIZE, MOUSE_REPORT_DESCRIPTOR,
+    MOUSE_REPORT_SIZE, NKRO_REPORT_DESCRIPTOR, NKRO_REPORT_SIZE,
+};

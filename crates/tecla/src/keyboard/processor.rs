@@ -48,7 +48,6 @@ use crate::pipeline::report::{
     ConsumerReport, HidReport, KeyboardReport, MidiEvent, MouseReport, NkroKeyboardReport,
 };
 use crate::telemetry::accessibility::AccessibilityTelemetry;
-use crate::telemetry::encoder::EncoderTelemetry;
 use crate::telemetry::gamepad::GamepadTelemetry;
 use crate::telemetry::midi::MidiTelemetry;
 use crate::telemetry::pointing::PointingTelemetry;
@@ -61,7 +60,7 @@ use super::steno_playback;
 mod tests;
 
 /// Bundled telemetry collectors for all modalities handled by the processor.
-pub struct ProcessorTelemetry<const KEYS: usize, const ENCODERS: usize = 0> {
+pub struct ProcessorTelemetry<const KEYS: usize> {
     /// Core keystroke dynamics (always active when telemetry is enabled).
     pub core: CoreTelemetry<KEYS>,
     /// Steno chord accuracy and dictionary metrics.
@@ -74,11 +73,45 @@ pub struct ProcessorTelemetry<const KEYS: usize, const ENCODERS: usize = 0> {
     pub gamepad: GamepadTelemetry,
     /// Pointing device velocity and click patterns.
     pub pointing: PointingTelemetry,
-    /// Rotary encoder rotation and reversal tracking.
-    pub encoder: EncoderTelemetry<ENCODERS>,
 }
 
-impl<const KEYS: usize, const ENCODERS: usize> ProcessorTelemetry<KEYS, ENCODERS> {
+impl<const KEYS: usize> ProcessorTelemetry<KEYS> {
+    /// Bundles every collector into one transportable frame.
+    ///
+    /// Non-destructive: this snapshots without clearing deltas, so a host
+    /// reading the frame across several transport packets sees one consistent
+    /// picture. Clearing is a separate, explicit step — see
+    /// [`clear_deltas`](Self::clear_deltas).
+    ///
+    /// `encoder` is left `None`: encoder telemetry is owned by the encoder task,
+    /// not the processor.
+    #[must_use]
+    pub fn frame(&self) -> crate::telemetry::transport::TelemetryFrame {
+        crate::telemetry::transport::TelemetryFrame {
+            core: Some(self.core.snapshot()),
+            steno: Some(self.steno.snapshot()),
+            midi: Some(self.midi.snapshot()),
+            gamepad: Some(self.gamepad.snapshot()),
+            pointing: Some(self.pointing.snapshot()),
+            encoder: None,
+            accessibility: Some(self.accessibility.snapshot()),
+        }
+    }
+
+    /// Resets every collector's delta counters, keeping cumulative totals.
+    ///
+    /// Call once the host has acknowledged a frame, so the next one measures a
+    /// fresh interval.
+    pub fn clear_deltas(&mut self) {
+        use crate::telemetry::TelemetryExt;
+        self.core.clear_deltas();
+        self.steno.clear_deltas();
+        self.midi.clear_deltas();
+        self.gamepad.clear_deltas();
+        self.pointing.clear_deltas();
+        self.accessibility.clear_deltas();
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             core: CoreTelemetry::new(),
@@ -87,7 +120,6 @@ impl<const KEYS: usize, const ENCODERS: usize> ProcessorTelemetry<KEYS, ENCODERS
             midi: MidiTelemetry::default(),
             gamepad: GamepadTelemetry::default(),
             pointing: PointingTelemetry::default(),
-            encoder: EncoderTelemetry::new(),
         }
     }
 }
@@ -202,6 +234,10 @@ pub struct KeyboardProcessor<
     last_tap_hold_tap: Option<(KeyPos, u64)>,
     pending_ble: Option<crate::transport::ble::BleCommand>,
     pending_rgb: Option<crate::rgb::RgbCommand>,
+    pending_audio: Option<crate::audio::AudioCommand>,
+    pending_haptic: Option<crate::haptic::HapticCommand>,
+    pending_output: Option<crate::pipeline::hid::OutputMode>,
+    pending_sleep: bool,
     #[cfg(feature = "autocorrect")]
     autocorrect: Option<AutocorrectEngine>,
     /// When set, typed keycodes are queued in `typed_out` for a remote engine
@@ -260,6 +296,10 @@ where
             last_tap_hold_tap: None,
             pending_ble: None,
             pending_rgb: None,
+            pending_audio: None,
+            pending_haptic: None,
+            pending_output: None,
+            pending_sleep: false,
             #[cfg(feature = "autocorrect")]
             autocorrect: None,
             #[cfg(feature = "autocorrect")]
@@ -415,6 +455,40 @@ where
         self.pending_rgb.take()
     }
 
+    /// Returns and clears the pending audio command, if any.
+    ///
+    /// Board crates drain this each loop and forward it to their
+    /// [`AudioController`](crate::audio::AudioController).
+    #[must_use]
+    pub fn pending_audio_command(&mut self) -> Option<crate::audio::AudioCommand> {
+        self.pending_audio.take()
+    }
+
+    /// Returns and clears the pending haptic command, if any.
+    ///
+    /// Board crates drain this each loop and forward it to their
+    /// [`HapticController`](crate::haptic::HapticController).
+    #[must_use]
+    pub fn pending_haptic_command(&mut self) -> Option<crate::haptic::HapticCommand> {
+        self.pending_haptic.take()
+    }
+
+    /// Returns and clears the pending output-mode switch, if any.
+    #[must_use]
+    pub fn pending_output_mode(&mut self) -> Option<crate::pipeline::hid::OutputMode> {
+        self.pending_output.take()
+    }
+
+    /// Returns and clears the pending sleep request.
+    ///
+    /// Board crates that support a low-power state check this each loop; on
+    /// boards that do not, [`Action::Sleep`](crate::action::Action::Sleep) has
+    /// no effect beyond setting this flag.
+    #[must_use]
+    pub fn pending_sleep(&mut self) -> bool {
+        core::mem::take(&mut self.pending_sleep)
+    }
+
     /// Returns the default layer bitmask.
     #[must_use]
     pub fn default_state(&self) -> u32 {
@@ -519,6 +593,13 @@ where
         if let Some(ref mut acc) = self.accessibility {
             let ready = acc.tick_slow_keys(now_ms);
             for pos in ready {
+                // A deferred press that survives to its deadline is an
+                // *accepted* slow key. Without this, slow_reject_rate only
+                // ever sees rejects and reads 0 when nothing was rejected —
+                // indistinguishable from "a perfect 0% reject rate".
+                if let Some(ref mut t) = self.telemetry {
+                    t.accessibility.record_slow_accept();
+                }
                 let event = KeyEvent::press(pos, now_ms);
                 let _ = self.pending.push_back(event);
             }
@@ -1088,13 +1169,19 @@ where
                 self.steno_chord |= 1u64 << bit.min(63);
                 self.steno_held_count = self.steno_held_count.saturating_add(1);
             }
-            Action::Audio(_)
-            | Action::Haptic(_)
-            | Action::OutputSelect(_)
-            | Action::Sleep
-            | Action::Transparent
-            | Action::NoOp
-            | Action::Ext(_) => {}
+            Action::Audio(cmd) => {
+                self.pending_audio = Some(cmd);
+            }
+            Action::Haptic(cmd) => {
+                self.pending_haptic = Some(cmd);
+            }
+            Action::OutputSelect(mode) => {
+                self.pending_output = Some(mode);
+            }
+            Action::Sleep => {
+                self.pending_sleep = true;
+            }
+            Action::Transparent | Action::NoOp | Action::Ext(_) => {}
         }
 
         if let Some(slot) = self.macro_recording {
@@ -1471,10 +1558,12 @@ where
     {
         match action {
             MouseAction::Move { dx, dy } => {
+                // Keymap mouse-keys stay i8 — a keymap constant has no use for
+                // 16-bit range; only a sensor does. Widened at the boundary.
                 emit(HidReport::Mouse(MouseReport {
                     buttons: self.mouse_buttons,
-                    dx,
-                    dy,
+                    dx: dx.into(),
+                    dy: dy.into(),
                     scroll: 0,
                 }));
             }

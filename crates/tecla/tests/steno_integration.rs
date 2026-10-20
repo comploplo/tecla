@@ -6,16 +6,13 @@
 #![expect(clippy::str_to_string, reason = "test code")]
 
 mod common;
-use common::{pos, press, release};
+use common::{collect, pos, press, processor, release};
 
-use heapless::Vec as HVec;
 use std::vec::Vec;
 use tecla::action::{Action, KeyCode, ModifierKey};
-use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::devices::steno::{CaseMode, OP_RETRO_CASE, OP_SPACE, OP_STITCH, OP_TEXT};
 use tecla::keyboard::KeyboardProcessor;
-use tecla::pipeline::event::{KeyEvent, KeyPos};
-use tecla::pipeline::keymap::{Layer, LayerStack};
+use tecla::pipeline::event::KeyPos;
 use tecla::pipeline::report::HidReport;
 use tecla_config::trie::compile_steno_dictionary;
 
@@ -25,22 +22,8 @@ const LAYERS: usize = 1;
 const KEYS: usize = 2;
 
 fn make_processor(dict: &'static [u8]) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
-    layers
-        .push(Layer::new(&[Action::Steno(0), Action::Steno(1)]))
-        .ok();
-    KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
+    processor(&[&[Action::Steno(0), Action::Steno(1)]])
         .with_steno(tecla::devices::steno::StenoEngine::new(dict))
-}
-
-fn collect_reports(
-    proc: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>,
-    event: KeyEvent,
-    now: u64,
-) -> std::vec::Vec<HidReport> {
-    let mut out = std::vec::Vec::new();
-    proc.process_event(event, now, &mut |r| out.push(r));
-    out
 }
 
 fn usage_id_to_char(usage_id: u8, mods: u8) -> Option<String> {
@@ -120,12 +103,8 @@ fn steno_press_sequence(
     start_ms: u64,
 ) -> std::vec::Vec<HidReport> {
     let mut reports = std::vec::Vec::new();
-    reports.extend(collect_reports(proc, press(key, start_ms), start_ms));
-    reports.extend(collect_reports(
-        proc,
-        release(key, start_ms + 10),
-        start_ms + 10,
-    ));
+    reports.extend(collect(proc, press(key, start_ms), start_ms));
+    reports.extend(collect(proc, release(key, start_ms + 10), start_ms + 10));
     reports
 }
 

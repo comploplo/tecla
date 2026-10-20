@@ -5,3 +5,7 @@ original/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Transient tool output — never commit a captured build/lint log.
+lint_output.txt
+*_output.txt

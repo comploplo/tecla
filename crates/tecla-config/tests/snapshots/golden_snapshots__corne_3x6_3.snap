@@ -4,21 +4,18 @@ expression: output
 ---
 // 3 layer(s), 42 keys (3 rows x 12 cols)
 keymap! {
-    #[rustfmt::skip]
     layer!(_QWERTY,
         Tab   , Q    , W    , E    , R    , T   , Y    , U    , I        , O         , P        , Backspace,
         Escape, A    , S    , D    , F    , G   , H    , J    , K        , L         , Semicolon, Quote,
         LShift, Z    , X    , C    , V    , B   , N    , M    , Comma    , Dot       , Slash    , RShift,
         LGui  , MO(1), Space, Enter, MO(2), RAlt,
     ),
-    #[rustfmt::skip]
     layer!(_LOWER,
         Tab   , N1   , N2   , N3   , N4   , N5  , N6   , N7   , N8       , N9        , N0       , Backspace,
         TRNS  , NoOp , NoOp , NoOp , NoOp , NoOp, Left , Down , Up       , Right     , NoOp     , NoOp,
         TRNS  , NoOp , NoOp , NoOp , NoOp , NoOp, NoOp , NoOp , NoOp     , NoOp      , NoOp     , NoOp,
         TRNS  , TRNS , TRNS , TRNS , TRNS , TRNS,
     ),
-    #[rustfmt::skip]
     layer!(_RAISE,
         Tab   , F1   , F2   , F3   , F4   , F5  , F6   , F7   , F8       , F9        , F10      , F11,
         TRNS  , NoOp , NoOp , NoOp , NoOp , NoOp, Minus, Equal, LeftBrace, RightBrace, Backslash, Grave,

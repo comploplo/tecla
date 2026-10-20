@@ -5,10 +5,16 @@ edition = "2021"
 description = "QMK config parser and keymap transpiler for tecla"
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/tecla-config"
+# Every integration test here asserts against ../../keyboards, a tree of
+# symlinks into the QMK/ZMK git submodules. Those paths do not exist inside a
+# .crate archive, so shipping the tests would give consumers a suite that
+# cannot pass.
+exclude = ["tests/"]
 
 [lints]
 workspace = true
@@ -19,12 +25,12 @@ dictionary = ["dep:ureq"]
 [dependencies]
 deser-hjson   = "2"
 serde_json   = { workspace = true }
-serde        = { workspace = true }
+serde        = { workspace = true, features = ["std"] }
 nom          = { workspace = true }
 toml         = { workspace = true }
 tree-sitter   = { workspace = true }
 tree-sitter-c = { workspace = true }
-serde_yml    = { workspace = true }
+noyalib      = { workspace = true }
 ureq          = { version = "3", optional = true }
 
 [dev-dependencies]

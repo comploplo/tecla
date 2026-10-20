@@ -6,7 +6,7 @@
 //! # Prerequisites
 //!
 //! The `ble` feature must be enabled. Current dependency versions:
-//! `trouble-host` 0.6, `nrf-sdc` 0.3, `embassy-nrf` 0.10, `embassy-sync` 0.7.
+//! `trouble-host` 0.8, `nrf-sdc` 0.4, `embassy-nrf` 0.11, `embassy-sync` 0.8.
 //!
 //! The `nrf-sdc` build requires ARM sysroot headers for bindgen.
 //! Set `LIBCLANG_PATH` to your system's libclang path (see `.cargo/config.toml`).
@@ -14,7 +14,8 @@
 //! # Flashing
 //!
 //! ```sh
-//! cargo run --example planck_ble --features ble --release
+//! cargo run -p tecla-nrf52840 --example planck_ble --no-default-features \
+//!   --features ble --target thumbv7em-none-eabihf --release
 //! ```
 //!
 //! # Wiring
@@ -177,7 +178,15 @@ async fn main(spawner: Spawner) {
     spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
     spawner.spawn(keyboard_task(event_ch, processor, report_ch).unwrap());
 
-    tecla_nrf52840::run_ble_peripheral(sdc, "Tecla Planck").await;
+    // Static random BLE address: the two high bits must be set for the
+    // address to be a valid "static random" one per the Bluetooth spec.
+    // A real board should derive this from its FICR device ID so two boards
+    // do not collide; a fixed value keeps the example self-contained.
+    const BLE_ADDRESS: [u8; 6] = [0x01, 0x02, 0x03, 0x04, 0x05, 0xC0];
+
+    // No stored bond: this example always advertises undirected. Persisting
+    // bonds needs the `storage` feature and a flash region.
+    tecla_nrf52840::run_ble_peripheral(sdc, "Tecla Planck", None, BLE_ADDRESS).await;
 }
 
 #[embassy_executor::task]

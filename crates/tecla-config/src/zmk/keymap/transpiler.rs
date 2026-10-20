@@ -215,9 +215,9 @@ pub fn transpile(layers: &[Vec<Binding>], cols: Option<usize>) -> Result<String,
     out.push_str("keymap! {\n");
 
     for (layer_idx, layer) in layers.iter().enumerate() {
-        if c > 0 {
-            out.push_str("    #[rustfmt::skip]\n");
-        }
+        // No `#[rustfmt::skip]` — see the note in the QMK transpiler: `keymap!`
+        // cannot parse an attribute there, so it produced output that would not
+        // compile.
         write!(out, "    layer!(Layer{layer_idx},")?;
 
         #[expect(

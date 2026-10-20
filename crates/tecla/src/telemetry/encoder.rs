@@ -166,4 +166,31 @@ mod tests {
         assert_eq!(t.delta_ticks, 0);
         assert_eq!(t.cw_count[0], 1);
     }
+
+    #[test]
+    fn per_encoder_counts_are_kept_separately() {
+        let mut t = EncoderTelemetry::<3>::default();
+        t.record_cw(0);
+        t.record_cw(0);
+        t.record_ccw(2);
+        assert_eq!(t.cw_counts(), &[2, 0, 0]);
+        assert_eq!(t.ccw_counts(), &[0, 0, 1]);
+    }
+
+    #[test]
+    fn out_of_range_encoder_ids_are_ignored() {
+        let mut t = EncoderTelemetry::<2>::new();
+        t.record_cw(9);
+        t.record_ccw(9);
+        assert_eq!(t.cw_counts(), &[0, 0]);
+        assert_eq!(t.ccw_counts(), &[0, 0]);
+    }
+
+    #[test]
+    fn default_matches_new() {
+        let a = EncoderTelemetry::<4>::new();
+        let b = EncoderTelemetry::<4>::default();
+        assert_eq!(a.cw_counts(), b.cw_counts());
+        assert_eq!(a.ccw_counts(), b.ccw_counts());
+    }
 }

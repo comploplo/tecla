@@ -5,16 +5,13 @@
 #![allow(missing_docs, reason = "integration test")]
 
 mod common;
-use common::{collect, pos, press, release};
+use common::{collect, pos, press, processor, release};
 
 use heapless::Vec as HVec;
 use std::vec::Vec;
 use tecla::action::{Action, GamepadAction, KeyCode, MidiAction, ModifierKey};
-use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::devices::steno::{OP_TEXT, OP_UNDO_LAST_TRANSLATION};
 use tecla::keyboard::KeyboardProcessor;
-use tecla::pipeline::event::KeyEvent;
-use tecla::pipeline::keymap::{Layer, LayerStack};
 use tecla::pipeline::report::HidReport;
 use tecla_config::trie::compile_steno_dictionary;
 
@@ -24,10 +21,7 @@ const LAYERS: usize = 2;
 const KEYS: usize = 12;
 
 fn make_keyboard(keys: &[Action<()>; KEYS]) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
-    layers.push(Layer::new(keys)).ok();
-    layers.push(Layer::new(keys)).ok();
-    KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default()).with_telemetry()
+    processor(&[keys, keys]).with_telemetry()
 }
 
 fn simple_keymap() -> [Action<()>; KEYS] {
@@ -203,7 +197,7 @@ fn bigram_tracking_records_key_pairs() {
     assert!(!bigrams.is_empty(), "should have at least one bigram");
     assert_eq!(bigrams[0].from, 0);
     assert_eq!(bigrams[0].to, 1);
-    assert!(bigrams[0].pp_ema > 0);
+    assert_eq!(bigrams[0].pp_ema, 80);
 }
 
 #[test]
@@ -221,9 +215,9 @@ fn snapshot_reflects_session_state() {
 
     let snap = proc.telemetry().unwrap().core.snapshot();
     assert_eq!(snap.total_presses, 16);
-    assert!(snap.wpm > 0);
-    assert!(snap.avg_hold_ms > 0);
-    assert!(snap.error_rate > 0);
+    assert_eq!(snap.wpm, 112);
+    assert_eq!(snap.avg_hold_ms, 50);
+    assert_eq!(snap.error_rate, 15);
 }
 
 #[test]
@@ -253,27 +247,9 @@ const STENO_KEYS: usize = 3;
 fn make_steno_processor(
     dict: &'static [u8],
 ) -> KeyboardProcessor<STENO_ROWS, STENO_COLS, STENO_LAYERS, STENO_KEYS> {
-    let mut layers = HVec::<Layer<()>, STENO_LAYERS>::new();
-    layers
-        .push(Layer::new(&[
-            Action::Steno(0),
-            Action::Steno(1),
-            Action::Steno(2),
-        ]))
-        .ok();
-    KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
+    processor(&[&[Action::Steno(0), Action::Steno(1), Action::Steno(2)]])
         .with_steno(tecla::devices::steno::StenoEngine::new(dict))
         .with_telemetry()
-}
-
-fn steno_collect(
-    proc: &mut KeyboardProcessor<STENO_ROWS, STENO_COLS, STENO_LAYERS, STENO_KEYS>,
-    event: KeyEvent,
-    now: u64,
-) -> Vec<HidReport> {
-    let mut out = Vec::new();
-    proc.process_event(event, now, &mut |r| out.push(r));
-    out
 }
 
 fn compact_text_payload(text: &str) -> Vec<u8> {
@@ -299,8 +275,8 @@ fn steno_telemetry_records_dictionary_hit() {
     let dict = leak_dict(vec![(vec![1u64], compact_text_payload("the"))]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 0), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 0), 50), 50);
+    collect(&mut proc, press(pos(0, 0), 0), 0);
+    collect(&mut proc, release(pos(0, 0), 50), 50);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert_eq!(snap.hit_rate, 255, "single hit should be 100%");
@@ -312,8 +288,8 @@ fn steno_telemetry_records_dictionary_miss() {
     let dict = leak_dict(vec![(vec![1u64], compact_text_payload("the"))]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 1), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 1), 50), 50);
+    collect(&mut proc, press(pos(0, 1), 0), 0);
+    collect(&mut proc, release(pos(0, 1), 50), 50);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert_eq!(snap.hit_rate, 0, "unmatched stroke should be 0% hit rate");
@@ -324,11 +300,11 @@ fn steno_telemetry_mixed_hit_miss() {
     let dict = leak_dict(vec![(vec![1u64], compact_text_payload("the"))]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 0), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 0), 50), 50);
+    collect(&mut proc, press(pos(0, 0), 0), 0);
+    collect(&mut proc, release(pos(0, 0), 50), 50);
 
-    steno_collect(&mut proc, press(pos(0, 1), 100), 100);
-    steno_collect(&mut proc, release(pos(0, 1), 150), 150);
+    collect(&mut proc, press(pos(0, 1), 100), 100);
+    collect(&mut proc, release(pos(0, 1), 150), 150);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert!(
@@ -347,11 +323,11 @@ fn steno_telemetry_records_undo() {
     ]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 0), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 0), 50), 50);
+    collect(&mut proc, press(pos(0, 0), 0), 0);
+    collect(&mut proc, release(pos(0, 0), 50), 50);
 
-    steno_collect(&mut proc, press(pos(0, 1), 100), 100);
-    steno_collect(&mut proc, release(pos(0, 1), 150), 150);
+    collect(&mut proc, press(pos(0, 1), 100), 100);
+    collect(&mut proc, release(pos(0, 1), 150), 150);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert_eq!(snap.undos, 1);
@@ -486,12 +462,21 @@ fn gamepad_telemetry_tracks_axis_range() {
 fn gamepad_button_release_tracked() {
     let mut proc = make_gamepad_keyboard();
 
+    // Two down, one up, then a third down: only two are ever held at once,
+    // so the peak must stay at 2. If the release were not tracked the live
+    // set would still hold button 0 and the peak would climb to 3 — which is
+    // the only externally visible consequence of record_button_release.
     collect(&mut proc, press(pos(0, 0), 0), 0);
     collect(&mut proc, press(pos(0, 1), 10), 10);
     collect(&mut proc, release(pos(0, 0), 20), 20);
+    collect(&mut proc, press(pos(0, 2), 30), 30);
 
     let snap = proc.telemetry().unwrap().gamepad.snapshot();
-    assert_eq!(snap.max_simultaneous, 2, "peak should be preserved");
+    assert_eq!(
+        snap.max_simultaneous, 2,
+        "never more than two buttons held at once"
+    );
+    assert_eq!(snap.total_presses, 3);
 }
 
 // ── Accessibility telemetry ──────────────────────────────────────────────────
@@ -523,15 +508,34 @@ fn accessibility_telemetry_slow_key_acceptance() {
     let config = tecla::accessibility::AccessibilityConfig::default().with_slow_keys(100);
     let mut proc = make_accessible_keyboard(config).with_telemetry();
 
+    // Held past the 100ms slow-key term ⇒ accepted.
     collect(&mut proc, press(pos(0, 0), 0), 0);
-
     let mut reports = Vec::new();
     proc.tick(100, &mut |r| reports.push(r));
+    assert!(
+        !reports.is_empty(),
+        "an accepted slow key should emit a press report"
+    );
+    assert_eq!(
+        proc.telemetry()
+            .unwrap()
+            .accessibility
+            .snapshot()
+            .slow_reject_rate,
+        0,
+        "one accept, zero rejects ⇒ 0% reject rate"
+    );
+
+    // Released before the term ⇒ rejected. One accept + one reject = 50%.
+    collect(&mut proc, release(pos(0, 0), 110), 110);
+    collect(&mut proc, press(pos(0, 1), 200), 200);
+    collect(&mut proc, release(pos(0, 1), 210), 210);
 
     let snap = proc.telemetry().unwrap().accessibility.snapshot();
-    assert!(
-        snap.slow_reject_rate < 255,
-        "accepted slow key should reduce rejection rate"
+    assert_eq!(
+        snap.slow_reject_rate, 127,
+        "one accept + one reject should be ~50% of 255, got {}",
+        snap.slow_reject_rate
     );
 }
 
@@ -540,15 +544,9 @@ fn accessibility_telemetry_sticky_key_usage() {
     let config = tecla::accessibility::AccessibilityConfig::default().with_sticky_keys();
     let mut keys = simple_keymap();
     keys[0] = Action::Modifier(ModifierKey::LSHIFT);
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
-    layers.push(Layer::new(&keys)).ok();
-    layers.push(Layer::new(&keys)).ok();
-    let mut proc = KeyboardProcessor::<ROWS, COLS, LAYERS, KEYS>::new(
-        LayerStack::new(layers),
-        TapHoldConfig::default(),
-    )
-    .with_accessibility(config)
-    .with_telemetry();
+    let mut proc: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> = processor(&[&keys, &keys])
+        .with_accessibility(config)
+        .with_telemetry();
 
     collect(&mut proc, press(pos(0, 0), 0), 0);
     collect(&mut proc, release(pos(0, 0), 50), 50);
@@ -570,13 +568,8 @@ fn telemetry_does_not_alter_hid_output() {
     let keymap = simple_keymap();
     let mut with_telemetry = make_keyboard(&keymap);
 
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
-    layers.push(Layer::new(&keymap)).ok();
-    layers.push(Layer::new(&keymap)).ok();
-    let mut without_telemetry = KeyboardProcessor::<ROWS, COLS, LAYERS, KEYS>::new(
-        LayerStack::new(layers),
-        TapHoldConfig::default(),
-    );
+    let mut without_telemetry: KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> =
+        processor(&[&keymap, &keymap]);
 
     let events = [
         press(pos(0, 0), 0),
@@ -631,9 +624,9 @@ fn telemetry_survives_full_session() {
 
     let snap = t.core.snapshot();
     assert_eq!(snap.total_presses, 500);
-    assert!(snap.wpm > 0);
-    assert!(snap.avg_hold_ms > 0);
-    assert!(snap.avg_pp_ms > 0);
+    assert_eq!(snap.wpm, 240);
+    assert_eq!(snap.avg_hold_ms, 25);
+    assert_eq!(snap.avg_pp_ms, 50);
 
     for &ema in t.core.hold_time_emas() {
         if ema > 0 {
@@ -659,21 +652,9 @@ fn make_lapwing_processor(
     for i in 0..26u8 {
         actions[usize::from(i)] = Action::Steno(i);
     }
-    let mut layers = HVec::<Layer<()>, LAPWING_LAYERS>::new();
-    layers.push(Layer::new(&actions)).ok();
-    KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
+    processor(&[&actions])
         .with_steno(tecla::devices::steno::StenoEngine::new(dict))
         .with_telemetry()
-}
-
-fn lapwing_collect(
-    proc: &mut KeyboardProcessor<LAPWING_ROWS, LAPWING_COLS, LAPWING_LAYERS, LAPWING_KEYS>,
-    event: KeyEvent,
-    now: u64,
-) -> Vec<HidReport> {
-    let mut out = Vec::new();
-    proc.process_event(event, now, &mut |r| out.push(r));
-    out
 }
 
 fn lapwing_chord(
@@ -683,14 +664,14 @@ fn lapwing_chord(
 ) -> Vec<HidReport> {
     let mut reports = Vec::new();
     for (i, &key) in keys.iter().enumerate() {
-        reports.extend(lapwing_collect(
+        reports.extend(collect(
             proc,
             press(pos(0, key), start_ms + i as u64),
             start_ms + i as u64,
         ));
     }
     for (i, &key) in keys.iter().enumerate() {
-        reports.extend(lapwing_collect(
+        reports.extend(collect(
             proc,
             release(pos(0, key), start_ms + 50 + i as u64),
             start_ms + 50 + i as u64,
@@ -801,8 +782,8 @@ fn steno_multi_stroke_tracking() {
     let dict = leak_dict(vec![(vec![1u64, 2u64], compact_text_payload("hello"))]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 0), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 0), 50), 50);
+    collect(&mut proc, press(pos(0, 0), 0), 0);
+    collect(&mut proc, release(pos(0, 0), 50), 50);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert_eq!(
@@ -810,8 +791,8 @@ fn steno_multi_stroke_tracking() {
         "first stroke is pending, no completion yet"
     );
 
-    steno_collect(&mut proc, press(pos(0, 1), 100), 100);
-    steno_collect(&mut proc, release(pos(0, 1), 150), 150);
+    collect(&mut proc, press(pos(0, 1), 100), 100);
+    collect(&mut proc, release(pos(0, 1), 150), 150);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert!(
@@ -826,11 +807,11 @@ fn steno_multi_stroke_abandoned() {
     let dict = leak_dict(vec![(vec![1u64, 1u64], compact_text_payload("hello"))]);
     let mut proc = make_steno_processor(dict);
 
-    steno_collect(&mut proc, press(pos(0, 0), 0), 0);
-    steno_collect(&mut proc, release(pos(0, 0), 50), 50);
+    collect(&mut proc, press(pos(0, 0), 0), 0);
+    collect(&mut proc, release(pos(0, 0), 50), 50);
 
-    steno_collect(&mut proc, press(pos(0, 1), 100), 100);
-    steno_collect(&mut proc, release(pos(0, 1), 150), 150);
+    collect(&mut proc, press(pos(0, 1), 100), 100);
+    collect(&mut proc, release(pos(0, 1), 150), 150);
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
     assert_eq!(
@@ -849,8 +830,8 @@ fn steno_spm_with_timed_strokes() {
 
     for i in 0..10u64 {
         let key = (i % 2) as u8;
-        steno_collect(&mut proc, press(pos(0, key), i * 500), i * 500);
-        steno_collect(&mut proc, release(pos(0, key), i * 500 + 50), i * 500 + 50);
+        collect(&mut proc, press(pos(0, key), i * 500), i * 500);
+        collect(&mut proc, release(pos(0, key), i * 500 + 50), i * 500 + 50);
     }
 
     let snap = proc.telemetry().unwrap().steno.snapshot();
@@ -902,7 +883,7 @@ fn mouse_move_records_pointing_telemetry() {
     collect(&mut proc, release(pos(0, 0), 50), 50);
 
     let snap = proc.telemetry().unwrap().pointing.snapshot();
-    assert!(snap.avg_velocity > 0);
+    assert_eq!(snap.avg_velocity, 15);
 }
 
 #[test]
@@ -940,10 +921,10 @@ fn collect_frame_captures_all_modalities() {
     collect(&mut proc, press(pos(0, 0), 0), 0);
     collect(&mut proc, release(pos(0, 0), 50), 50);
 
-    let frame = collect_frame(proc.telemetry_mut().unwrap());
-    assert!(frame.core.unwrap().total_presses > 0);
+    let frame = collect_frame(proc.telemetry_mut().unwrap(), None);
+    assert_eq!(frame.core.unwrap().total_presses, 1);
 
-    let frame2 = collect_frame(proc.telemetry_mut().unwrap());
+    let frame2 = collect_frame(proc.telemetry_mut().unwrap(), None);
     assert_eq!(frame2.core.unwrap().delta_presses, 0);
 }
 
@@ -965,12 +946,39 @@ fn telemetry_frame_serialize_deserialize() {
         );
     }
 
-    let frame = collect_frame(proc.telemetry_mut().unwrap());
+    let frame = collect_frame(proc.telemetry_mut().unwrap(), None);
     let mut buf = HVec::<u8, 128>::new();
     frame.serialize(&mut buf);
     let decoded = TelemetryFrame::deserialize(&buf).unwrap();
     assert_eq!(
         decoded.core.unwrap().total_presses,
         frame.core.unwrap().total_presses
+    );
+}
+
+fn typed_text(reports: &[HidReport]) -> String {
+    let mut out = String::new();
+    for r in reports {
+        if let HidReport::Keyboard(k) = r {
+            for &code in &k.keycodes {
+                if (0x04..=0x1d).contains(&code) {
+                    out.push(char::from(b'a' + (code - 0x04)));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn lapwing_kat_types_cat() {
+    let dict = compile_lapwing();
+    let mut proc = make_lapwing_processor(dict);
+    // K=3, A=8, -T=19 in Plover bit order.
+    let reports = lapwing_chord(&mut proc, &[3, 8, 19], 0);
+    assert!(
+        typed_text(&reports).contains("cat"),
+        "got {:?}",
+        typed_text(&reports)
     );
 }

@@ -40,9 +40,13 @@ keymap! {
     layer!(Media,
         // Left hand: outer -> inner.
         // spacer              outer        pinky        ring         middle       index        inner
+        // Mouse buttons sit on the LEFT hand: the right thumb holds this layer
+        // and the trackball lives under a thumb, so clicks have to be a
+        // different hand entirely or they fight each other.
+        // Wheel on the upper row, buttons on home row under ring/middle/index.
            NOOP,               RGB_NEXT,    NOOP,        NOOP,        NOOP,        NOOP,        NOOP,
-           NOOP,               TRNS,        TRNS,        NOOP,        NOOP,        NOOP,        TRNS,
-           NOOP,               TRNS,        NOOP,        NOOP,        NOOP,        NOOP,        TRNS,
+           NOOP,               TRNS,        TRNS,        MS_WHUP,     MS_WHDN,     NOOP,        TRNS,
+           NOOP,               TRNS,        MS_BTN3,     MS_BTN2,     MS_BTN1,     NOOP,        TRNS,
            NOOP,               TRNS,        TRNS,        TRNS,        TRNS,        TRNS,        NOOP,
            NOOP,               NOOP,        NOOP,        NOOP,        TRNS,        NOOP,        NOOP,
            TRNS,               TRNS,        NOOP,        NOOP,        NOOP,        NOOP,        NOOP,

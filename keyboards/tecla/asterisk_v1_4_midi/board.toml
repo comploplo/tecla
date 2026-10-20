@@ -1,0 +1,7 @@
+name = "asterisk_v1_4_midi"
+crate = "tecla-rp2040"
+example = "asterisk_v1_4_midi"
+target = "thumbv6m-none-eabi"
+flash = "uf2"
+features = ["usb-midi"]
+vendor = "stenokeyboards"

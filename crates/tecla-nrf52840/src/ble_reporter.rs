@@ -18,12 +18,9 @@
 
 use trouble_host::prelude::*;
 
-use tecla::ble::BleError;
 use tecla::pipeline::hid::{AsyncReporter, ReportError};
 use tecla::pipeline::report::HidReport;
-
-use embassy_nrf::rng::Rng as HwRng;
-use embassy_nrf::{bind_interrupts, peripherals, rng, Peri};
+use tecla::transport::ble::BleError;
 
 const HID_REPORT_MAP: &[u8] = crate::KEYBOARD_REPORT_DESCRIPTOR;
 
@@ -124,7 +121,7 @@ impl<'a, 'server, P: PacketPool> AsyncReporter for BleHidReporter<'a, 'server, P
                 self.server
                     .hid
                     .input_report
-                    .notify(conn, &bytes)
+                    .notify(conn, &bytes, false)
                     .await
                     .map_err(|_| ReportError::NotConnected)
             }
@@ -133,7 +130,7 @@ impl<'a, 'server, P: PacketPool> AsyncReporter for BleHidReporter<'a, 'server, P
                 self.server
                     .hid
                     .consumer_report
-                    .notify(conn, &bytes)
+                    .notify(conn, &bytes, false)
                     .await
                     .map_err(|_| ReportError::NotConnected)
             }
@@ -142,7 +139,9 @@ impl<'a, 'server, P: PacketPool> AsyncReporter for BleHidReporter<'a, 'server, P
     }
 }
 
-impl<'a, 'server, P: PacketPool> tecla::ble::BleReporter for BleHidReporter<'a, 'server, P> {
+impl<'a, 'server, P: PacketPool> tecla::transport::ble::BleReporter
+    for BleHidReporter<'a, 'server, P>
+{
     /// No-op: connection acceptance is driven by `run_ble_peripheral`'s
     /// advertise-accept loop, not by the trait caller.
     async fn connect(&mut self) -> Result<(), BleError> {
@@ -168,10 +167,6 @@ impl<'a, 'server, P: PacketPool> tecla::ble::BleReporter for BleHidReporter<'a, 
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2;
 
-bind_interrupts!(struct RngIrqs {
-    RNG => rng::InterruptHandler<peripherals::RNG>;
-});
-
 /// Run the BLE peripheral event loop: advertise, accept connections, and serve
 /// the HID GATT server until the connection drops, then re-advertise.
 #[expect(
@@ -181,24 +176,22 @@ bind_interrupts!(struct RngIrqs {
 pub async fn run_ble_peripheral<C: Controller>(
     controller: C,
     name: &str,
-    rng_peripheral: Peri<'_, peripherals::RNG>,
-    active_bond: Option<&tecla::ble::BondInfo>,
+    active_bond: Option<&tecla::transport::ble::BondInfo>,
     ble_address: [u8; 6],
 ) -> ! {
     let address = Address::random(ble_address);
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    let mut rng = HwRng::new(rng_peripheral, RngIrqs);
+    // No RNG parameter: trouble-host seeds its security-manager RNG itself
+    // from the controller's LeRand HCI command, which is a better entropy
+    // source than a caller-supplied peripheral anyway.
     let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address)
-        .set_random_generator_seed(&mut rng);
+        .build();
     stack.set_io_capabilities(IoCapabilities::NoInputNoOutput);
-    let Host {
-        mut peripheral,
-        runner,
-        ..
-    } = stack.build();
+    let mut peripheral = stack.peripheral();
+    let runner = stack.runner();
 
     let server = HidGattServer::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name,
@@ -255,7 +248,7 @@ async fn advertise_undirected<'v, 's, C: Controller>(
     let len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[[0x12, 0x18], [0x0f, 0x18]]),
+            AdStructure::CompleteServiceUuids16(&[[0x12, 0x18], [0x0f, 0x18]]),
             AdStructure::CompleteLocalName(name.as_bytes()),
         ],
         &mut adv_data[..],

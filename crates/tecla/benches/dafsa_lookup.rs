@@ -14,7 +14,8 @@
 
 #![allow(missing_docs, reason = "criterion bench harness")]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
 use tecla::devices::steno::{StenoChord, StenoEngine};
 use tecla_config::trie::compile_steno_dictionary;
 

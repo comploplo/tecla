@@ -17,7 +17,7 @@ use crate::pipeline::event::KeyPos;
 /// Internally stored as a row-major 2-D `u8` array. Each cell is a
 /// normalized travel value: `0` is fully released/rest, `255` is fully
 /// bottomed out. All access goes through safe
-/// [`get`](AnalogMatrixState::get) / [`set`](AnalogMatrixState::set)
+/// `get` / `set`
 /// methods — no direct indexing.
 pub type AnalogMatrixState<const ROWS: usize, const COLS: usize> =
     crate::matrix::state::Matrix<u8, ROWS, COLS>;
@@ -413,8 +413,7 @@ mod tests {
     fn ema_moves_toward_sample_each_update() {
         let mut ema = Ema::new(0);
         let first = ema.update(100, 2);
-        assert!(first > 0);
-        assert!(first < 100);
+        assert_eq!(first, 25);
     }
 
     #[test]

@@ -174,7 +174,7 @@ impl TelemetryFrame {
         if let Some(ref s) = self.accessibility {
             serialize_snapshot!(buf, s,
                 slow_reject_rate: u8, bounce_reject_rate: u8,
-                sticky_uses: u32, hold_time_trend: i8);
+                sticky_uses: u32, delta_sticky_uses: u16, hold_time_trend: i8);
         }
     }
 
@@ -219,7 +219,7 @@ impl TelemetryFrame {
         if flags & FLAG_ACCESSIBILITY != 0 {
             frame.accessibility = Some(deserialize_snapshot!(buf, p, AccessibilitySnapshot,
                 slow_reject_rate: u8, bounce_reject_rate: u8,
-                sticky_uses: u32, hold_time_trend: i8));
+                sticky_uses: u32, delta_sticky_uses: u16, hold_time_trend: i8));
         }
 
         let _ = p;
@@ -228,8 +228,12 @@ impl TelemetryFrame {
 }
 
 /// Collect a [`TelemetryFrame`] from the processor telemetry and reset deltas.
-pub fn collect_frame<const KEYS: usize, const ENCODERS: usize>(
-    t: &mut crate::keyboard::ProcessorTelemetry<KEYS, ENCODERS>,
+/// `encoder` is supplied by the caller because rotary encoders are scanned in
+/// their own task, which owns the [`EncoderTelemetry`](super::encoder::EncoderTelemetry)
+/// collector; pass `None` on boards without encoders.
+pub fn collect_frame<const KEYS: usize>(
+    t: &mut crate::keyboard::ProcessorTelemetry<KEYS>,
+    encoder: Option<EncoderSnapshot>,
 ) -> TelemetryFrame {
     use super::TelemetryExt;
     TelemetryFrame {
@@ -238,7 +242,7 @@ pub fn collect_frame<const KEYS: usize, const ENCODERS: usize>(
         midi: Some(t.midi.collect()),
         gamepad: Some(t.gamepad.collect()),
         pointing: Some(t.pointing.collect()),
-        encoder: Some(t.encoder.collect()),
+        encoder,
         accessibility: Some(t.accessibility.collect()),
     }
 }
@@ -412,6 +416,7 @@ mod tests {
                 slow_reject_rate: 25,
                 bounce_reject_rate: 10,
                 sticky_uses: 42,
+                delta_sticky_uses: 7,
                 hold_time_trend: -3,
             }),
         };
@@ -425,7 +430,9 @@ mod tests {
         assert_eq!(decoded.gamepad.unwrap().axis_min[0], -100);
         assert_eq!(decoded.pointing.unwrap().total_clicks, 100);
         assert_eq!(decoded.encoder.unwrap().total_cw, 150);
-        assert_eq!(decoded.accessibility.unwrap().hold_time_trend, -3);
+        let acc = decoded.accessibility.unwrap();
+        assert_eq!(acc.hold_time_trend, -3);
+        assert_eq!(acc.delta_sticky_uses, 7);
     }
 
     #[test]
@@ -450,11 +457,15 @@ mod tests {
         t.core
             .record_press(crate::pipeline::event::KeyPos::new(0, 0), 100, 3);
         t.pointing.record_click(false);
-        t.encoder.record_cw(0);
-        let frame = collect_frame(&mut t);
-        assert!(frame.core.unwrap().delta_presses > 0);
-        assert!(frame.pointing.unwrap().delta_clicks > 0);
-        let frame2 = collect_frame(&mut t);
+        use crate::telemetry::TelemetryExt;
+        let mut enc = crate::telemetry::encoder::EncoderTelemetry::<2>::new();
+        enc.record_cw(0);
+        let frame = collect_frame(&mut t, Some(enc.collect()));
+        assert_eq!(frame.core.unwrap().delta_presses, 1);
+        assert_eq!(frame.pointing.unwrap().delta_clicks, 1);
+        assert_eq!(frame.encoder.unwrap().total_cw, 1);
+        let frame2 = collect_frame(&mut t, None);
+        assert!(frame2.encoder.is_none());
         assert_eq!(frame2.core.unwrap().delta_presses, 0);
         assert_eq!(frame2.pointing.unwrap().delta_clicks, 0);
     }

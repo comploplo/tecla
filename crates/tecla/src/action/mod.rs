@@ -1,6 +1,6 @@
 //! Action types facade.
 //!
-//! Implementation lives in [`types`]; this module keeps the public surface
+//! Implementation lives in `types`; this module keeps the public surface
 //! shallow and re-exports the action types.
 
 mod consumer;

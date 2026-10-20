@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Install host test tools
+        run: cargo install --locked just cargo-nextest
+      - name: Check formatting
+        run: just fmt-check
+      - name: Clippy
+        run: just lint
+      - name: Host tests
+        run: just test
+      - name: Documentation examples
+        run: |
+          cargo test --locked --doc --workspace \
+            --exclude tecla-rp2040 --exclude tecla-nrf52840 \
+            --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete
+      - name: Documentation
+        run: just doc
+
+  boards:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: tecla-rp2040
+            target: thumbv6m-none-eabi
+            features: hil,steno-dictionary,usb-midi
+          - crate: tecla-nrf52840
+            target: thumbv7em-none-eabihf
+            features: hil
+          - crate: tecla-stm32f4
+            target: thumbv7em-none-eabihf
+            features: ""
+          - crate: tecla-stm32f3
+            target: thumbv7em-none-eabihf
+            features: usb-midi
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Fetch the steno dictionary
+        if: contains(matrix.features, 'steno-dictionary')
+        run: git submodule update --init --depth 1 .vendor/plover-lapwing-aio
+      - name: Build Voyager without MIDI
+        if: matrix.crate == 'tecla-stm32f3'
+        run: cargo build --locked --release -p tecla-stm32f3 --lib --examples --target thumbv7em-none-eabihf
+      - name: Build firmware
+        run: |
+          cargo build --locked --release -p ${{ matrix.crate }} --lib --examples \
+            --target ${{ matrix.target }} \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+      - name: Clippy
+        run: |
+          cargo clippy --locked -p ${{ matrix.crate }} --lib --examples \
+            --target ${{ matrix.target }} \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+
+  ble:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    env:
+      LIBCLANG_PATH: /usr/lib/llvm-14/lib
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Install bindgen support
+        run: apt-get install -y --no-install-recommends libclang-14-dev
+      - name: Build BLE firmware
+        run: |
+          cargo build --locked --release -p tecla-nrf52840 --lib --example planck_ble \
+            --no-default-features --features ble --target thumbv7em-none-eabihf
+      - name: Clippy
+        run: |
+          cargo clippy --locked -p tecla-nrf52840 --lib --example planck_ble \
+            --no-default-features --features ble --target thumbv7em-none-eabihf
+
+  coverage:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Install coverage tools
+        run: cargo install --locked just cargo-llvm-cov
+      - name: Core coverage gate
+        run: just cov-core
+      - name: Workspace coverage gate
+        run: just cov-all

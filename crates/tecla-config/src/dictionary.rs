@@ -99,7 +99,6 @@ fn parse_line(line: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 #[expect(clippy::as_conversions, reason = "test code")]
 #[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
@@ -134,14 +133,16 @@ mod tests {
             (String::from("hello"), 5),
         ];
         let trie = crate::trie::compile_trie(&words);
-        assert!(!trie.is_empty());
-        assert_eq!(trie[0], 2, "root should have 2 children (h, t)");
+        // Bytes 0..4 are the little-endian offset of the root node; the byte
+        // at that offset is the root's child count.
+        let root = u32::from_le_bytes([trie[0], trie[1], trie[2], trie[3]]) as usize;
+        assert_eq!(trie[root], 2, "root should have 2 children (h, t)");
     }
 
     #[test]
     fn compiled_trie_lookups_match() {
         fn walk(trie: &[u8], keycodes: &[u8]) -> bool {
-            let mut pos = 0;
+            let mut pos = u32::from_le_bytes([trie[0], trie[1], trie[2], trie[3]]) as usize;
             for &kc in keycodes {
                 let cc = usize::from(*trie.get(pos).unwrap_or(&0));
                 let mut found = false;
@@ -183,7 +184,7 @@ mod tests {
             (String::from("ccc"), 0),
         ];
         assign_frequencies(&mut words);
-        assert_eq!(words.first().unwrap().1, 0);
-        assert!(words.last().unwrap().1 > 0);
+        let freqs: Vec<u8> = words.iter().map(|w| w.1).collect();
+        assert_eq!(freqs, [0, 85, 170]);
     }
 }

@@ -187,7 +187,7 @@ mod tests {
         t.record_hit();
         t.record_undo();
         let snap = t.snapshot();
-        assert!(snap.retry_rate > 0);
+        assert_eq!(snap.retry_rate, 255);
         assert_eq!(snap.undos, 1);
     }
 

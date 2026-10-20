@@ -262,7 +262,6 @@ mod tests {
         engine.process_keycode(KeyCode::T);
         engine.process_keycode(KeyCode::H);
         let s = engine.suggestion();
-        assert!(s.is_some());
         assert_eq!(s.unwrap(), &[0x08]);
     }
 
@@ -274,7 +273,6 @@ mod tests {
         engine.process_keycode(KeyCode::H);
         engine.process_keycode(KeyCode::E);
         let s = engine.suggestion();
-        assert!(s.is_some());
         assert_eq!(s.unwrap(), &[0x0C, 0x15]);
     }
 
@@ -285,7 +283,6 @@ mod tests {
         engine.process_keycode(KeyCode::T);
         engine.process_keycode(KeyCode::H);
         let result = engine.accept();
-        assert!(result.is_some());
         assert_eq!(result.unwrap().as_slice(), &[0x08]);
     }
 
@@ -384,7 +381,6 @@ mod tests {
         engine.process_keycode(KeyCode::H);
         let _ = engine.accept();
         let s = engine.suggestion();
-        assert!(s.is_some());
         assert_eq!(s.unwrap(), &[0x0C, 0x15]);
     }
 
@@ -405,7 +401,6 @@ mod tests {
         engine.process_keycode(KeyCode::H);
         engine.process_keycode(KeyCode::E);
         let s = engine.suggestion();
-        assert!(s.is_some());
         assert_eq!(s.unwrap(), &[0x0C, 0x15]);
     }
 
@@ -415,7 +410,6 @@ mod tests {
         let mut engine = AutocompleteEngine::new(dict);
         engine.process_keycode(KeyCode::H);
         let s = engine.suggestion();
-        assert!(s.is_some());
         assert_eq!(s.unwrap(), &[0x08, 0x0F, 0x0F, 0x12]);
     }
 

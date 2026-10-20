@@ -1,7 +1,7 @@
 //! ZMK shield directory parser.
 //!
 //! Reads a shield directory (`.dtsi`, `.overlay`, `.keymap`, `.zmk.yml`) and
-//! assembles a [`BoardConfig`](crate::board::BoardConfig) from the parsed data.
+//! assembles a [`crate::board::BoardConfig`] from the parsed data.
 
 use crate::board::{BoardConfig, DiodeDirection, EncoderPins, Layout, LayoutKey};
 use crate::zmk::dts::{self, DtsValue};
@@ -52,7 +52,7 @@ pub struct ShieldMetadata {
 
 /// Parse a `.zmk.yml` metadata file.
 pub fn parse_metadata(yaml: &str) -> Result<ShieldMetadata, String> {
-    serde_yml::from_str(yaml).map_err(|e| e.to_string())
+    noyalib::compat::serde_yaml::from_str(yaml).map_err(|e| e.to_string())
 }
 
 /// Errors from parsing a ZMK shield directory.
@@ -417,6 +417,23 @@ siblings:
     }
 
     #[test]
+    fn metadata_preserves_yaml_strings_and_aliases() {
+        let meta = parse_metadata(
+            "name: NO\nrequires: &connectors [pro_micro]\nexposes: *connectors\nfeatures: [keys]\n",
+        )
+        .unwrap();
+        assert_eq!(meta.name.as_deref(), Some("NO"));
+        assert_eq!(meta.requires, vec!["pro_micro"]);
+        assert_eq!(meta.exposes, meta.requires);
+    }
+
+    #[test]
+    fn metadata_rejects_malformed_yaml_and_invalid_field_types() {
+        assert!(parse_metadata("features: [keys").is_err());
+        assert!(parse_metadata("features: keys").is_err());
+    }
+
+    #[test]
     fn parse_real_corne_shield() {
         let shield_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../keyboards/zmk_shields/corne");
@@ -428,9 +445,13 @@ siblings:
         assert_eq!(config.name.as_deref(), Some("Corne"));
         assert_eq!(config.matrix_size, (4, 12));
         assert_eq!(config.diode_direction, DiodeDirection::Col2Row);
-        assert!(!config.row_pins.is_empty());
-        assert!(!config.col_pins.is_empty());
-        assert!(!config.layouts.is_empty());
+        assert_eq!(config.row_pins.len(), 4);
+        assert_eq!(
+            config.col_pins.first().map(String::as_str),
+            Some("&pro_micro 21")
+        );
+        assert_eq!(config.col_pins.len(), 6);
+        assert_eq!(config.layouts["LAYOUT_corne"].keys.len(), 42);
     }
 
     #[test]

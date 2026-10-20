@@ -584,7 +584,10 @@ mod tests {
         };
         let rec: Option<TapHoldRecognizer<32>> =
             TapHoldRecognizer::from_action(CFG, action, press(pos(0, 0), 0));
-        assert!(rec.is_some());
+        assert_eq!(
+            rec.unwrap().observe(release(pos(0, 0), 10), 10),
+            Recognition::Matched(TapHoldDecision::Tap(KeyCode::A))
+        );
     }
 
     #[test]
@@ -595,7 +598,10 @@ mod tests {
         };
         let rec: Option<TapHoldRecognizer<32>> =
             TapHoldRecognizer::from_action(CFG, action, press(pos(0, 0), 0));
-        assert!(rec.is_some());
+        assert_eq!(
+            rec.unwrap().tick(TERM),
+            Recognition::Matched(TapHoldDecision::HoldLayer(2))
+        );
     }
 
     #[test]

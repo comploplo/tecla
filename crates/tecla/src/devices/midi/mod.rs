@@ -7,8 +7,13 @@
 //!
 //! See also: [`action::MidiAction`](crate::action::MidiAction) for the
 //! keymap-level MIDI action type.
+//! [`PadMidiOutput`] supplies stop/reconnect cleanup for a fixed pad note map.
 
 use crate::pipeline::report::MidiEvent;
+
+pub mod output;
+mod pad_output;
+pub use pad_output::{PadMidiConfigError, PadMidiOutput};
 
 /// Creates a MIDI note-on event.
 #[must_use]

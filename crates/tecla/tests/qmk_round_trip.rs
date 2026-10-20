@@ -194,7 +194,8 @@ fn planck_qmk_to_processor_round_trip() {
     let mut proc =
         KeyboardProcessor::<ROWS, COLS, MAX_LAYERS, MAX_KEYS>::new(stack, TapHoldConfig::default());
 
-    let mut press_results: std::vec::Vec<(KeyPos, std::vec::Vec<HidReport>)> = std::vec::Vec::new();
+    let mut press_results: std::vec::Vec<(KeyPos, Action<()>, std::vec::Vec<HidReport>)> =
+        std::vec::Vec::new();
     let mut time = 100u64;
 
     let base_layer = layers.first().expect("no layers parsed");
@@ -219,7 +220,7 @@ fn planck_qmk_to_processor_round_trip() {
         time += 10;
 
         if !reports.is_empty() {
-            press_results.push((pos, reports));
+            press_results.push((pos, action, reports));
         }
     }
 
@@ -229,18 +230,36 @@ fn planck_qmk_to_processor_round_trip() {
         "expected at least 20 keys to produce HID reports on the Planck base layer, got {keys_with_output}"
     );
 
-    for (pos, reports) in &press_results {
+    // The round trip only means something if the emitted HID matches the
+    // keycode the QMK source actually named — a constant-returning keymap
+    // satisfies "non-empty report" just as well.
+    for (pos, action, reports) in &press_results {
+        let expected = match action {
+            Action::Key(kc) => Some(*kc),
+            _ => None,
+        };
         for report in reports {
             match report {
                 HidReport::Keyboard(kr) => {
-                    let has_keycode = kr.keycodes.iter().any(|&k| k != 0);
-                    let has_modifier = kr.modifiers != 0;
-                    assert!(
-                        has_keycode || has_modifier,
-                        "key at ({},{}) produced an empty keyboard report",
-                        pos.row,
-                        pos.col,
-                    );
+                    if let Some(kc) = expected {
+                        assert!(
+                            kr.keycodes.contains(&kc.usage_id()),
+                            "key at ({},{}) resolved to {kc:?} (usage {}), but the report carried {:?}",
+                            pos.row,
+                            pos.col,
+                            kc.usage_id(),
+                            kr.keycodes,
+                        );
+                    } else {
+                        let has_keycode = kr.keycodes.iter().any(|&k| k != 0);
+                        let has_modifier = kr.modifiers != 0;
+                        assert!(
+                            has_keycode || has_modifier,
+                            "key at ({},{}) produced an empty keyboard report",
+                            pos.row,
+                            pos.col,
+                        );
+                    }
                 }
                 HidReport::Consumer(_) | HidReport::NkroKeyboard(_) | HidReport::Mouse(_) => {}
                 _ => {}

@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# rust-toolchain.toml pins the compiler, components, and targets; each job's
+# `rustup toolchain install` reads it, so CI and local builds match.
+env:
+  CARGO_TERM_COLOR: always
+  # Not RUSTFLAGS=-D warnings: that would also deny warnings in third-party
+  # dependencies. The workspace already sets `warnings = "deny"` in
+  # [workspace.lints.rust], which is scoped to our own crates.
+
+jobs:
+  # Format and clippy are cheap and fail fast, so they run without the
+  # submodules (which are ~1GB of QMK/ZMK fixtures).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: |
+          cargo clippy --workspace \
+            --exclude tecla-rp2040 --exclude tecla-nrf52840 \
+            --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete \
+            --all-targets
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # The QMK/ZMK/Lapwing fixtures are what the tecla-config compatibility
+      # tests parse; without them those tests have nothing to check.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # Not --all-features: tecla's `usb` feature pulls embassy-usb -> ssmarshal,
+      # which cannot compile alongside `std`. The board job below covers it.
+      - run: |
+          cargo test --workspace \
+            --exclude tecla-rp2040 --exclude tecla-nrf52840 \
+            --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete
+
+  # rustdoc with -D warnings — this is what catches intra-doc links that
+  # describe a module layout the code has moved on from.
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace \
+            --exclude tecla-rp2040 --exclude tecla-nrf52840 \
+            --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete
+
+  # Board crates are excluded from every host job above, so nothing else in
+  # CI ever compiles them. Without this job they rot against dependency
+  # updates and nobody notices until a flash fails.
+  boards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: tecla-rp2040
+            target: thumbv6m-none-eabi
+            features: hil,steno-dictionary,usb-midi
+          - crate: tecla-nrf52840
+            target: thumbv7em-none-eabihf
+            features: hil
+          - crate: tecla-stm32f4
+            target: thumbv7em-none-eabihf
+            features: ""
+          - crate: tecla-stm32f3
+            target: thumbv7em-none-eabihf
+            features: usb-midi
+    steps:
+      - uses: actions/checkout@v4
+      # steno-dictionary compiles the Lapwing dictionary into the steno board
+      # examples; fetch just that submodule, not the ~1GB QMK/ZMK fixtures.
+      - if: contains(matrix.features, 'steno-dictionary')
+        run: git submodule update --init --depth 1 .vendor/plover-lapwing-aio
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Voyager without MIDI
+        if: matrix.crate == 'tecla-stm32f3'
+        run: |
+          cargo build --release -p tecla-stm32f3 --lib --examples \
+            --target thumbv7em-none-eabihf
+      # --release because that is what gets flashed, and because the debug
+      # build of the STM32F3 firmware does not fit in its 256KB of flash.
+      - name: Build
+        run: |
+          cargo build --release -p ${{ matrix.crate }} --lib --examples \
+            --target ${{ matrix.target }} \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+      - name: Clippy
+        run: |
+          cargo clippy -p ${{ matrix.crate }} --lib --examples \
+            --target ${{ matrix.target }} \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+
+  # BLE is a separate job: it needs libclang for bindgen (nrf-sdc-sys /
+  # nrf-mpsl-sys) and must build with --no-default-features, because nrf-mpsl
+  # provides the critical-section implementation that cortex-m otherwise would.
+  # Nothing else in CI compiles this feature, and it had rotted unnoticed.
+  ble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libclang for bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Build
+        run: |
+          cargo build --release -p tecla-nrf52840 --lib --example planck_ble \
+            --no-default-features --features ble --target thumbv7em-none-eabihf
+      - name: Clippy
+        run: |
+          cargo clippy -p tecla-nrf52840 --lib --example planck_ble \
+            --no-default-features --features ble --target thumbv7em-none-eabihf
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Core coverage gate
+        run: cargo llvm-cov -p tecla --features testing --fail-under-lines 95
+      - name: Workspace coverage gate
+        run: |
+          cargo llvm-cov --workspace \
+            --exclude tecla-rp2040 --exclude tecla-nrf52840 \
+            --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --features tecla/testing \
+            --ignore-filename-regex 'src/bin/' \
+            --fail-under-lines 90

@@ -7,6 +7,7 @@
 
 use embassy_rp::gpio::{Drive, Flex, Input, Output, Pull};
 use embassy_time::Timer;
+use tecla::matrix::capacitive::CapacitiveFilter;
 use tecla::matrix::{AsyncMatrixScanner, MatrixState};
 
 /// Direct-pin scanner for keyboards where each key has its own GPIO pin.
@@ -60,19 +61,18 @@ impl<'d, const KEYS: usize> AsyncMatrixScanner<1, KEYS> for DirectPinScanner<'d,
 ///
 /// Measures discharge time per pin: charge all pins high, switch each to
 /// input sequentially, count cycles until low. A finger adds capacitance,
-/// increasing the count. Calibrates at boot (4 rounds, threshold = 1.3x
-/// baseline). Maps keys into a `1 × KEYS` matrix (single row).
+/// increasing the count. Calibrates at boot (4 untouched rounds), then uses
+/// per-pad hysteresis, two-scan edge confirmation and guarded idle drift
+/// tracking. Maps keys into a `1 × KEYS` matrix (single row).
 pub struct CapTouchScanner<'d, const KEYS: usize> {
     pins: [Flex<'d>; KEYS],
-    thresholds: [u32; KEYS],
+    filter: CapacitiveFilter<KEYS>,
 }
 
 impl<'d, const KEYS: usize> CapTouchScanner<'d, KEYS> {
     const CHARGE_CYCLES: u32 = 1250;
     const MAX_DISCHARGE_COUNT: u32 = 100_000;
     const CALIBRATION_ROUNDS: usize = 4;
-    const THRESHOLD_NUMERATOR: u32 = 333;
-    const THRESHOLD_SHIFT: u32 = 10;
 
     /// Creates a new scanner, calibrating touch thresholds at boot.
     pub fn new(mut pins: [Flex<'d>; KEYS]) -> Self {
@@ -82,23 +82,28 @@ impl<'d, const KEYS: usize> CapTouchScanner<'d, KEYS> {
         }
         let mut scanner = Self {
             pins,
-            thresholds: [0; KEYS],
+            filter: CapacitiveFilter::new([0; KEYS], [0; KEYS]),
         };
         scanner.calibrate();
         scanner
     }
 
     fn calibrate(&mut self) {
-        let mut accum = [0u32; KEYS];
+        let mut accum = [0u64; KEYS];
+        let mut minimum = [u32::MAX; KEYS];
+        let mut maximum = [0u32; KEYS];
         for _ in 0..Self::CALIBRATION_ROUNDS {
             let counts = self.read_counts();
-            for (a, c) in accum.iter_mut().zip(counts.iter()) {
-                *a += c;
+            for (index, &count) in counts.iter().enumerate() {
+                accum[index] += u64::from(count);
+                minimum[index] = minimum[index].min(count);
+                maximum[index] = maximum[index].max(count);
             }
         }
-        for (th, sum) in self.thresholds.iter_mut().zip(accum.iter()) {
-            *th = (*sum * Self::THRESHOLD_NUMERATOR) >> Self::THRESHOLD_SHIFT;
-        }
+        let baselines =
+            core::array::from_fn(|index| (accum[index] / Self::CALIBRATION_ROUNDS as u64) as u32);
+        let noise = core::array::from_fn(|index| maximum[index].saturating_sub(minimum[index]));
+        self.filter = CapacitiveFilter::new(baselines, noise);
     }
 
     fn charge_all(&mut self) {
@@ -135,8 +140,8 @@ impl<'d, const KEYS: usize> AsyncMatrixScanner<1, KEYS> for CapTouchScanner<'d, 
     async fn scan(&mut self) -> Result<MatrixState<1, KEYS>, Self::Error> {
         let counts = self.read_counts();
         let mut state = MatrixState::new();
-        for (i, (count, threshold)) in counts.iter().zip(self.thresholds.iter()).enumerate() {
-            state.set(0, i, *count > *threshold);
+        for (i, pressed) in self.filter.update(&counts).into_iter().enumerate() {
+            state.set(0, i, pressed);
         }
         Ok(state)
     }

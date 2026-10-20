@@ -22,16 +22,16 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_usb::class::hid::{HidWriter, State};
 use embassy_usb::{Builder, Config};
 use esp_backtrace as _;
-use esp_hal::gpio::{Input, Level, Output, Pull};
-use esp_hal::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::usb::otg::{embassy_usb_device, Usb};
 use esp_println as _;
 use static_cell::StaticCell;
-use tecla::debounce::AsymEagerDefer;
-use tecla::keyboard::KeyboardProcessor;
-use tecla::task::{EventChannel, ReportChannel};
 use tecla::devices::keyboard::tapping::TapHoldConfig;
-use tecla_macros::{keyboard_main, keymap};
+use tecla::keyboard::KeyboardProcessor;
+use tecla::matrix::debounce::AsymEagerDefer;
+use tecla::task::{EventChannel, ReportChannel};
 use tecla_esp32s3::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_macros::keymap;
 
 const ROWS: usize = 4;
 const COLS: usize = 12;
@@ -44,16 +44,21 @@ static USB_DEVICE_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONFIG_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_BOS_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+static USB_EP_OUT_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timer0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
-    esp_hal_embassy::init(timer0.timer0);
+    esp_rtos::start(timer0.timer0, peripherals.FROM_CPU_INTR0);
 
-    let usb = esp_hal::otg_fs::Usb::new(peripherals.USB0, peripherals.GPIO19, peripherals.GPIO20);
-    let driver = esp_hal::otg_fs::UsbBus::new(usb);
+    let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
+    let driver = embassy_usb_device::Driver::new(
+        usb,
+        USB_EP_OUT_BUF.init([0; 64]),
+        embassy_usb_device::Config::default(),
+    );
 
     let mut config = Config::new(0x6666, 0x0001);
     config.manufacturer = Some("Tecla");
@@ -76,6 +81,8 @@ async fn main(spawner: Spawner) {
         request_handler: None,
         poll_ms: 1,
         max_packet_size: 8,
+        hid_subclass: embassy_usb::class::hid::HidSubclass::Boot,
+        hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::Keyboard,
     };
     let hid_writer: HidWriter<'_, _, 8> =
         HidWriter::new(&mut builder, HID_STATE.init(State::new()), hid_config);
@@ -83,24 +90,60 @@ async fn main(spawner: Spawner) {
     let usb_device = builder.build();
 
     let rows: [Output<'_>; ROWS] = [
-        Output::new(peripherals.GPIO0, Level::High),
-        Output::new(peripherals.GPIO1, Level::High),
-        Output::new(peripherals.GPIO2, Level::High),
-        Output::new(peripherals.GPIO3, Level::High),
+        Output::new(peripherals.GPIO0, Level::High, OutputConfig::default()),
+        Output::new(peripherals.GPIO1, Level::High, OutputConfig::default()),
+        Output::new(peripherals.GPIO2, Level::High, OutputConfig::default()),
+        Output::new(peripherals.GPIO3, Level::High, OutputConfig::default()),
     ];
     let cols: [Input<'_>; COLS] = [
-        Input::new(peripherals.GPIO4, Pull::Up),
-        Input::new(peripherals.GPIO5, Pull::Up),
-        Input::new(peripherals.GPIO6, Pull::Up),
-        Input::new(peripherals.GPIO7, Pull::Up),
-        Input::new(peripherals.GPIO8, Pull::Up),
-        Input::new(peripherals.GPIO9, Pull::Up),
-        Input::new(peripherals.GPIO10, Pull::Up),
-        Input::new(peripherals.GPIO11, Pull::Up),
-        Input::new(peripherals.GPIO12, Pull::Up),
-        Input::new(peripherals.GPIO13, Pull::Up),
-        Input::new(peripherals.GPIO14, Pull::Up),
-        Input::new(peripherals.GPIO15, Pull::Up),
+        Input::new(
+            peripherals.GPIO4,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO5,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO6,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO7,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO8,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO9,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO10,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO11,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO12,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO13,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO14,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
+        Input::new(
+            peripherals.GPIO15,
+            InputConfig::default().with_pull(Pull::Up),
+        ),
     ];
 
     let scanner = GpioMatrixScanner::new(rows, cols);
@@ -127,19 +170,15 @@ async fn main(spawner: Spawner) {
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());
 
-    spawner.spawn(usb_device_task(usb_device)).unwrap();
-    spawner
-        .spawn(matrix_task(scanner, debouncer, event_ch))
-        .unwrap();
-    spawner
-        .spawn(keyboard_task(event_ch, processor, report_ch))
-        .unwrap();
+    spawner.spawn(usb_device_task(usb_device).unwrap());
+    spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
+    spawner.spawn(keyboard_task(event_ch, processor, report_ch).unwrap());
     tecla::task::usb_task(report_ch.receiver(), reporter).await;
 }
 
 #[embassy_executor::task]
 async fn usb_device_task(
-    mut device: embassy_usb::UsbDevice<'static, impl embassy_usb::driver::Driver<'static>>,
+    mut device: embassy_usb::UsbDevice<'static, embassy_usb_device::Driver<'static>>,
 ) -> ! {
     device.run().await
 }

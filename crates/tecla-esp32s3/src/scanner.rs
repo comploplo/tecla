@@ -55,16 +55,16 @@ impl<'d, const KEYS: usize> AsyncMatrixScanner<1, KEYS> for DirectPinScanner<'d,
 /// # Usage
 ///
 /// ```rust,ignore
-/// use esp_hal::gpio::{Input, Level, Output, Pull};
+/// use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 /// use tecla_esp32s3::scanner::GpioMatrixScanner;
 ///
 /// let rows = [
-///     Output::new(peripherals.GPIO0, Level::High),
-///     Output::new(peripherals.GPIO1, Level::High),
+///     Output::new(peripherals.GPIO0, Level::High, OutputConfig::default()),
+///     Output::new(peripherals.GPIO1, Level::High, OutputConfig::default()),
 /// ];
 /// let cols = [
-///     Input::new(peripherals.GPIO4, Pull::Up),
-///     Input::new(peripherals.GPIO5, Pull::Up),
+///     Input::new(peripherals.GPIO4, InputConfig::default().with_pull(Pull::Up)),
+///     Input::new(peripherals.GPIO5, InputConfig::default().with_pull(Pull::Up)),
 /// ];
 /// let scanner = GpioMatrixScanner::new(rows, cols);
 /// ```

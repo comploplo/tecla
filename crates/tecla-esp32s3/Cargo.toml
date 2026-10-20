@@ -1,26 +1,38 @@
+# This crate stays outside the workspace until its Xtensa build is validated.
+# Its dependencies are explicit because it cannot inherit workspace values.
+[workspace]
+
 [package]
 name = "tecla-esp32s3"
 version = "0.1.0"
 edition = "2021"
 description = "Tecla keyboard firmware board support for ESP32-S3"
-authors.workspace = true
-license.workspace = true
+authors = ["Gabe Oppenheimer"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/comploplo/tecla"
+publish = false
 
-[lints]
-workspace = true
+[lints.rust]
+warnings = "deny"
+unsafe_code = "deny"
+missing_docs = "deny"
 
 [dependencies]
-tecla        = { version = "0.1.0", path = "../tecla", features = ["embassy"] }
+tecla        = { version = "0.1.0", path = "../tecla", features = ["embassy", "usb"] }
 tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 
-embassy-usb      = { workspace = true }
-embassy-time     = { workspace = true }
-embassy-sync     = { workspace = true }
+embassy-usb      = "0.6"
+embassy-time     = "0.5"
+embassy-sync     = "0.8"
 
-esp-hal          = { workspace = true, features = ["unstable"] }
-esp-println      = { workspace = true }
-esp-backtrace    = { workspace = true }
+esp-hal          = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-println      = { version = "0.18", features = ["esp32s3", "defmt-espflash"] }
+esp-backtrace    = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
 
-static_cell     = { workspace = true }
-heapless        = { workspace = true }
+static_cell     = "2"
+heapless        = "0.9"
 portable-atomic = { version = "1", features = ["critical-section"] }
+
+[dev-dependencies]
+embassy-executor = "0.10"
+esp-rtos = { version = "0.4", features = ["esp32s3", "embassy"] }

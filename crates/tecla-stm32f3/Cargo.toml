@@ -5,6 +5,7 @@ edition = "2021"
 description = "Tecla keyboard firmware board support for STM32F3 (ZSA Voyager)"
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -13,8 +14,11 @@ documentation = "https://docs.rs/tecla-stm32f3"
 [lints]
 workspace = true
 
+[features]
+usb-midi = ["tecla/usb-midi"]
+
 [dependencies]
-tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy"] }
+tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "usb", "via"] }
 tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 embedded-hal = { workspace = true }
 embedded-hal-async = { workspace = true }
@@ -26,6 +30,7 @@ embassy-executor = { workspace = true, features = ["platform-cortex-m", "executo
 # this crate alone:
 #   cargo build -p tecla-stm32f3 --example voyager --target thumbv7em-none-eabihf
 embassy-stm32 = { version = "0.6", features = ["stm32f303cc", "time-driver-any", "exti", "unstable-pac"] }
+embassy-futures  = { version = "0.1" }
 embassy-usb      = { workspace = true }
 embassy-time     = { workspace = true }
 embassy-sync     = { workspace = true }
@@ -47,3 +52,29 @@ name = "voyager_usbtest"
 
 [[example]]
 name = "voyager_matrix_test"
+
+[[example]]
+name = "voyager_i2c_scan"
+
+[[example]]
+name = "voyager_trackball"
+
+[[example]]
+name = "voyager_tonnetz"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "voyager_tonnetz_parallel"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "voyager_four_finger"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "voyager_accordion"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "voyager_harmony"
+required-features = ["usb-midi"]

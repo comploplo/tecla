@@ -38,5 +38,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 fn main() -> ! {
     hprintln!("MINIMAL OK");
     debug::exit(EXIT_SUCCESS);
-    loop {}
+    loop {
+        cortex_m::asm::wfi();
+    }
 }

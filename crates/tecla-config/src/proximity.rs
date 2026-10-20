@@ -2,7 +2,7 @@
 //!
 //! [`generate_proximity_table`] computes a 26x26 Euclidean distance matrix
 //! for letter keys (A-Z) based on their physical `(x, y)` coordinates in a
-//! [`Layout`](crate::board::Layout). The resulting table can be fed to the
+//! [`crate::board::Layout`]. The resulting table can be fed to the
 //! autocorrect engine so that nearby-key typos score lower cost than
 //! distant-key typos.
 //!

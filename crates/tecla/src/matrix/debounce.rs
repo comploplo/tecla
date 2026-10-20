@@ -184,7 +184,6 @@ mod tests {
         let raw = pressed::<4, 12>(0, 0);
         d.process(&raw, 0);
         let result = d.process(&raw, 5);
-        assert!(result.is_some());
         assert_eq!(result.unwrap().get(0, 0), Some(true));
     }
 
@@ -199,8 +198,9 @@ mod tests {
         // At t=6, only 3ms have passed since the second change — not yet stable
         assert!(d.process(&second, 6).is_none());
         // At t=8, 5ms have passed since second change — now stable
-        let result = d.process(&second, 8);
-        assert!(result.is_some());
+        let result = d.process(&second, 8).unwrap();
+        assert_eq!(result.get(0, 0), Some(false));
+        assert_eq!(result.get(0, 1), Some(true));
     }
 
     #[test]
@@ -227,7 +227,6 @@ mod tests {
         // Now release
         d.process(&released_state, 10);
         let result = d.process(&released_state, 15);
-        assert!(result.is_some());
         assert_eq!(result.unwrap().get(0, 0), Some(false));
     }
 
@@ -238,7 +237,6 @@ mod tests {
         let mut d = AsymEagerDefer::<4, 12>::new(5);
         let raw = pressed::<4, 12>(0, 0);
         let result = d.process(&raw, 0);
-        assert!(result.is_some());
         assert_eq!(result.unwrap().get(0, 0), Some(true));
     }
 
@@ -260,7 +258,6 @@ mod tests {
         d.process(&release, 1); // start release timer
         d.process(&release, 4); // not yet
         let result = d.process(&release, 6); // 5ms elapsed
-        assert!(result.is_some());
         assert_eq!(result.unwrap().get(0, 0), Some(false));
     }
 
@@ -279,9 +276,9 @@ mod tests {
         // Timer starts fresh; should not fire at t=7 (only 3ms since t=4)
         assert!(d.process(&release, 7).is_none());
         // Should fire at t=9 (5ms since t=4)
-        assert!(d.process(&release, 9).is_some());
+        assert_eq!(d.process(&release, 9).unwrap().get(0, 0), Some(false));
         // And no spurious events from the bounce
-        let _ = result;
+        assert!(result.is_none());
     }
 
     #[test]

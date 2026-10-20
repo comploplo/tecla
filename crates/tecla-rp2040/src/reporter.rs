@@ -1,63 +1,37 @@
-//! USB HID reporter for RP2040.
+//! USB HID reporters for RP2040.
 //!
-//! [`UsbHidReporter`] implements [`AsyncReporter`] using an
-//! `embassy_usb::class::hid::HidWriter`. It serialises tecla's
-//! [`HidReport::Keyboard`] variant to the 8-byte boot-protocol keyboard
-//! report and writes it to the USB HID endpoint.
+//! The reporter implementation itself lives in tecla core as
+//! [`CompositeUsbReporter`](tecla::transport::usb::CompositeUsbReporter) —
+//! routing a [`HidReport`](tecla::pipeline::report::HidReport) to the right USB
+//! interface is board-independent, and five copies of it drifted apart.
+//! This module re-exports it plus the descriptors each interface needs.
 //!
-//! [`HidReport::Consumer`] and [`HidReport::NkroKeyboard`] are silently
-//! accepted and discarded — consumer and NKRO support will be added in a
-//! later phase.
+//! # Usage
+//!
+//! Build one `HidWriter` per interface you want, using the matching descriptor,
+//! then register them:
+//!
+//! ```text
+//! let reporter = CompositeUsbReporter::new(keyboard_writer)
+//!     .with_consumer(consumer_writer)
+//!     .with_mouse(mouse_writer);
+//! ```
+//!
+//! A report whose interface was not registered returns
+//! [`ReportError::Unsupported`](tecla::pipeline::hid::ReportError::Unsupported)
+//! rather than being silently discarded.
 
-use embassy_usb::class::hid::HidWriter;
-use embassy_usb::driver::Driver;
-use tecla::pipeline::hid::{AsyncReporter, ReportError};
-use tecla::pipeline::report::HidReport;
+pub use tecla::pipeline::hid::Capabilities;
+pub use tecla::pipeline::report::{
+    CONSUMER_REPORT_DESCRIPTOR, CONSUMER_REPORT_SIZE, GAMEPAD_REPORT_DESCRIPTOR,
+    GAMEPAD_REPORT_SIZE, KEYBOARD_REPORT_DESCRIPTOR, KEYBOARD_REPORT_SIZE, MOUSE_REPORT_DESCRIPTOR,
+    MOUSE_REPORT_SIZE, NKRO_REPORT_DESCRIPTOR, NKRO_REPORT_SIZE,
+};
+pub use tecla::transport::usb::CompositeUsbReporter;
 
-/// USB HID reporter backed by an embassy-usb [`HidWriter`].
+/// Keyboard-only USB HID reporter.
 ///
-/// The const generic `N` is the HID endpoint packet size; use `8` for the
-/// standard 6KRO boot-protocol keyboard report.
-///
-/// # Usage
-///
-/// ```rust,ignore
-/// use embassy_usb::class::hid::HidWriter;
-/// use tecla_rp2040::reporter::UsbHidReporter;
-///
-/// // After building the USB device and obtaining a HidWriter<'_, D, 8>:
-/// let reporter = UsbHidReporter::new(hid_writer);
-/// ```
-pub struct UsbHidReporter<'d, D: Driver<'d>, const N: usize> {
-    writer: HidWriter<'d, D, N>,
-}
-
-impl<'d, D: Driver<'d>, const N: usize> UsbHidReporter<'d, D, N> {
-    /// Wraps a pre-built [`HidWriter`] as an [`AsyncReporter`].
-    #[must_use]
-    pub fn new(writer: HidWriter<'d, D, N>) -> Self {
-        Self { writer }
-    }
-}
-
-impl<'d, D: Driver<'d>> AsyncReporter for UsbHidReporter<'d, D, 8> {
-    async fn send(&mut self, report: &HidReport) -> Result<(), ReportError> {
-        let HidReport::Keyboard(kr) = report else {
-            return Ok(());
-        };
-        let bytes: [u8; 8] = [
-            kr.modifiers,
-            kr.reserved,
-            kr.keycodes[0],
-            kr.keycodes[1],
-            kr.keycodes[2],
-            kr.keycodes[3],
-            kr.keycodes[4],
-            kr.keycodes[5],
-        ];
-        self.writer
-            .write(&bytes)
-            .await
-            .map_err(|_e| ReportError::NotConnected)
-    }
-}
+/// Kept as an alias so existing board examples and downstream code keep
+/// building; it is a [`CompositeUsbReporter`] with no optional interfaces
+/// registered. Prefer naming `CompositeUsbReporter` directly in new code.
+pub type UsbHidReporter<'d, D> = CompositeUsbReporter<'d, D>;

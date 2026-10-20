@@ -1,13 +1,10 @@
-//! Stenography chord recognition and translation.
-//!
-//! [`StenoRecognizer`] accumulates a chord (set of simultaneously held keys)
-//! until all keys are released.
+//! Stenography chord translation.
 //!
 //! [`StenoEngine`] performs on-device translation of steno chords into a
 //! compact native playback bytecode using a pre-compiled DAFSA dictionary.
+//! Chords are accumulated by the processor's inline chord state machine and
+//! handed here as [`StenoChord`] values.
 
-use crate::pipeline::event::KeyEvent;
-use crate::pipeline::recognizer::{Recognition, Recognizer};
 use heapless::Vec;
 
 /// Playback opcode: literal text segment.
@@ -77,79 +74,6 @@ pub enum StenoProtocol {
 pub struct StenoChord {
     /// Bitmask of all key positions that were part of this chord.
     pub keys: u64,
-}
-
-// ── StenoRecognizer ───────────────────────────────────────────────────────────
-
-/// Accumulates a steno chord until all keys are released.
-pub struct StenoRecognizer {
-    /// Keys currently physically held.
-    held_mask: u64,
-    /// All keys that were pressed as part of this chord.
-    chord_mask: u64,
-    /// True once at least one key has been pressed.
-    started: bool,
-}
-
-impl StenoRecognizer {
-    /// Creates a new steno recognizer.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            held_mask: 0,
-            chord_mask: 0,
-            started: false,
-        }
-    }
-}
-
-impl Default for StenoRecognizer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Recognizer for StenoRecognizer {
-    type Output = StenoChord;
-
-    fn observe(&mut self, event: KeyEvent, _now_ms: u64) -> Recognition<StenoChord> {
-        // Use a flat index mapping or specific bits if provided.
-        // For simplicity we use the flat index capped to 63.
-        let bit = 1u64 << event.pos.flat(64).min(63);
-
-        if event.pressed {
-            self.started = true;
-            self.held_mask |= bit;
-            self.chord_mask |= bit;
-            Recognition::Pending
-        } else {
-            self.held_mask &= !bit;
-            if self.started && self.held_mask == 0 {
-                let chord = StenoChord {
-                    keys: self.chord_mask,
-                };
-                self.chord_mask = 0;
-                self.started = false;
-                Recognition::Matched(chord)
-            } else {
-                Recognition::Pending
-            }
-        }
-    }
-
-    fn tick(&mut self, _now_ms: u64) -> Recognition<StenoChord> {
-        Recognition::Pending
-    }
-
-    fn reset(&mut self) {
-        self.held_mask = 0;
-        self.chord_mask = 0;
-        self.started = false;
-    }
-
-    fn next_deadline_ms(&self) -> Option<u64> {
-        None
-    }
 }
 
 // ── StenoEngine ───────────────────────────────────────────────────────────────
@@ -300,7 +224,6 @@ mod tests {
         let chord = StenoChord { keys: 0x01 };
         let result = engine.process_stroke(chord);
 
-        assert!(result.is_some());
         assert_eq!(result.unwrap(), &[0x01, 0x01, 0x00, b'a']);
     }
 
@@ -317,7 +240,6 @@ mod tests {
 
         // Second stroke
         let result2 = engine.process_stroke(chord);
-        assert!(result2.is_some());
         assert_eq!(result2.unwrap(), &[0x01, 0x02, 0x00, b'a', b'a']);
     }
 

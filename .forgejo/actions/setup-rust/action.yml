@@ -1,0 +1,16 @@
+name: Set up Tecla Rust
+description: Install the pinned Rust toolchain in the Node Bookworm job image.
+runs:
+  using: composite
+  steps:
+    - name: Install build tools and rustup
+      shell: bash
+      run: |
+        apt-get update
+        apt-get install -y --no-install-recommends build-essential ca-certificates curl git pkg-config
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$RUNNER_TEMP/rustup-init.sh"
+        sh "$RUNNER_TEMP/rustup-init.sh" -y --profile minimal --default-toolchain none
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+    - name: Install the repository toolchain
+      shell: bash
+      run: rustup toolchain install

@@ -51,26 +51,30 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
-use embassy_usb::class::hid::{HidWriter, State};
+use embassy_usb::class::hid::{HidReaderWriter, HidWriter, State};
 use embassy_usb::Builder;
 use panic_probe as _;
 use static_cell::StaticCell;
 use tecla::devices::keyboard::combo::ComboConfig;
-use tecla::devices::keyboard::tapping::TapHoldConfig;
+use tecla::devices::keyboard::tapping::{TapHoldConfig, TapHoldMode};
 use tecla::keyboard::KeyboardProcessor;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::matrix::AsyncMatrixScanner;
 use tecla::pipeline::event::KeyEvent;
+use tecla::pipeline::report::{VIA_REPORT_DESCRIPTOR, VIA_REPORT_SIZE};
 use tecla::rgb::{
     Animation, Breathing, Heatmap, LedDriver, RainbowCycle, ReactivePress, RgbCommand,
     RgbController, Ripple, SolidColor, WpmRainbow,
 };
+use tecla::storage::via::ViaProtocol;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, keymap};
 use tecla_stm32f3::bitbang_i2c::BitBangI2c;
 use tecla_stm32f3::bootloader::{enter_ignition_bootloader, idle_ignition_pins};
 use tecla_stm32f3::is31fl3731::{Is31fl3731, ADDR_LEFT, ADDR_RIGHT};
 use tecla_stm32f3::mcp23018::{Mcp23018, DEFAULT_ADDRESS};
+use tecla_stm32f3::navigator::Navigator;
+use tecla_stm32f3::reporter::{MOUSE_REPORT_DESCRIPTOR, MOUSE_REPORT_SIZE};
 use tecla_stm32f3::scanner::{VoyagerScanner, COLS, ROWS};
 use tecla_stm32f3::shared_i2c::SharedI2c;
 use tecla_stm32f3::voyager_leds::{remap_for_rgb, VoyagerLeds, LEDS, LED_POSITIONS};
@@ -127,6 +131,16 @@ static RGB_CMD_CHANNEL: StaticCell<Channel<NoopRawMutex, RgbCommand, 4>> = Stati
 static PROCESSOR: StaticCell<KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>> = StaticCell::new();
 
 static HID_STATE: StaticCell<State> = StaticCell::new();
+static MOUSE_HID_STATE: StaticCell<State> = StaticCell::new();
+static VIA_HID_STATE: StaticCell<State> = StaticCell::new();
+/// Via request/response channels. Depth 1: the protocol is strictly one
+/// command, one reply, so a deeper queue could only hide a host that is not
+/// waiting for its answer.
+static VIA_REQ_CHANNEL: StaticCell<Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>> =
+    StaticCell::new();
+static VIA_RESP_CHANNEL: StaticCell<Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>> =
+    StaticCell::new();
+static VIA_PROTOCOL: StaticCell<ViaProtocol<COLS>> = StaticCell::new();
 static USB_DEVICE_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONFIG_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_BOS_BUF: StaticCell<[u8; 256]> = StaticCell::new();
@@ -200,14 +214,14 @@ async fn main(spawner: Spawner) {
     let i2c: Bus = BitBangI2c::new(Flex::new(p.PB6), Flex::new(p.PB7));
     let bus = I2C_BUS.init(Mutex::new(i2c));
     let mcp = Mcp23018::new(SharedI2c::new(bus), DEFAULT_ADDRESS);
-    let mut leds = VoyagerLeds::new(
+    // Not initialised here: `VoyagerLeds::write` brings the chips up on its
+    // first frame and again after any failure, so an offline LED bus never
+    // blocks the rest of the keyboard and a half that is unplugged and
+    // reconnected lights up again on its own.
+    let leds = VoyagerLeds::new(
         Is31fl3731::new(SharedI2c::new(bus), ADDR_LEFT),
         Is31fl3731::new(SharedI2c::new(bus), ADDR_RIGHT),
     );
-    // Best-effort: an offline/unpopulated LED bus shouldn't block the rest of
-    // the keyboard from working, mirroring the expander's own lazy-init
-    // tolerance in `VoyagerScanner`.
-    let _ = leds.init().await;
 
     let driver = Driver::new(p.USB, Irqs, p.PA12, p.PA11);
 
@@ -237,6 +251,41 @@ async fn main(spawner: Spawner) {
     };
     let hid_writer: HidWriter<'_, _, 8> =
         HidWriter::new(&mut builder, HID_STATE.init(State::new()), hid_config);
+
+    // Second HID interface for the Navigator trackball. Declared unconditionally
+    // so the descriptor set does not change with what is plugged in — a host
+    // that has already bonded to this device would otherwise see the interface
+    // appear and disappear with the module.
+    let mouse_hid_config = embassy_usb::class::hid::Config {
+        report_descriptor: MOUSE_REPORT_DESCRIPTOR,
+        request_handler: None,
+        poll_ms: 1,
+        max_packet_size: MOUSE_REPORT_SIZE as u16,
+        hid_subclass: embassy_usb::class::hid::HidSubclass::Boot,
+        hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::Mouse,
+    };
+    let mouse_writer: HidWriter<'_, _, MOUSE_REPORT_SIZE> = HidWriter::new(
+        &mut builder,
+        MOUSE_HID_STATE.init(State::new()),
+        mouse_hid_config,
+    );
+
+    // Via's vendor interface: a raw 32-byte in/out HID pipe on usage page
+    // 0xFF60. This is also how telemetry leaves the board — commands 0x25/0x26
+    // ride the same interface rather than costing another one.
+    let via_hid_config = embassy_usb::class::hid::Config {
+        report_descriptor: VIA_REPORT_DESCRIPTOR,
+        request_handler: None,
+        poll_ms: 1,
+        max_packet_size: VIA_REPORT_SIZE as u16,
+        hid_subclass: embassy_usb::class::hid::HidSubclass::No,
+        hid_boot_protocol: embassy_usb::class::hid::HidBootProtocol::None,
+    };
+    let via_hid: HidReaderWriter<'_, _, VIA_REPORT_SIZE, VIA_REPORT_SIZE> = HidReaderWriter::new(
+        &mut builder,
+        VIA_HID_STATE.init(State::new()),
+        via_hid_config,
+    );
 
     let usb = builder.build();
     // Spawn USB before any matrix/I2C setup so enumeration never waits on (or
@@ -278,18 +327,61 @@ async fn main(spawner: Spawner) {
         env!("CARGO_MANIFEST_DIR"),
         "/../../keyboards/tecla/voyager/keymaps/default/keymap.rs"
     ));
+    // Not TapHoldConfig::default(): that is `new(200)`, which leaves both
+    // anti-misfire guards off (`quick_tap_ms` and `require_prior_idle_ms` are
+    // 0). This keymap leans hard on mod-taps — including MT!(LALT, Z) on a
+    // letter — and with prior-idle disabled those fire mid-word.
+    //
+    // - require_prior_idle: no hold unless the board was quiet first, so
+    //   mid-flow presses always tap.
+    // - quick_tap: re-tapping the same key skips hold detection, which is what
+    //   makes held-down repeat (backspace) work.
+    // - PermissiveHold: a key pressed *and released* inside the term settles as
+    //   hold, so deliberate chords resolve without waiting out the full term.
+    let tap_hold = TapHoldConfig {
+        tapping_term_ms: 200,
+        mode: TapHoldMode::PermissiveHold,
+        quick_tap_ms: 150,
+        require_prior_idle_ms: 175,
+    };
+    // `with_telemetry` is what makes the collectors run at all. Without it the
+    // Via telemetry commands answer "unhandled" rather than a frame of zeros.
     let processor = PROCESSOR.init_with(|| {
-        KeyboardProcessor::new(keymap, TapHoldConfig::default()).with_combos(VOYAGER_COMBO_CONFIG)
+        KeyboardProcessor::new(keymap, tap_hold)
+            .with_combos(VOYAGER_COMBO_CONFIG)
+            .with_telemetry()
     });
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = UsbHidReporter::new(hid_writer).with_mouse(mouse_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());
     let rgb_event_ch = RGB_EVENT_CHANNEL.init(EventChannel::new());
     let rgb_cmd_ch = RGB_CMD_CHANNEL.init(Channel::new());
+    let via_req_ch = VIA_REQ_CHANNEL.init(Channel::new());
+    let via_resp_ch = VIA_RESP_CHANNEL.init(Channel::new());
+    let via = VIA_PROTOCOL.init(ViaProtocol::new(&[]));
 
+    // The trackball shares the bus with the matrix and the LEDs. It brings
+    // itself up inside the task and retries if absent, so an unplugged module
+    // costs nothing here and hot-plugging it works without a reflash.
+    spawner.spawn(pointing_task(Navigator::new(bus), report_ch).unwrap());
     spawner.spawn(matrix_task(scanner, debouncer, event_ch).unwrap());
-    spawner.spawn(keyboard_task(event_ch, processor, report_ch, rgb_event_ch, rgb_cmd_ch).unwrap());
+    spawner.spawn(
+        keyboard_task(
+            event_ch,
+            processor,
+            report_ch,
+            rgb_event_ch,
+            rgb_cmd_ch,
+            ViaWiring {
+                protocol: via,
+                req: via_req_ch,
+                resp: via_resp_ch,
+            },
+        )
+        .unwrap(),
+    );
+    spawner.spawn(via_task(via_hid, via_req_ch, via_resp_ch).unwrap());
     spawner.spawn(rgb_task(leds, rgb_event_ch, rgb_cmd_ch).unwrap());
     tecla::task::usb_task(report_ch.receiver(), reporter).await;
 }
@@ -314,12 +406,32 @@ async fn usb_device_task(mut device: embassy_usb::UsbDevice<'static, Driver<'sta
 }
 
 #[embassy_executor::task]
+async fn pointing_task(
+    ball: Navigator<'static, NoopRawMutex, Bus>,
+    report_ch: &'static ReportChannel<NoopRawMutex, 8>,
+) -> ! {
+    tecla::task::pointing_task(ball, report_ch.sender()).await
+}
+
+#[embassy_executor::task]
 async fn matrix_task(
     scanner: VoyagerScanner<'static, SharedBus>,
     debouncer: AsymEagerDefer<ROWS, COLS>,
     event_ch: &'static EventChannel<NoopRawMutex, 16>,
 ) -> ! {
     tecla::task::matrix_task(scanner, debouncer, event_ch.sender()).await
+}
+
+/// The Via protocol handler and its two packet channels.
+///
+/// Bundled rather than passed as three more task arguments: the task macro
+/// generates code that trips `clippy::too_many_arguments`, and an attribute on
+/// the function does not reach inside the expansion. Grouping them reads better
+/// anyway — they are one subsystem.
+struct ViaWiring {
+    protocol: &'static mut ViaProtocol<COLS>,
+    req: &'static Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>,
+    resp: &'static Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>,
 }
 
 #[embassy_executor::task]
@@ -329,15 +441,29 @@ async fn keyboard_task(
     report_ch: &'static ReportChannel<NoopRawMutex, 8>,
     rgb_event_ch: &'static EventChannel<NoopRawMutex, 8>,
     rgb_cmd_ch: &'static Channel<NoopRawMutex, RgbCommand, 4>,
+    via: ViaWiring,
 ) -> ! {
-    tecla::task::keyboard_task_rgb(
+    tecla::task::keyboard_task_rgb_via(
         event_ch.receiver(),
         processor,
         report_ch.sender(),
         rgb_event_ch.sender(),
         rgb_cmd_ch.sender(),
+        via.protocol,
+        via.req.receiver(),
+        via.resp.sender(),
     )
     .await
+}
+
+/// Carries Via packets between the raw-HID endpoint and the keyboard task.
+#[embassy_executor::task]
+async fn via_task(
+    hid: HidReaderWriter<'static, Driver<'static, USB>, VIA_REPORT_SIZE, VIA_REPORT_SIZE>,
+    via_req_ch: &'static Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>,
+    via_resp_ch: &'static Channel<NoopRawMutex, [u8; VIA_REPORT_SIZE], 1>,
+) -> ! {
+    tecla::transport::usb::via_usb_task(hid, via_req_ch.sender(), via_resp_ch.receiver()).await
 }
 
 /// Dispatches to whichever built-in [`Animation`] is currently selected.
@@ -399,6 +525,8 @@ async fn rgb_task(
     rgb_cmd_ch: &'static Channel<NoopRawMutex, RgbCommand, 4>,
 ) -> ! {
     let mut controller = RgbController::<LEDS>::new();
+    controller.set_base_color(tecla::rgb::Hsv::new(32, 40, 255));
+    controller.set_brightness(80);
     let mut solid = AnyAnim::Solid(SolidColor {
         color: tecla::rgb::Rgb::WHITE,
     });

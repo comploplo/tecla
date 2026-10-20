@@ -13,61 +13,15 @@ use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::Duration;
 
-use serde::Deserialize;
+use tecla_config::flash::{
+    cargo_args, discover_native_profiles, is_rp2_bootloader, method_name, qmk_family,
+    resolve_native_profile, suggest_usb_flash, usb_device_id, usb_device_name,
+    usb_source_matches_selector, BoardProfile, FlashMethod, UsbDevice, UsbSourceInfo,
+};
 use tecla_config::qmk::info_json;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum FlashMethod {
-    ProbeRs,
-    Uf2,
-    Dfu,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct BoardManifest {
-    name: String,
-    #[serde(rename = "crate")]
-    package: String,
-    example: String,
-    target: String,
-    flash: FlashMethod,
-    #[serde(default)]
-    features: Vec<String>,
-    #[serde(default)]
-    qmk_family: Option<String>,
-    #[serde(default)]
-    vendor: Option<String>,
-    #[serde(default)]
-    dfu_vid_pid: Option<String>,
-    #[serde(default)]
-    dfu_address: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct BoardProfile {
-    name: String,
-    package: String,
-    example: String,
-    target: String,
-    method: FlashMethod,
-    features: Vec<String>,
-    qmk_family: Option<String>,
-    vendor: Option<String>,
-    dfu_vid_pid: Option<String>,
-    dfu_address: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct UsbDevice {
-    sysfs_path: PathBuf,
-    busnum: String,
-    devnum: String,
-    vendor: String,
-    product: String,
-    manufacturer: Option<String>,
-    product_name: Option<String>,
-}
+/// Where `board.toml` profiles live, relative to the repo root.
+const PROFILE_ROOT: &str = "keyboards/tecla";
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -104,7 +58,8 @@ fn main() {
     match (qmk_keyboard, tecla_config) {
         (Some(keyboard_name), None) => flash_qmk(device.as_deref(), &keyboard_name),
         (None, Some(profile_name)) => {
-            let profile = resolve_native_profile(&profile_name).unwrap_or_else(|err| fail(&err));
+            let profile = resolve_native_profile(Path::new(PROFILE_ROOT), &profile_name)
+                .unwrap_or_else(|err| fail(&err));
             flash_profile(profile, device.as_deref());
         }
         (Some(_), Some(_)) => fail("use only one of --qmk-keyboard or --tecla-config"),
@@ -131,7 +86,7 @@ fn fail(msg: &str) -> ! {
 }
 
 fn print_list() {
-    let profiles = discover_native_profiles();
+    let profiles = discover_native_profiles(Path::new(PROFILE_ROOT));
     let usb_devices = discover_usb_devices();
     let flashable_devices = usb_devices
         .iter()
@@ -177,127 +132,6 @@ fn print_list() {
     }
 }
 
-fn method_name(method: FlashMethod) -> &'static str {
-    match method {
-        FlashMethod::ProbeRs => "probe-rs",
-        FlashMethod::Uf2 => "uf2",
-        FlashMethod::Dfu => "dfu",
-    }
-}
-
-fn suggest_native_flash(device: &UsbDevice, profiles: &[BoardProfile]) -> Option<String> {
-    let manufacturer = device
-        .manufacturer
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    if manufacturer.is_empty() {
-        return None;
-    }
-
-    let matches = profiles
-        .iter()
-        .filter(|profile| {
-            profile
-                .vendor
-                .as_deref()
-                .is_some_and(|vendor| vendor.eq_ignore_ascii_case(&manufacturer))
-        })
-        .collect::<Vec<_>>();
-
-    matches.as_slice().first().and_then(|profile| {
-        if matches.len() == 1 {
-            Some(format!(
-                "just flash --device {} --tecla-config {}",
-                usb_device_id(device),
-                profile.name
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-fn suggest_usb_flash(device: &UsbDevice, profiles: &[BoardProfile]) -> Option<String> {
-    if let Some(hint) = suggest_native_flash(device, profiles) {
-        return Some(hint);
-    }
-    if !is_rp2_bootloader(device) {
-        return None;
-    }
-
-    let matches = profiles
-        .iter()
-        .filter(|profile| matches!(profile.method, FlashMethod::Uf2))
-        .collect::<Vec<_>>();
-
-    matches.as_slice().first().and_then(|profile| {
-        if matches.len() == 1 {
-            Some(format!("just flash --tecla-config {}", profile.name))
-        } else {
-            None
-        }
-    })
-}
-
-fn discover_native_profiles() -> Vec<BoardProfile> {
-    let root = Path::new("keyboards/tecla");
-    let mut profiles = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if path.file_name() != Some(OsStr::new("board.toml")) {
-                continue;
-            }
-            let Ok(text) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(manifest) = toml::from_str::<BoardManifest>(&text) else {
-                continue;
-            };
-            profiles.push(BoardProfile {
-                name: manifest.name,
-                package: manifest.package,
-                example: manifest.example,
-                target: manifest.target,
-                method: manifest.flash,
-                features: manifest.features,
-                qmk_family: manifest.qmk_family,
-                vendor: manifest.vendor,
-                dfu_vid_pid: manifest.dfu_vid_pid,
-                dfu_address: manifest.dfu_address,
-            });
-        }
-    }
-
-    profiles.sort_by(|a, b| a.name.cmp(&b.name));
-    profiles
-}
-
-fn resolve_native_profile(name: &str) -> Result<BoardProfile, String> {
-    discover_native_profiles()
-        .into_iter()
-        .find(|profile| profile.name == name)
-        .ok_or_else(|| {
-            let known = discover_native_profiles()
-                .into_iter()
-                .map(|profile| profile.name)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("unknown native profile `{name}`; known profiles: {known}")
-        })
-}
-
 fn flash_qmk(device: Option<&str>, keyboard_name: &str) -> ! {
     let root = Path::new(".vendor/qmk_firmware/keyboards");
     let Some(found) = find_qmk_keyboard(root, keyboard_name) else {
@@ -309,7 +143,7 @@ fn flash_qmk(device: Option<&str>, keyboard_name: &str) -> ! {
     eprintln!("found QMK keyboard at {}", found.display());
 
     let family = qmk_family(keyboard_name);
-    let matches = discover_native_profiles()
+    let matches = discover_native_profiles(Path::new(PROFILE_ROOT))
         .into_iter()
         .filter(|profile| profile.qmk_family.as_deref() == Some(&family))
         .collect::<Vec<_>>();
@@ -340,11 +174,7 @@ fn flash_profile(profile: BoardProfile, device: Option<&str>) -> ! {
         example = profile.example,
     );
 
-    let mut cargo_args = cargo_args(&profile, matches!(profile.method, FlashMethod::ProbeRs));
-    for feature in &profile.features {
-        cargo_args.push("--features".to_string());
-        cargo_args.push(feature.clone());
-    }
+    let cargo_args = cargo_args(&profile, matches!(profile.method, FlashMethod::ProbeRs));
 
     match profile.method {
         FlashMethod::ProbeRs => run_cargo(&cargo_args),
@@ -370,19 +200,6 @@ fn auto_select_uf2_device() -> Option<String> {
     }
 
     fail("multiple RP2 boot devices are connected; pass `--device <usb-device>`");
-}
-
-fn cargo_args(profile: &BoardProfile, run: bool) -> Vec<String> {
-    vec![
-        if run { "run" } else { "build" }.to_string(),
-        "-p".to_string(),
-        profile.package.clone(),
-        "--example".to_string(),
-        profile.example.clone(),
-        "--target".to_string(),
-        profile.target.clone(),
-        "--release".to_string(),
-    ]
 }
 
 fn run_cargo(cargo_args: &[String]) -> ! {
@@ -742,34 +559,6 @@ fn mount_matches_selector(mount: &Path, source: &str, selector: &str) -> bool {
     false
 }
 
-fn usb_source_matches_selector(info: &UsbSourceInfo, selector: &str) -> bool {
-    selector
-        == info
-            .sysfs_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-        || selector == format!("{}/{}", info.vendor, info.product)
-        || selector == format!("{}:{}", info.vendor, info.product)
-        || selector == format!("{}:{}", info.busnum, info.devnum)
-        || selector == info.busnum
-        || selector == info.devnum
-}
-
-fn qmk_family(keyboard_name: &str) -> String {
-    if keyboard_name.eq_ignore_ascii_case("zsa/voyager")
-        || keyboard_name.eq_ignore_ascii_case("voyager")
-    {
-        return "zsa/voyager".to_string();
-    }
-
-    keyboard_name
-        .split('/')
-        .next()
-        .unwrap_or(keyboard_name)
-        .to_ascii_lowercase()
-}
-
 fn discover_usb_devices() -> Vec<UsbDevice> {
     let mut devices = Vec::new();
     let root = Path::new("/sys/bus/usb/devices");
@@ -805,36 +594,6 @@ fn discover_usb_devices() -> Vec<UsbDevice> {
 
     devices.sort_by(|a, b| a.sysfs_path.cmp(&b.sysfs_path));
     devices
-}
-
-fn is_rp2_bootloader(device: &UsbDevice) -> bool {
-    device.vendor.eq_ignore_ascii_case("2e8a") && device.product.eq_ignore_ascii_case("0003")
-}
-
-fn usb_device_name(device: &UsbDevice) -> String {
-    let manufacturer = device
-        .manufacturer
-        .as_deref()
-        .unwrap_or("unknown manufacturer");
-    let product = device.product_name.as_deref().unwrap_or("unknown product");
-    format!("{manufacturer} {product}")
-}
-
-fn usb_device_id(device: &UsbDevice) -> String {
-    device
-        .sysfs_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-struct UsbSourceInfo {
-    sysfs_path: PathBuf,
-    busnum: String,
-    devnum: String,
-    vendor: String,
-    product: String,
 }
 
 fn usb_source_info(block_name: &str) -> Option<UsbSourceInfo> {
@@ -1012,4 +771,25 @@ fn find_qmk_keyboard(root: &Path, keyboard_name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mount_selector_matches_absolute_path_and_leaf_name() {
+        let mount = Path::new("/media/user/RPI-RP2");
+        assert!(mount_matches_selector(
+            mount,
+            "/dev/sda1",
+            "/media/user/RPI-RP2"
+        ));
+        assert!(mount_matches_selector(mount, "/dev/sda1", "RPI-RP2"));
+        assert!(!mount_matches_selector(
+            mount,
+            "/dev/sda1",
+            "/media/user/OTHER"
+        ));
+    }
 }

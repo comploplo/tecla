@@ -22,10 +22,8 @@ const ROWS: usize = 12;
 const COLS: usize = 7;
 
 /// LED index (0..52) for every populated matrix position, `None` for a
-/// spacer slot with no physical key. Taken directly from the default
-/// keymap's Base layer layout
-/// (`keyboards/tecla/voyager/keymaps/default/keymap.rs`), assigned in
-/// row-major scan order.
+/// spacer slot with no physical key. Indices follow ZSA's physical LED order,
+/// including N before M on the right bottom row despite its later matrix row.
 #[rustfmt::skip]
 pub const LED_INDEX: [[Option<u8>; COLS]; ROWS] = [
     // row 0
@@ -47,9 +45,9 @@ pub const LED_INDEX: [[Option<u8>; COLS]; ROWS] = [
     // row 8
     [Some(38), Some(39), Some(40), Some(41), Some(42), Some(43), None],
     // row 9
-    [None, Some(44), Some(45), Some(46), Some(47), Some(48), None],
+    [None, Some(45), Some(46), Some(47), Some(48), Some(49), None],
     // row 10
-    [None, None, Some(49), None, None, None, None],
+    [None, None, Some(44), None, None, None, None],
     // row 11
     [None, None, None, None, None, Some(50), Some(51)],
 ];
@@ -139,8 +137,8 @@ const LED_CHANNELS: [(u8, u8, u8, u8); LEDS] = [
     (1, 0x71, 0x61, 0x81), (1, 0x70, 0x60, 0x80), (1, 0x17, 0x07, 0x27),
     (1, 0x1D, 0x0D, 0x2D), (1, 0x1C, 0x0C, 0x2C), (1, 0x1B, 0x0B, 0x2B),
     (1, 0x1A, 0x0A, 0x2A), (1, 0x19, 0x09, 0x3A), (1, 0x75, 0x65, 0x85),
-    (1, 0x7A, 0x6A, 0x8A), (1, 0x79, 0x69, 0x89), (1, 0x78, 0x68, 0x88),
-    (1, 0x1F, 0x0F, 0x2F), (1, 0x1E, 0x0E, 0x2E), (1, 0x7B, 0x6B, 0x8B),
+    (1, 0x7B, 0x6B, 0x8B), (1, 0x7A, 0x6A, 0x8A), (1, 0x79, 0x69, 0x89),
+    (1, 0x78, 0x68, 0x88), (1, 0x1F, 0x0F, 0x2F), (1, 0x1E, 0x0E, 0x2E),
     (1, 0x7D, 0x6D, 0x8D), (1, 0x7C, 0x6C, 0x8C),
 ];
 
@@ -164,17 +162,33 @@ pub fn remap_for_rgb(event: KeyEvent) -> KeyEvent {
     remapped
 }
 
+/// PWM channels per IS31FL3731 — one brightness byte each.
+const PWM_BYTES: usize = 144;
+
 /// The Voyager's combined per-key RGB driver: two [`Is31fl3731`] chips (one
 /// per half) presented as one 52-LED [`LedDriver`].
 pub struct VoyagerLeds<I2C> {
     left: Is31fl3731<I2C>,
     right: Is31fl3731<I2C>,
+    chips_ok: bool,
+    /// Last frame actually sent, so an unchanged one can be skipped.
+    ///
+    /// Retain all 288 PWM values so unchanged chunks cost no shared-bus time.
+    last_frame: Option<([u8; PWM_BYTES], [u8; PWM_BYTES])>,
 }
 
 impl<I2C> VoyagerLeds<I2C> {
     /// Combines an already-constructed left/right chip pair.
+    ///
+    /// The chips are not touched here — see [`write`](LedDriver::write), which
+    /// initialises them lazily and re-initialises them if they go away.
     pub fn new(left: Is31fl3731<I2C>, right: Is31fl3731<I2C>) -> Self {
-        Self { left, right }
+        Self {
+            left,
+            right,
+            chips_ok: false,
+            last_frame: None,
+        }
     }
 }
 
@@ -184,17 +198,36 @@ impl<I2C: embedded_hal_async::i2c::I2c> VoyagerLeds<I2C> {
     /// # Errors
     /// Returns the underlying I2C error if either chip fails to initialize.
     pub async fn init(&mut self) -> Result<(), I2C::Error> {
+        self.chips_ok = false;
+        // A chip that has just been (re)initialised is PWM-zeroed, so any
+        // cached frame no longer describes what is on the LEDs.
+        self.last_frame = None;
         self.left.init().await?;
-        self.right.init().await
+        self.right.init().await?;
+        self.chips_ok = true;
+        Ok(())
     }
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> LedDriver for VoyagerLeds<I2C> {
     type Error = I2C::Error;
 
+    /// Writes one frame, bringing the chips up first if they are not running.
+    ///
+    /// The right-hand chip loses power whenever the TRRS link is opened —
+    /// unplugging the halves, or inserting a Navigator into the chain — and
+    /// comes back in its power-on state: shut down, LED-enable bits clear, PWM
+    /// zeroed. A one-shot `init()` at boot leaves it dark forever after that.
+    /// So a failed write drops back to uninitialised and the next frame retries,
+    /// which mirrors the lazy-init tolerance
+    /// [`VoyagerScanner`](crate::scanner::VoyagerScanner) already has for the
+    /// expander on the same cable.
     async fn write(&mut self, leds: &[Rgb]) -> Result<(), Self::Error> {
-        let mut left_pwm = [0u8; 144];
-        let mut right_pwm = [0u8; 144];
+        if !self.chips_ok {
+            self.init().await?;
+        }
+        let mut left_pwm = [0u8; PWM_BYTES];
+        let mut right_pwm = [0u8; PWM_BYTES];
         for (i, &color) in leds.iter().enumerate().take(LEDS) {
             let (chip, r, g, b) = LED_CHANNELS[i];
             let buf = if chip == 0 {
@@ -206,7 +239,32 @@ impl<I2C: embedded_hal_async::i2c::I2c> LedDriver for VoyagerLeds<I2C> {
             buf[usize::from(g)] = color.g;
             buf[usize::from(b)] = color.b;
         }
-        self.left.write_frame(&left_pwm).await?;
-        self.right.write_frame(&right_pwm).await
+        if self.last_frame == Some((left_pwm, right_pwm)) {
+            return Ok(());
+        }
+
+        let previous = self.last_frame.as_ref();
+        if let Err(e) = self
+            .left
+            .write_frame_diff(&left_pwm, previous.map(|(left, _)| left))
+            .await
+        {
+            self.chips_ok = false;
+            self.last_frame = None;
+            return Err(e);
+        }
+        if let Err(e) = self
+            .right
+            .write_frame_diff(&right_pwm, previous.map(|(_, right)| right))
+            .await
+        {
+            self.chips_ok = false;
+            // Left landed, right did not — cache nothing rather than a frame
+            // only half of the hardware is showing.
+            self.last_frame = None;
+            return Err(e);
+        }
+        self.last_frame = Some((left_pwm, right_pwm));
+        Ok(())
     }
 }

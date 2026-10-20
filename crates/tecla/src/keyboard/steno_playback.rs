@@ -457,7 +457,6 @@ fn alpha_key(ch: char, base: u8, modifier: ModifierKey) -> Option<(ModifierKey, 
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::action::{KeyCode, ModifierKey};
@@ -466,7 +465,7 @@ mod tests {
     use heapless::Vec as HVec;
 
     struct MockOutput {
-        keys: HVec<(KeyCode, bool), 256>,
+        keys: HVec<(KeyCode, bool), 1024>,
         modifiers: HVec<(ModifierKey, bool), 64>,
         drains: u32,
     }
@@ -622,7 +621,7 @@ mod tests {
         let mut output = MockOutput::new();
         let translation = text_bytes("the");
         playback.play_translation(translation.as_slice(), None, &mut output, &mut |_| {});
-        assert!(playback.visible_backspaces > 0);
+        assert_eq!(playback.visible_backspaces, 3);
 
         let mut output2 = MockOutput::new();
         let mut undo: HVec<u8, 4> = HVec::new();
@@ -633,7 +632,7 @@ mod tests {
             .iter()
             .filter(|&&kc| kc == KeyCode::Backspace)
             .count();
-        assert!(bs_count > 0);
+        assert_eq!(bs_count, 3);
     }
 
     #[test]
@@ -649,19 +648,15 @@ mod tests {
     }
 
     #[test]
-    fn char_to_key_covers_ascii() {
-        assert!(char_to_key_action('a').is_some());
-        assert!(char_to_key_action('Z').is_some());
-        assert!(char_to_key_action('5').is_some());
-        assert!(char_to_key_action('!').is_some());
-        assert!(char_to_key_action(' ').is_some());
-        assert!(char_to_key_action('\n').is_some());
-
-        let (m, _) = char_to_key_action('A').unwrap();
-        assert_eq!(m, ModifierKey::LSHIFT);
-
-        let (m, _) = char_to_key_action('a').unwrap();
-        assert_eq!(m, ModifierKey::NONE);
+    fn char_to_key_maps_letter_case_to_shift() {
+        assert_eq!(
+            char_to_key_action('a'),
+            Some((ModifierKey::NONE, KeyCode::A))
+        );
+        assert_eq!(
+            char_to_key_action('Z'),
+            Some((ModifierKey::LSHIFT, KeyCode::Z))
+        );
     }
 
     #[test]
@@ -689,5 +684,350 @@ mod tests {
         playback.play_translation(translation.as_slice(), None, &mut output, &mut |_| {});
 
         assert_eq!(output.drains, 1);
+    }
+
+    // ── Formatting and history opcodes ───────────────────────────────────────
+
+    fn op(bytes: &[u8]) -> HVec<u8, 64> {
+        let mut v = HVec::new();
+        let _ = v.extend_from_slice(bytes);
+        v
+    }
+
+    fn concat(parts: &[&[u8]]) -> HVec<u8, 64> {
+        let mut v = HVec::new();
+        for p in parts {
+            let _ = v.extend_from_slice(p);
+        }
+        v
+    }
+
+    #[test]
+    fn set_case_capitalizes_the_next_word() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let t = concat(&[
+            &op(&[OP_SET_CASE, CaseMode::CapFirstWord as u8]),
+            text_bytes("the").as_slice(),
+        ]);
+        playback.play_translation(t.as_slice(), None, &mut output, &mut |_| {});
+
+        // A capital T means a shift was held around the first keystroke.
+        assert_eq!(
+            typed_keys(&output).as_slice(),
+            &[KeyCode::T, KeyCode::H, KeyCode::E]
+        );
+        assert!(
+            output
+                .modifiers
+                .iter()
+                .any(|&(m, pressed)| m == ModifierKey::LSHIFT && pressed),
+            "CapFirstWord did not shift the first character"
+        );
+    }
+
+    #[test]
+    fn set_case_upper_shifts_the_whole_first_word() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let t = concat(&[
+            &op(&[OP_SET_CASE, CaseMode::UpperFirstWord as u8]),
+            text_bytes("the").as_slice(),
+        ]);
+        playback.play_translation(t.as_slice(), None, &mut output, &mut |_| {});
+
+        let shifts = output
+            .modifiers
+            .iter()
+            .filter(|&&(m, pressed)| m == ModifierKey::LSHIFT && pressed)
+            .count();
+        assert_eq!(shifts, 3, "UpperFirstWord should shift all three letters");
+    }
+
+    #[test]
+    fn set_case_with_an_unknown_mode_byte_stops_playback() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let t = concat(&[&op(&[OP_SET_CASE, 0x7F]), text_bytes("the").as_slice()]);
+        playback.play_translation(t.as_slice(), None, &mut output, &mut |_| {});
+        assert!(
+            typed_keys(&output).is_empty(),
+            "unknown case mode should abort, not type"
+        );
+    }
+
+    #[test]
+    fn noop_opcode_advances_without_output() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let t = concat(&[
+            &op(&[OP_NOOP]),
+            text_bytes("hi").as_slice(),
+            &op(&[OP_NOOP]),
+        ]);
+        playback.play_translation(t.as_slice(), None, &mut output, &mut |_| {});
+        assert_eq!(typed_keys(&output).as_slice(), &[KeyCode::H, KeyCode::I]);
+    }
+
+    #[test]
+    fn unknown_opcode_stops_playback() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let t = concat(&[
+            text_bytes("hi").as_slice(),
+            &op(&[0xEE]),
+            text_bytes("no").as_slice(),
+        ]);
+        playback.play_translation(t.as_slice(), None, &mut output, &mut |_| {});
+        assert_eq!(
+            typed_keys(&output).as_slice(),
+            &[KeyCode::H, KeyCode::I],
+            "playback should stop at the unknown opcode"
+        );
+    }
+
+    #[test]
+    fn reset_formatting_clears_pending_space() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+
+        // "hi" leaves needs_space set; RESET_FORMATTING must clear it so the
+        // next word is not prefixed with a space.
+        playback.play_translation(text_bytes("hi").as_slice(), None, &mut output, &mut |_| {});
+        let mut out2 = MockOutput::new();
+        let t = concat(&[&op(&[OP_RESET_FORMATTING]), text_bytes("yo").as_slice()]);
+        playback.play_translation(t.as_slice(), None, &mut out2, &mut |_| {});
+
+        assert_eq!(
+            typed_keys(&out2).as_slice(),
+            &[KeyCode::Y, KeyCode::O],
+            "no leading space expected after RESET_FORMATTING"
+        );
+    }
+
+    #[test]
+    fn repeat_last_translation_types_the_previous_word_again() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("hi").as_slice(), None, &mut output, &mut |_| {});
+
+        let mut out2 = MockOutput::new();
+        playback.play_translation(
+            op(&[OP_REPEAT_LAST_TRANSLATION]).as_slice(),
+            None,
+            &mut out2,
+            &mut |_| {},
+        );
+        assert_eq!(
+            typed_keys(&out2).as_slice(),
+            &[KeyCode::Space, KeyCode::H, KeyCode::I],
+            "repeat should retype the last translation"
+        );
+    }
+
+    #[test]
+    fn undo_last_translation_backspaces_exactly_what_was_typed() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("cat").as_slice(), None, &mut output, &mut |_| {});
+        assert_eq!(typed_keys(&output).len(), 3);
+
+        let mut out2 = MockOutput::new();
+        playback.play_translation(
+            op(&[OP_UNDO_LAST_TRANSLATION]).as_slice(),
+            None,
+            &mut out2,
+            &mut |_| {},
+        );
+        let keys = typed_keys(&out2);
+        assert_eq!(
+            keys.len(),
+            3,
+            "expected one backspace per visible character"
+        );
+        assert!(keys.iter().all(|&k| k == KeyCode::Backspace));
+    }
+
+    #[test]
+    fn undo_records_a_telemetry_undo() {
+        use crate::telemetry::TelemetryExt;
+        let mut playback = StenoPlayback::new();
+        let mut telem = StenoTelemetry::default();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("cat").as_slice(), None, &mut output, &mut |_| {});
+        playback.play_translation(
+            op(&[OP_UNDO_LAST_TRANSLATION]).as_slice(),
+            Some(&mut telem),
+            &mut output,
+            &mut |_| {},
+        );
+        assert_eq!(telem.collect().undos, 1);
+    }
+
+    #[test]
+    fn retro_case_rewrites_the_previous_word_capitalized() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("cat").as_slice(), None, &mut output, &mut |_| {});
+
+        let mut out2 = MockOutput::new();
+        playback.play_translation(
+            op(&[OP_RETRO_CASE, CaseMode::CapFirstWord as u8]).as_slice(),
+            None,
+            &mut out2,
+            &mut |_| {},
+        );
+
+        let keys = typed_keys(&out2);
+        let backspaces = keys.iter().filter(|&&k| k == KeyCode::Backspace).count();
+        assert_eq!(backspaces, 3, "should erase the three characters first");
+        assert_eq!(
+            &keys[backspaces..],
+            &[KeyCode::C, KeyCode::A, KeyCode::T],
+            "then retype the word"
+        );
+        assert!(
+            out2.modifiers
+                .iter()
+                .any(|&(m, pressed)| m == ModifierKey::LSHIFT && pressed),
+            "retyped word should be capitalized"
+        );
+    }
+
+    #[test]
+    fn retro_case_with_an_unknown_mode_byte_is_a_no_op() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("cat").as_slice(), None, &mut output, &mut |_| {});
+
+        let mut out2 = MockOutput::new();
+        playback.play_translation(
+            op(&[OP_RETRO_CASE, 0x7F]).as_slice(),
+            None,
+            &mut out2,
+            &mut |_| {},
+        );
+        assert!(typed_keys(&out2).is_empty());
+    }
+
+    #[test]
+    fn truncated_set_case_at_end_of_stream_does_not_panic() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(
+            op(&[OP_SET_CASE]).as_slice(),
+            None,
+            &mut output,
+            &mut |_| {},
+        );
+        assert!(typed_keys(&output).is_empty());
+    }
+
+    #[test]
+    fn reset_state_clears_case_and_space() {
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        playback.play_translation(text_bytes("hi").as_slice(), None, &mut output, &mut |_| {});
+        playback.reset_state();
+
+        let mut out2 = MockOutput::new();
+        playback.play_translation(text_bytes("yo").as_slice(), None, &mut out2, &mut |_| {});
+        assert_eq!(typed_keys(&out2).as_slice(), &[KeyCode::Y, KeyCode::O]);
+    }
+
+    #[test]
+    fn char_to_key_action_covers_every_printable_ascii() {
+        // Every printable ASCII character must be typeable, and the shifted
+        // pairs must agree on the physical key (e.g. '!' is shift+'1').
+        for byte in 0x20u8..0x7F {
+            let ch = char::from(byte);
+            assert!(
+                char_to_key_action(ch).is_some(),
+                "no key mapping for {ch:?} (0x{byte:02X})"
+            );
+        }
+
+        let shift_pairs = [
+            ('!', '1'),
+            ('@', '2'),
+            ('#', '3'),
+            ('$', '4'),
+            ('%', '5'),
+            ('^', '6'),
+            ('&', '7'),
+            ('*', '8'),
+            ('(', '9'),
+            (')', '0'),
+            ('_', '-'),
+            ('+', '='),
+            ('{', '['),
+            ('}', ']'),
+            ('|', '\\'),
+            (':', ';'),
+            ('"', '\''),
+            ('~', '`'),
+            ('<', ','),
+            ('>', '.'),
+            ('?', '/'),
+        ];
+        for (shifted, plain) in shift_pairs {
+            let (smod, skey) = char_to_key_action(shifted).expect("shifted");
+            let (pmod, pkey) = char_to_key_action(plain).expect("plain");
+            assert_eq!(
+                skey, pkey,
+                "{shifted:?} and {plain:?} are the same physical key"
+            );
+            assert_eq!(smod, ModifierKey::LSHIFT, "{shifted:?} needs shift");
+            assert_eq!(pmod, ModifierKey::NONE, "{plain:?} needs no modifier");
+        }
+    }
+
+    #[test]
+    fn char_to_key_action_handles_whitespace_and_rejects_non_ascii() {
+        assert_eq!(
+            char_to_key_action('\n'),
+            Some((ModifierKey::NONE, KeyCode::Enter))
+        );
+        assert_eq!(
+            char_to_key_action('\r'),
+            Some((ModifierKey::NONE, KeyCode::Enter))
+        );
+        assert_eq!(
+            char_to_key_action('\t'),
+            Some((ModifierKey::NONE, KeyCode::Tab))
+        );
+        assert_eq!(
+            char_to_key_action(' '),
+            Some((ModifierKey::NONE, KeyCode::Space))
+        );
+        assert_eq!(char_to_key_action('\u{7F}'), None);
+        assert_eq!(char_to_key_action('é'), None);
+        assert_eq!(char_to_key_action('→'), None);
+    }
+
+    #[test]
+    fn uppercase_letters_type_with_shift() {
+        let (m, k) = char_to_key_action('Z').expect("Z");
+        assert_eq!(m, ModifierKey::LSHIFT);
+        assert_eq!(k, char_to_key_action('z').expect("z").1);
+    }
+
+    #[test]
+    fn long_text_uses_the_two_byte_length_encoding() {
+        // Lengths >= 255 switch to the 0xFF + u16 form; make sure a long
+        // translation still plays back in full.
+        let mut playback = StenoPlayback::new();
+        let mut output = MockOutput::new();
+        let text = "a".repeat(300);
+        let mut v: HVec<u8, 512> = HVec::new();
+        let _ = v.push(OP_TEXT);
+        let _ = v.push(0xFF);
+        let _ = v.push((300 & 0xFF) as u8);
+        let _ = v.push(((300 >> 8) & 0xFF) as u8);
+        let _ = v.extend_from_slice(text.as_bytes());
+
+        playback.play_translation(v.as_slice(), None, &mut output, &mut |_| {});
+        let pressed = output.keys.iter().filter(|&&(_, p)| p).count();
+        assert_eq!(pressed, 300, "all 300 characters should be typed");
     }
 }
