@@ -10,5 +10,5 @@
 
 include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../keyboards/tecla/asterisk_v1_4_midi/examples/default.rs"
+    "/profiles/asterisk_v1_4_midi/examples/default.rs"
 ));

@@ -1,7 +1,6 @@
-# Linker rustflags for this target come from the workspace root
-# .cargo/config.toml — don't repeat them here: cargo *joins* rustflags arrays
-# from nested configs, and a duplicated -Tlink.x fails the link with
-# "region 'FLASH' already defined".
+# build.rs supplies the linker scripts for this crate's firmware targets,
+# including when building extracted release archives. Do not repeat them in
+# rustflags: a duplicated -Tlink.x defines the FLASH region twice.
 
 [target.thumbv6m-none-eabi]
 runner = "probe-rs run --chip RP2040"

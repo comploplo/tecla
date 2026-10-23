@@ -60,6 +60,13 @@ struct TextOpcodeContext<'a, F: FnMut(HidReport) + ?Sized, O: KeyOutput<F> + ?Si
 
 impl Default for StenoPlayback {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StenoPlayback {
+    /// Create a new playback engine with default (no-space, no-case) state.
+    pub const fn new() -> Self {
         Self {
             needs_space: false,
             pending_case: None,
@@ -68,13 +75,6 @@ impl Default for StenoPlayback {
             last_needs_space: false,
             last_retro_case: None,
         }
-    }
-}
-
-impl StenoPlayback {
-    /// Create a new playback engine with default (no-space, no-case) state.
-    pub fn new() -> Self {
-        Self::default()
     }
 
     /// Play a steno translation opcode stream, emitting keystrokes via `output`.

@@ -182,7 +182,7 @@ fn planck_qmk_to_processor_round_trip() {
         action_layers.push(actions);
     }
 
-    let mut hlayers = HVec::<Layer<()>, MAX_LAYERS>::new();
+    let mut hlayers = HVec::<Layer<(), MAX_KEYS>, MAX_LAYERS>::new();
     for al in &action_layers {
         let mut hkeys = HVec::<Action<()>, MAX_KEYS>::new();
         for a in al {

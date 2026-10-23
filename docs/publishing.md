@@ -1,7 +1,9 @@
-# Publishing Checklist
+# Publishing Tecla 0.1.0
 
-This repository contains publishable Tecla source plus vendored compatibility
-fixtures. Check these items before making a public release or publishing crates.
+This repository contains eight publishable crates plus repository-only test
+harnesses and compatibility fixtures. Run the archive checks below before tagging
+a source release or publishing crates. All publishable Tecla crates and their
+internal versioned dependencies use `0.1.0` for this first release.
 
 ## License
 
@@ -19,31 +21,27 @@ fixtures. Check these items before making a public release or publishing crates.
 
 ## Crates
 
-- Publish the first crates in dependency order:
-  1. `tecla-config`
-  2. `tecla`
-  3. `tecla-macros`
-- Board support crates depend on specific embedded targets and examples; publish
-  them only after their hardware bring-up status is reflected in the README.
-- HIL tests live in `crates/tecla-hil-tests`. It has its own workspace and is
-  marked `publish = false` because it is a repo-local test harness, not a
-  library anyone should depend on. The `just hil-*` targets run it by manifest
-  path.
-- The nRF BLE stack uses published `trouble-host` 0.8 and `nrf-sdc`/`nrf-mpsl`
-  0.4 releases with matching `bt-hci` 0.10 types.
-- `tecla-esp32s3` is `exclude`d from the workspace while its current
-  `esp-hal`/`esp-rtos` migration awaits an Xtensa firmware build and hardware
+- Package and verify `tecla-config`, `tecla`, and `tecla-macros` before the board
+  crates. Their path-only development dependencies are stripped by Cargo during
+  packaging.
+- Before publishing board crates, verify their versioned dependencies, target
+  metadata, examples, and [hardware status](../keyboards/tecla/README.md). A
+  successful cross-compilation does not establish hardware validation.
+- HIL and mutation-discovery harnesses are repository-only and marked
+  `publish = false`. They must not become targets of a published library: their
+  test inputs deliberately refer to the checkout's board profiles and fixtures.
+- `tecla-esp32s3` is `exclude`d from the workspace while its
+  `esp-hal`/`esp-rtos` integration awaits an Xtensa firmware build and hardware
   validation. Its standalone dependency graph resolves, but nothing in CI
   compiles it. Do not publish it or treat its code as verified.
-- `tecla-config` sets `exclude = ["tests/"]`: its integration tests assert
-  against `../../keyboards`, a symlink tree into the git submodules, which does
-  not exist inside a `.crate` archive.
-- `repository` points at `https://github.com/comploplo/tecla`, which does not
-  exist yet — push the repo before publishing, or crates.io and docs.rs will
-  both link to a 404.
-- Allow crates.io time to index each dependency before verifying or publishing
-  the next crate. `tecla` has a dev-dependency on `tecla-config`, and
-  `tecla-macros` has a dev-dependency on `tecla`.
+- Checkout-dependent integration tests and benchmarks are excluded from the
+  library archives. The board crates package the native profile sources their
+  firmware examples use, rather than reaching outside the archive to
+  `keyboards/`. The RP2040 crate also packages its steno dictionary inputs and
+  third-party notice.
+- Verify that the workspace's `repository` URL points to the intended public
+  repository before publishing. It may differ from a checkout's Forgejo origin;
+  crates.io and docs.rs use the package metadata, not the local remote.
 
 ## Preflight
 
@@ -51,19 +49,58 @@ fixtures. Check these items before making a public release or publishing crates.
 just fmt-check
 just lint
 just test
-just doc            # rustdoc -D warnings; docs.rs builds fail otherwise
-just build-boards   # nothing else in CI compiles the board crates
+just test-doc       # nextest does not execute documentation examples
+just doc            # rustdoc with warnings denied
+just build-boards   # supported Cortex-M configurations
+just lint-boards
+just hack           # each host-compatible feature independently
 just cov-core
 just cov-all
-cargo package -p tecla-config
-# Publish tecla-config, then wait for it to appear in the crates.io index.
-cargo package -p tecla
-# Publish tecla, then wait for it to appear in the crates.io index.
-cargo package -p tecla-macros
+just package-check
 ```
 
-`cargo package --list` only inspects archive contents; it does not perform the
-package build verification used by the commands above.
+`just package-check` runs [`scripts/check-packages.py`](../scripts/check-packages.py).
+It creates all eight `.crate` archives, extracts them to a temporary directory
+outside the checkout, and checks:
 
-Run `just ci` before tagging when HIL hardware/emulation dependencies are
-available.
+- Packaged licenses, versioned dependencies, and target paths.
+- Core and tooling libraries/binaries, including the optional dictionary client
+  and the core's `no_std` USB/MIDI/storage features.
+- Core and tooling documentation examples, compiled and run from the archives.
+- All configured Cortex-M examples, including the optional RP2040 core1 demo and
+  the nRF52840 BLE configuration.
+- Documentation using each crate's docs.rs target and feature settings, with
+  warnings denied.
+
+Cargo packages the workspace crates together with `--locked`, leaving the
+checkout's lockfile unchanged. Before the crates exist on crates.io, extracted
+builds use Cargo patches pointing only to the other extracted release archives.
+`cargo package --no-verify` **creates** archives; it is not build verification.
+The subsequent checks compile the extracted contents. No source files or Cargo
+configuration are borrowed from the checkout, and the script never publishes.
+Its build cache remains in `target/package-check` for subsequent runs.
+
+Python 3 and the normal board build prerequisites, including BLE's libclang,
+are required. Initialize the dictionary submodule before running the gate;
+see [setup](../deps.md). With dependencies already cached, run
+`python3 scripts/check-packages.py --offline` to disable registry access.
+
+Hosted Git source ZIP/tar downloads omit submodule contents. Repository builds
+need a recursive Git checkout; the verified `.crate` archives include the inputs
+their packaged examples require.
+
+`cargo package --list` only lists archive contents. It does not compile them.
+After publishing dependencies, run ordinary `cargo package` without
+`--no-verify` before publishing each dependent crate. The publication order is
+`tecla-config`, `tecla`, `tecla-macros`, then the five Cortex-M board crates;
+allow each dependency time to appear in the registry index.
+
+The ordinary board matrix does not cover every feature combination; the package
+gate additionally builds the RP2040 `core1-autocorrect` example. ESP32-S3 remains
+outside both matrices. Mutation suites are manual and focused; list their scopes
+before choosing additional release checks.
+
+Run `just ci` before tagging in an environment with the
+[emulation dependencies](../deps.md#emulation). It includes the checks above
+and Renode tests. Perform physical hardware checks separately for the boards
+included in the release.

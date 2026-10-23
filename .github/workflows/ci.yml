@@ -27,6 +27,7 @@ jobs:
           cargo clippy --workspace \
             --exclude tecla-rp2040 --exclude tecla-nrf52840 \
             --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --exclude tecla-stm32f0 \
             --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete \
             --all-targets
 
@@ -46,6 +47,7 @@ jobs:
           cargo test --workspace \
             --exclude tecla-rp2040 --exclude tecla-nrf52840 \
             --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --exclude tecla-stm32f0 \
             --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete
 
   # rustdoc with -D warnings — this is what catches intra-doc links that
@@ -60,6 +62,7 @@ jobs:
           RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace \
             --exclude tecla-rp2040 --exclude tecla-nrf52840 \
             --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --exclude tecla-stm32f0 \
             --features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete
 
   # Board crates are excluded from every host job above, so nothing else in
@@ -83,6 +86,9 @@ jobs:
           - crate: tecla-stm32f3
             target: thumbv7em-none-eabihf
             features: usb-midi
+          - crate: tecla-stm32f0
+            target: thumbv6m-none-eabi
+            features: ""
     steps:
       - uses: actions/checkout@v4
       # steno-dictionary compiles the Lapwing dictionary into the steno board
@@ -91,6 +97,11 @@ jobs:
         run: git submodule update --init --depth 1 .vendor/plover-lapwing-aio
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      - name: Check no_std core features
+        if: matrix.crate == 'tecla-rp2040'
+        run: |
+          cargo check --locked --release -p tecla --target thumbv6m-none-eabi \
+            --features usb,usb-midi,via,storage,embassy
       - name: Build Voyager without MIDI
         if: matrix.crate == 'tecla-stm32f3'
         run: |
@@ -103,7 +114,12 @@ jobs:
           cargo build --release -p ${{ matrix.crate }} --lib --examples \
             --target ${{ matrix.target }} \
             ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
-      - name: Clippy
+      - name: Clippy without MIDI
+        if: matrix.crate == 'tecla-stm32f3'
+        run: |
+          cargo clippy -p tecla-stm32f3 --lib --examples \
+            --target thumbv7em-none-eabihf
+      - name: Clippy with profile features
         run: |
           cargo clippy -p ${{ matrix.crate }} --lib --examples \
             --target ${{ matrix.target }} \
@@ -112,23 +128,41 @@ jobs:
   # BLE is a separate job: it needs libclang for bindgen (nrf-sdc-sys /
   # nrf-mpsl-sys) and must build with --no-default-features, because nrf-mpsl
   # provides the critical-section implementation that cortex-m otherwise would.
-  # Nothing else in CI compiles this feature, and it had rotted unnoticed.
+  # The package job also verifies this feature from its release archive.
   ble:
     runs-on: ubuntu-latest
+    container: node:22-bookworm
+    env:
+      LIBCLANG_PATH: /usr/lib/llvm-14/lib
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install
+      - uses: ./.forgejo/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Install libclang for bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+        run: apt-get install -y --no-install-recommends libclang-14-dev
       - name: Build
         run: |
-          cargo build --release -p tecla-nrf52840 --lib --example planck_ble \
+          cargo build --locked --release -p tecla-nrf52840 --lib --example planck_ble \
             --no-default-features --features ble --target thumbv7em-none-eabihf
       - name: Clippy
         run: |
-          cargo clippy -p tecla-nrf52840 --lib --example planck_ble \
+          cargo clippy --locked -p tecla-nrf52840 --lib --example planck_ble \
             --no-default-features --features ble --target thumbv7em-none-eabihf
+
+  packages:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    env:
+      LIBCLANG_PATH: /usr/lib/llvm-14/lib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-rust
+      - name: Install package-check tools
+        run: apt-get install -y --no-install-recommends python3 libclang-14-dev
+      - name: Fetch packaged dictionary data
+        run: git submodule update --init --depth 1 .vendor/plover-lapwing-aio
+      - name: Verify extracted release archives
+        run: python3 scripts/check-packages.py
 
   coverage:
     runs-on: ubuntu-latest
@@ -146,6 +180,7 @@ jobs:
           cargo llvm-cov --workspace \
             --exclude tecla-rp2040 --exclude tecla-nrf52840 \
             --exclude tecla-stm32f4 --exclude tecla-stm32f3 \
+            --exclude tecla-stm32f0 \
             --features tecla/testing \
             --ignore-filename-regex 'src/bin/' \
             --fail-under-lines 90

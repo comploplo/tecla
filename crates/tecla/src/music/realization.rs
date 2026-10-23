@@ -1,15 +1,15 @@
-//! Bounded harmonic realization around an arbitrary literal pitch collection.
+//! Bounded realization of literal pitch collections and generated harmonic bodies.
 //!
-//! This planner adds supporting voices; it never changes, removes or echoes an
-//! exact played pitch. Phrase direction, prepared holds and voice-specific
-//! dominant resolutions are retained between explicit events. It deliberately
+//! Accompaniment preserves every exact played pitch; autonomous realization
+//! supplies the whole body. Phrase direction, prepared holds and voice-specific
+//! dominant resolutions are retained between explicit events. The planner
 //! has no timer, MIDI output, automatic rhythm, or fixed bass/soprano anchors.
 
 use super::harmony::{Chord, Shape};
 use super::voicing::parallel_pair;
 use super::{ChordKind, ChordQuality, Key, PitchClassSet, Voicing};
 
-/// Maximum simultaneously generated supporting voices.
+/// Maximum simultaneously generated voices.
 pub const SUPPORT_VOICES: usize = 6;
 /// Chord identities per bounded search, independent of the number of held keys.
 pub const CHORD_CANDIDATES: usize = 12 * 25;
@@ -58,7 +58,7 @@ pub enum Colour {
     Extended,
 }
 
-/// The chord-member role of the lowest literal note, independently of added bass.
+/// The lowest literal note's chord role, or the autonomous generated bass role.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Foundation {
     /// Infer the lowest played note's role from the complete collection.
@@ -131,7 +131,7 @@ pub enum Direction {
 pub struct Preferences {
     /// Requested characteristic chord colour.
     pub colour: Colour,
-    /// Chord role assigned to the lowest literal played note.
+    /// Chord role of the lowest literal note, or of the autonomous bass.
     pub foundation: Foundation,
     /// Requested movement of the generated upper voices.
     pub motion: Motion,
@@ -145,7 +145,7 @@ pub struct Preferences {
     pub pedal: bool,
 }
 
-/// Supporting realization; the caller separately owns all literal played notes.
+/// Generated realization; accompaniment callers separately own literal notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Realization {
     /// Stable voice slots; absent voices are genuinely silent.
@@ -154,7 +154,7 @@ pub struct Realization {
     pub chord: Option<Chord>,
     /// Saved local destination, which need not be the global tonic.
     pub destination: Option<Chord>,
-    /// Prepared pitches currently waiting above their descending resolutions.
+    /// Prepared tones retained outside the current harmony until released.
     pub suspended: [bool; SUPPORT_VOICES],
     /// The harmonic root has no literal or generated representative.
     pub root_implied: bool,
@@ -268,11 +268,66 @@ impl Realizer {
     /// released but the phrase destination survives a breath between gestures.
     /// Two searches visit at most 300 chord recipes each; voice searches are bounded.
     pub fn plan(&mut self, held: &[u8], preferences: Preferences) -> Realization {
+        self.plan_inner(held, preferences, None, 0)
+    }
+
+    /// Generates a complete harmonic body without any literal keyboard notes.
+    ///
+    /// The reference describes harmonic context, not pitches already sounding
+    /// elsewhere. Each retained upper-voice bit preserves a genuinely prepared
+    /// tone, including through an arrival request. Later harmonies update its
+    /// resolution target without releasing the catch. On release, nonchord
+    /// tones resolve down by step when possible, otherwise to a nearby chord
+    /// tone. The caller advances this planner only for a performed harmonic event.
+    pub fn plan_harmony(
+        &mut self,
+        reference: Chord,
+        preferences: Preferences,
+        retain: u8,
+    ) -> Realization {
+        let reference = Chord {
+            root: reference.root % 12,
+            ..reference
+        };
+        self.plan_inner(&[], preferences, Some(reference), retain & 0b11_1110)
+    }
+
+    /// Releases selected suspension catches without choosing another harmony.
+    ///
+    /// Set bits keep their existing catches. Released voices take their current
+    /// resolution targets; phrase destination and harmonic history do not
+    /// advance. This also permits independent release of several gesture groups.
+    pub fn resolve_suspensions(&mut self, retain: u8) -> Realization {
+        for voice in 1..SUPPORT_VOICES {
+            if retain & (1 << voice) == 0 {
+                if self.current.suspended[voice] {
+                    self.current.notes[voice] = self.resolved[voice];
+                    self.current.suspended[voice] = false;
+                }
+                self.suspensions[voice] = None;
+            }
+        }
+        if let Some(chord) = self.current.chord {
+            self.current.root_implied = !(self.source.contains(chord.root)
+                || self.current.pitch_classes().contains(chord.root));
+        }
+        self.tendencies = dominant_tendencies(self.current);
+        self.current
+    }
+
+    fn plan_inner(
+        &mut self,
+        held: &[u8],
+        preferences: Preferences,
+        harmonic_reference: Option<Chord>,
+        retain: u8,
+    ) -> Realization {
+        let autonomous = harmonic_reference.is_some();
         if !preferences.pedal {
             self.pedal = None;
         }
         let source = pitches(held.iter().copied().filter(|note| *note <= 127));
-        if source.is_empty() {
+        if source.is_empty() && !autonomous {
             self.current.notes = [None; SUPPORT_VOICES];
             self.current.suspended = [false; SUPPORT_VOICES];
             self.resolved = [None; SUPPORT_VOICES];
@@ -290,7 +345,8 @@ impl Realizer {
             .filter(|note| *note <= 127)
             .min()
             .unwrap_or(60);
-        let mut reference = self.select_reference(source, lowest);
+        let mut reference =
+            harmonic_reference.unwrap_or_else(|| self.select_reference(source, lowest));
         // A single passing/neighbour tone may decorate an established collection.
         if source_changed
             && preferences.motion == Motion::Nearest
@@ -315,13 +371,26 @@ impl Realizer {
         } else {
             reference
         };
-        let selected = self.select_chord(source, lowest % 12, relation, preferences);
+        let selection_preferences = if autonomous {
+            Preferences {
+                foundation: Foundation::Natural,
+                ..preferences
+            }
+        } else {
+            preferences
+        };
+        let selected = self.select_chord(source, lowest % 12, relation, selection_preferences);
         let (chord, destination) = match preferences.direction {
             Direction::Continue | Direction::Substitute | Direction::Explore => {
                 let chord = if preferences.direction == Direction::Explore {
                     old.chord
                         .filter(|chord| {
-                            candidate_limitations(*chord, lowest % 12, relation, preferences) == 0
+                            candidate_limitations(
+                                *chord,
+                                lowest % 12,
+                                relation,
+                                selection_preferences,
+                            ) == 0
                         })
                         .unwrap_or(selected)
                 } else {
@@ -380,32 +449,90 @@ impl Realizer {
         };
         let palette = chord.tones();
         let mut notes = [None; SUPPORT_VOICES];
-        let retaining_delay = preferences.delay && preferences.direction != Direction::Arrive;
+        let retain = if autonomous {
+            retain
+        } else if preferences.delay && preferences.direction != Direction::Arrive {
+            0b11_1110
+        } else {
+            0
+        };
         let mut suspended = [false; SUPPORT_VOICES];
-        if retaining_delay {
+        if autonomous {
             for voice in 1..SUPPORT_VOICES {
-                if let Some(pitch) = self.suspensions[voice] {
+                let keep = retain & (1 << voice) != 0;
+                let before = self.suspensions[voice].or_else(|| {
+                    old.notes[voice].filter(|pitch| {
+                        keep && old
+                            .chord
+                            .is_some_and(|chord| chord.tones().contains(*pitch))
+                    })
+                });
+                self.suspensions[voice] = None;
+                let Some(before) = before else { continue };
+                if keep {
+                    notes[voice] = Some(before);
+                    suspended[voice] = !palette.contains(before);
+                    self.suspensions[voice] = Some(before);
+                }
+            }
+            let mut occupied = [None; SUPPORT_VOICES * 2];
+            occupied[..SUPPORT_VOICES].copy_from_slice(&notes);
+            for voice in 1..SUPPORT_VOICES {
+                let before = self.suspensions[voice]
+                    .or_else(|| old.notes[voice].filter(|_| old.suspended[voice]));
+                let Some(before) = before else { continue };
+                let heard = occupied[voice].take();
+                let target = retained_target(before, palette, &occupied);
+                occupied[voice] = heard;
+                occupied[SUPPORT_VOICES + voice] = Some(target);
+                self.resolved[voice] = Some(target);
+                if retain & (1 << voice) == 0 && old.suspended[voice] {
+                    notes[voice] = Some(target);
+                    occupied[voice] = Some(target);
+                }
+            }
+        } else if retain != 0 {
+            for voice in 1..SUPPORT_VOICES {
+                if let Some(pitch) = self.suspensions[voice].filter(|_| retain & (1 << voice) != 0)
+                {
                     notes[voice] = Some(pitch);
                     suspended[voice] = true;
                 }
             }
         }
+        let retaining_delay = retain != 0;
+        let voicing_preferences = if autonomous {
+            Preferences {
+                delay: retaining_delay,
+                ..preferences
+            }
+        } else {
+            preferences
+        };
         let essential = chord.essential();
         let characteristic = characteristic(chord, preferences.colour);
         // A dense literal collection needs fewer doublings, but its requested
         // colour and missing structural pitches take precedence over density.
         let mut budget = match source.len() {
-            1..=2 => 4,
+            0..=2 => 4,
             3..=4 => 3,
             _ => 2,
         };
         let forced_resolution = matches!(
             preferences.direction,
             Direction::Arrive | Direction::Deceive
-        ) || (!preferences.delay
-            && old.suspended.into_iter().any(|held| held));
+        ) || old.suspended.into_iter().enumerate().any(|(voice, held)| {
+            held && if autonomous {
+                retain & (1 << voice) == 0
+            } else {
+                !preferences.delay
+            }
+        });
         if forced_resolution {
             for (voice, note) in notes.iter_mut().enumerate() {
+                if autonomous && note.is_some() {
+                    continue;
+                }
                 let target = if old.suspended[voice] {
                     self.resolved[voice]
                 } else if matches!(
@@ -432,7 +559,14 @@ impl Realizer {
             // location; repeated steering cannot walk the bass into sub-bass.
             let bass_ceiling = lowest.saturating_sub(1).min(52);
             let bass_floor = bass_ceiling.saturating_sub(11).max(28);
-            let bass_class = if preferences.foundation == Foundation::Natural {
+            let bass_class = if autonomous {
+                match preferences.foundation {
+                    Foundation::Natural | Foundation::Root => chord.root,
+                    Foundation::Third => chord.third(),
+                    Foundation::Fifth => chord.fifth(),
+                    Foundation::Seventh => chord.seventh().unwrap_or(chord.root),
+                }
+            } else if preferences.foundation == Foundation::Natural {
                 chord.root
             } else {
                 lowest % 12
@@ -444,8 +578,21 @@ impl Realizer {
                 0,
                 held,
                 &notes,
-                preferences,
+                voicing_preferences,
             );
+            // A retained upper tone can occupy the inversion's only nearby bass
+            // pitch. Use a lower octave rather than erase the foundation.
+            if autonomous && notes[0].is_none() {
+                notes[0] = self.choose_note(
+                    bass_class,
+                    28,
+                    bass_ceiling,
+                    0,
+                    held,
+                    &notes,
+                    voicing_preferences,
+                );
+            }
         }
         if preferences.pedal && self.pedal.is_none() {
             self.pedal = notes[0];
@@ -481,7 +628,8 @@ impl Realizer {
                     break;
                 }
                 let (low, high) = register(voice);
-                notes[voice] = self.choose_note(class, low, high, voice, held, &notes, preferences);
+                notes[voice] =
+                    self.choose_note(class, low, high, voice, held, &notes, voicing_preferences);
                 if notes[voice].is_some() {
                     represented.insert(class);
                 }
@@ -513,18 +661,31 @@ impl Realizer {
             let Some(voice) = (1..SUPPORT_VOICES).find(|voice| notes[*voice].is_none()) else {
                 break;
             };
-            notes[voice] = self.fill_note(fill, voice, held, &notes, preferences);
+            notes[voice] = self.fill_note(fill, voice, held, &notes, voicing_preferences);
             fill.rotate_left(1);
         }
         let mut resolved = notes;
+        let mut occupied = [None; SUPPORT_VOICES * 2];
+        occupied[..SUPPORT_VOICES].copy_from_slice(&notes);
         for voice in 1..SUPPORT_VOICES {
             if suspended[voice] {
+                if autonomous {
+                    if let Some(pitch) = notes[voice] {
+                        // Catches can resolve independently: reserve both heard
+                        // pitches and other targets so releases cannot merge voices.
+                        let target = self.resolved[voice]
+                            .filter(|target| !occupied.contains(&Some(*target)))
+                            .unwrap_or_else(|| retained_target(pitch, palette, &occupied));
+                        self.resolved[voice] = Some(target);
+                        occupied[SUPPORT_VOICES + voice] = Some(target);
+                    }
+                }
                 resolved[voice] = self.resolved[voice];
             }
         }
-        if retaining_delay {
+        if retaining_delay && !autonomous {
             for voice in 1..SUPPORT_VOICES {
-                if suspended[voice] {
+                if suspended[voice] || retain & (1 << voice) == 0 {
                     continue;
                 }
                 let (Some(before), Some(target)) = (old.notes[voice], notes[voice]) else {
@@ -549,12 +710,14 @@ impl Realizer {
                 }
             }
         }
-        self.suspensions = [None; SUPPORT_VOICES];
-        for voice in 1..SUPPORT_VOICES {
-            if suspended[voice] {
-                self.suspensions[voice] = notes[voice];
-                if notes[voice].is_some_and(|note| held.contains(&note)) {
-                    notes[voice] = None;
+        if !autonomous {
+            self.suspensions = [None; SUPPORT_VOICES];
+            for voice in 1..SUPPORT_VOICES {
+                if suspended[voice] {
+                    self.suspensions[voice] = notes[voice];
+                    if notes[voice].is_some_and(|note| held.contains(&note)) {
+                        notes[voice] = None;
+                    }
                 }
             }
         }
@@ -567,7 +730,11 @@ impl Realizer {
             suspended,
             root_implied: !sounding.contains(chord.root),
         };
-        self.limited = candidate_limitations(chord, lowest % 12, relation, preferences);
+        self.limited = candidate_limitations(chord, lowest % 12, relation, selection_preferences);
+        if autonomous && preferences.foundation == Foundation::Seventh && chord.seventh().is_none()
+        {
+            self.limited |= 2;
+        }
         if !characteristic.is_empty() && sounding.bits() & characteristic.bits() == 0 {
             self.limited |= 1;
         }
@@ -824,8 +991,16 @@ impl Realizer {
                         .iter()
                         .zip(self.resolved)
                         .any(|(suspension, target)| {
-                            suspension.is_some()
-                                && target.is_some_and(|target| target % 12 == note % 12)
+                            suspension.is_some_and(|held| {
+                                target.is_some_and(|target| {
+                                    target != held
+                                        && if voice == 0 {
+                                            target == note
+                                        } else {
+                                            target % 12 == note % 12
+                                        }
+                                })
+                            })
                         }))
             {
                 continue;
@@ -1061,6 +1236,23 @@ fn mode_pitches(reference: Chord) -> PitchClassSet {
 fn voice_centre(voice: usize) -> u8 {
     // Alternating open registers leave room to contract as well as to expand.
     [40, 60, 74, 67, 79, 86][voice]
+}
+
+fn retained_target(pitch: u8, palette: PitchClassSet, occupied: &[Option<u8>]) -> u8 {
+    let available = |target| palette.contains(target) && !occupied.contains(&Some(target));
+    if available(pitch) {
+        return pitch;
+    }
+    for delta in [-1_i16, -2, 1, 2] {
+        let target = i16::from(pitch) + delta;
+        if (0..=127).contains(&target) && available(target as u8) {
+            return target as u8;
+        }
+    }
+    (0_u8..=127)
+        .filter(|target| available(*target))
+        .min_by_key(|target| target.abs_diff(pitch))
+        .unwrap_or(pitch)
 }
 
 fn register(voice: usize) -> (u8, u8) {
@@ -1925,5 +2117,349 @@ mod tests {
             1,
             "catalogue has no half-diminished ninth recipe"
         );
+    }
+
+    #[test]
+    fn autonomous_body_supplies_its_own_structural_tones_in_every_key() {
+        for root in 0..12 {
+            for shape in [
+                Shape::Major,
+                Shape::Minor,
+                Shape::Dominant7,
+                Shape::Diminished7,
+            ] {
+                let reference = chord(root, shape);
+                let mut player = Realizer::new(Key::C_MAJOR);
+                let body = player.plan_harmony(reference, Preferences::default(), 0);
+                assert_eq!(body.chord, Some(reference));
+                assert!(count(&body.notes) >= 4, "{body:?}");
+                assert_eq!(
+                    body.pitch_classes().bits() & reference.essential().bits(),
+                    reference.essential().bits()
+                );
+                assert!(!body.root_implied, "{body:?}");
+                assert!(player.source.is_empty());
+                assert_literal_safe(body, &[]);
+            }
+        }
+    }
+
+    #[test]
+    fn autonomous_reference_accepts_midi_roots_outside_the_first_octave() {
+        for root in [12, 23, 60, 127, 128, 254, 255] {
+            let mut actual = Realizer::new(Key::C_MAJOR);
+            let mut expected = Realizer::new(Key::C_MAJOR);
+            assert_eq!(
+                actual.plan_harmony(chord(root, Shape::Major), Preferences::default(), 0),
+                expected.plan_harmony(chord(root % 12, Shape::Major), Preferences::default(), 0)
+            );
+        }
+    }
+
+    #[test]
+    fn independently_released_catches_keep_distinct_sounding_voices() {
+        for root in 0..12 {
+            for movement in [1, 5] {
+                for shape in [Shape::Major, Shape::Minor] {
+                    let mut player = Realizer::new(Key::C_MAJOR);
+                    player.plan_harmony(chord(root, shape), Preferences::default(), 0);
+                    let next = chord((root + movement) % 12, shape);
+                    let mut retain = 0b11_1110;
+                    let caught = player.plan_harmony(next, Preferences::default(), retain);
+                    assert!(caught.notes[0].is_some(), "bass disappeared: {caught:?}");
+                    let mut event_release = player.clone();
+                    let released = event_release.plan_harmony(next, Preferences::default(), 0);
+                    assert!(released.notes[0].is_some());
+                    for (voice, pitch) in released.notes.iter().enumerate() {
+                        if pitch.is_some() {
+                            assert!(
+                                !released.notes[voice + 1..].contains(pitch),
+                                "release during event merged voices: {released:?}"
+                            );
+                        }
+                    }
+                    for voice in 1..SUPPORT_VOICES {
+                        retain &= !(1 << voice);
+                        let released = player.resolve_suspensions(retain);
+                        assert!(!released.root_implied, "sounding root lost: {released:?}");
+                        let notes: heapless::Vec<_, SUPPORT_VOICES> =
+                            released.notes.into_iter().flatten().collect();
+                        assert!(notes.len() >= 4, "{root} -> {next:?}: {released:?}");
+                        for (index, pitch) in notes.iter().enumerate() {
+                            assert!(
+                                !notes[index + 1..].contains(pitch),
+                                "{root} -> {next:?}, retain={retain}: {released:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_catch_reserves_its_upper_resolution_while_the_bass_can_state_the_root() {
+        let mut catches = 0;
+        for root in 0..12 {
+            for retain in [2, 4, 8, 16, 32, 6, 10] {
+                let mut player = Realizer::new(Key::C_MAJOR);
+                player.plan_harmony(chord(root, Shape::Major), Preferences::default(), 0);
+                let body = player.plan_harmony(
+                    chord((root + 5) % 12, Shape::Major),
+                    Preferences::default(),
+                    retain,
+                );
+                assert!(body.notes[0].is_some());
+                for voice in 1..SUPPORT_VOICES {
+                    if !body.suspended[voice] {
+                        continue;
+                    }
+                    catches += 1;
+                    let target = player.resolved[voice].unwrap();
+                    for other in 1..SUPPORT_VOICES {
+                        if retain & (1 << other) == 0 {
+                            assert!(
+                                body.notes[other].is_none_or(|pitch| pitch % 12 != target % 12),
+                                "resolution sounded before release: {body:?}, target={target}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(catches > 0);
+    }
+
+    #[test]
+    fn autonomous_inversions_choose_the_generated_bass_role() {
+        for foundation in [
+            Foundation::Root,
+            Foundation::Third,
+            Foundation::Fifth,
+            Foundation::Seventh,
+        ] {
+            let mut player = Realizer::new(Key::C_MAJOR);
+            let reference = chord(7, Shape::Dominant7);
+            let body = player.plan_harmony(
+                reference,
+                Preferences {
+                    foundation,
+                    ..Preferences::default()
+                },
+                0,
+            );
+            let expected = match foundation {
+                Foundation::Root => reference.root,
+                Foundation::Third => reference.third(),
+                Foundation::Fifth => reference.fifth(),
+                Foundation::Seventh => reference.seventh().unwrap(),
+                Foundation::Natural => unreachable!(),
+            };
+            assert_eq!(body.chord, Some(reference));
+            assert_eq!(body.notes[0].unwrap() % 12, expected);
+            assert_eq!(player.limited & 2, 0);
+        }
+    }
+
+    #[test]
+    fn autonomous_preparation_can_be_released_independently_without_advancing_harmony() {
+        let mut player = Realizer::new(Key::C_MAJOR);
+        let prepared = player.plan_harmony(chord(5, Shape::Major), Preferences::default(), 0);
+        let displaced =
+            player.plan_harmony(chord(7, Shape::Major), Preferences::default(), 0b11_1110);
+        let catches: heapless::Vec<usize, SUPPORT_VOICES> = displaced
+            .suspended
+            .iter()
+            .enumerate()
+            .filter_map(|(voice, held)| held.then_some(voice))
+            .collect();
+        assert!(
+            catches.len() >= 2,
+            "prepared={prepared:?}, displaced={displaced:?}"
+        );
+        let targets = player.resolved;
+        for &voice in &catches {
+            let old = prepared.notes[voice].unwrap();
+            let target = targets[voice].unwrap();
+            assert_eq!(displaced.notes[voice], Some(old));
+            assert!(prepared.chord.unwrap().tones().contains(old));
+            assert!(!displaced.chord.unwrap().tones().contains(old));
+            assert!(old > target && old - target <= 2);
+        }
+        let event = player.event;
+        let recent = player.recent;
+        let destination = displaced.destination;
+        let keep = 1 << catches[1];
+        let partly_released = player.resolve_suspensions(keep);
+        assert_eq!(partly_released.notes[catches[0]], targets[catches[0]]);
+        assert!(!partly_released.suspended[catches[0]]);
+        assert_eq!(
+            partly_released.notes[catches[1]],
+            displaced.notes[catches[1]]
+        );
+        assert!(partly_released.suspended[catches[1]]);
+        let released = player.resolve_suspensions(0);
+        assert_eq!(released.notes[catches[1]], targets[catches[1]]);
+        assert!(!released.suspended.into_iter().any(|held| held));
+        assert_eq!(released.chord, displaced.chord);
+        assert_eq!(released.destination, destination);
+        assert_eq!(player.event, event);
+        assert_eq!(player.recent, recent);
+        assert_eq!(player.resolve_suspensions(0), released);
+    }
+
+    #[test]
+    fn autonomous_arrival_keeps_explicitly_delayed_prepared_tones() {
+        let mut player = Realizer::new(Key::C_MAJOR);
+        let tonic = chord(0, Shape::Major);
+        player.plan_harmony(tonic, Preferences::default(), 0);
+        let dominant = player.plan_harmony(tonic, request(Direction::Lean), 0);
+        let arrival = player.plan_harmony(tonic, request(Direction::Arrive), 0b11_1110);
+        assert_eq!(arrival.chord, Some(tonic));
+        assert_eq!(arrival.destination, None);
+        assert!(
+            arrival.suspended.into_iter().any(|held| held),
+            "dominant={dominant:?}, arrival={arrival:?}"
+        );
+        let targets = player.resolved;
+        for (voice, held) in arrival.suspended.into_iter().enumerate() {
+            if held {
+                assert_eq!(arrival.notes[voice], dominant.notes[voice]);
+                assert!(
+                    arrival.notes[voice]
+                        .unwrap()
+                        .abs_diff(targets[voice].unwrap())
+                        <= 2
+                );
+            }
+        }
+        let released = player.resolve_suspensions(0);
+        for (voice, held) in arrival.suspended.into_iter().enumerate() {
+            if held {
+                assert_eq!(released.notes[voice], targets[voice]);
+            }
+        }
+    }
+
+    #[test]
+    fn autonomous_current_shape_cannot_invent_an_unheard_preparation() {
+        let mut fresh = Realizer::new(Key::C_MAJOR);
+        let unprepared =
+            fresh.plan_harmony(chord(7, Shape::Major), Preferences::default(), u8::MAX);
+        assert!(!unprepared.suspended.into_iter().any(|held| held));
+        let mut heard = Realizer::new(Key::C_MAJOR);
+        heard.plan_harmony(chord(5, Shape::Major), Preferences::default(), 0);
+        let prepared = heard.plan_harmony(chord(7, Shape::Major), Preferences::default(), u8::MAX);
+        assert!(prepared.suspended.into_iter().any(|held| held));
+        assert_ne!(prepared.notes, unprepared.notes);
+    }
+
+    #[test]
+    fn autonomous_retained_tones_reinterpret_and_retarget_as_harmony_changes() {
+        let mut player = Realizer::new(Key::C_MAJOR);
+        player.plan_harmony(chord(5, Shape::Major), Preferences::default(), 0);
+        let caught = player.plan_harmony(chord(7, Shape::Major), Preferences::default(), 0b11_1110);
+        let common = player.plan_harmony(chord(9, Shape::Minor), Preferences::default(), 0b11_1110);
+        for (voice, held) in caught.suspended.into_iter().enumerate() {
+            if held {
+                assert_eq!(common.notes[voice], caught.notes[voice]);
+                assert!(!common.suspended[voice]);
+                assert_eq!(player.resolved[voice], common.notes[voice]);
+            }
+        }
+        let changed =
+            player.plan_harmony(chord(2, Shape::Minor), Preferences::default(), 0b11_1110);
+        let targets = player.resolved;
+        let palette = changed.chord.unwrap().tones();
+        assert!(count(&changed.notes) >= 4);
+        for (voice, held) in caught.suspended.into_iter().enumerate() {
+            if held {
+                assert_eq!(changed.notes[voice], caught.notes[voice]);
+                assert!(palette.contains(targets[voice].unwrap()));
+                assert_eq!(
+                    changed.suspended[voice],
+                    !palette.contains(changed.notes[voice].unwrap())
+                );
+            }
+        }
+        let released = player.resolve_suspensions(0);
+        for (voice, held) in caught.suspended.into_iter().enumerate() {
+            if held {
+                assert_eq!(released.notes[voice], targets[voice]);
+            }
+        }
+        assert!(!released.suspended.into_iter().any(|held| held));
+        assert!(released
+            .notes
+            .into_iter()
+            .flatten()
+            .all(|pitch| palette.contains(pitch)));
+        assert!(player.suspensions.into_iter().all(|pitch| pitch.is_none()));
+    }
+
+    #[test]
+    fn autonomous_common_tones_stay_pinned_until_their_physical_catch_is_released() {
+        let mut player = Realizer::new(Key::C_MAJOR);
+        let tonic = chord(0, Shape::Major);
+        let before = player.plan_harmony(tonic, Preferences::default(), 0);
+        let rising = Preferences {
+            motion: Motion::Rising,
+            ..Preferences::default()
+        };
+        let caught = player.plan_harmony(tonic, rising, 0b11_1110);
+        assert_eq!(caught.notes, before.notes);
+        assert!(!caught.suspended.into_iter().any(|held| held));
+        let mut simultaneous = player.clone();
+        assert_ne!(
+            simultaneous.plan_harmony(tonic, rising, 0).notes,
+            before.notes
+        );
+        assert_eq!(player.resolve_suspensions(0).notes, before.notes);
+        assert!(player.suspensions.into_iter().all(|pitch| pitch.is_none()));
+        let released = player.plan_harmony(tonic, rising, 0);
+        assert_ne!(released.notes, before.notes);
+    }
+
+    #[test]
+    fn retained_nonchord_release_prefers_steps_then_nearest_consonance() {
+        let major = chord(0, Shape::Major).tones();
+        assert_eq!(retained_target(65, major, &[]), 64);
+        assert_eq!(retained_target(62, major, &[]), 60);
+        assert_eq!(retained_target(59, major, &[]), 60);
+        assert_eq!(retained_target(64, major, &[]), 64);
+        assert_eq!(
+            retained_target(69, chord(0, Shape::Diminished).tones(), &[]),
+            66
+        );
+    }
+
+    #[test]
+    fn retained_targets_stay_in_midi_range_and_avoid_occupied_pitches() {
+        for root in 0..12 {
+            for shape in [Shape::Major, Shape::Minor] {
+                let palette = chord(root, shape).tones();
+                for pitch in 0..=127 {
+                    let target = retained_target(pitch, palette, &[]);
+                    assert!(target <= 127 && palette.contains(target));
+                    let alternative = retained_target(pitch, palette, &[Some(target)]);
+                    assert!(alternative <= 127 && palette.contains(alternative));
+                    assert_ne!(alternative, target);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn autonomous_rest_drops_physical_preparation_but_retains_phrase_destination() {
+        let mut player = Realizer::new(Key::C_MAJOR);
+        let tonic = chord(0, Shape::Major);
+        player.plan_harmony(tonic, Preferences::default(), 0);
+        let dominant = player.plan_harmony(tonic, request(Direction::Lean), 0);
+        let rest = player.plan(&[], Preferences::default());
+        assert_eq!(rest.destination, dominant.destination);
+        assert!(rest.notes.into_iter().all(|note| note.is_none()));
+        let resumed = player.plan_harmony(tonic, request(Direction::Arrive), u8::MAX);
+        assert_eq!(resumed.chord, Some(tonic));
+        assert!(!resumed.suspended.into_iter().any(|held| held));
     }
 }

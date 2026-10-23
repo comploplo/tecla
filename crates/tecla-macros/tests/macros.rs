@@ -12,13 +12,13 @@ use tecla_macros::{keymap, layer, steno, LT, MT};
 
 #[test]
 fn layer_macro_produces_correct_layer_type() {
-    let l: Layer<()> = layer!(Base, A, B, C, D);
+    let l: Layer<(), 4> = layer!(Base, A, B, C, D);
     assert_eq!(l.len(), 4);
 }
 
 #[test]
 fn layer_macro_letter_keys_resolve_correctly() {
-    let l: Layer<()> = layer!(Base, A, B, Z);
+    let l: Layer<(), 3> = layer!(Base, A, B, Z);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::A)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::B)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::Z)));
@@ -26,22 +26,28 @@ fn layer_macro_letter_keys_resolve_correctly() {
 
 #[test]
 fn layer_macro_transparent_resolves_to_transparent() {
-    let l: Layer<()> = layer!(Base, TRNS, TRANSPARENT);
+    let l: Layer<(), 2> = layer!(Base, TRNS, TRANSPARENT);
     assert_eq!(l.get(0), Some(Action::Transparent));
     assert_eq!(l.get(1), Some(Action::Transparent));
 }
 
 #[test]
 fn layer_macro_noop_resolves_to_noop() {
-    let l: Layer<()> = layer!(Base, NOOP, NoOp, XXXXXXX);
+    let l: Layer<(), 3> = layer!(Base, NOOP, NoOp, XXXXXXX);
     assert_eq!(l.get(0), Some(Action::NoOp));
     assert_eq!(l.get(1), Some(Action::NoOp));
     assert_eq!(l.get(2), Some(Action::NoOp));
 }
 
 #[test]
+fn layer_macro_type_wpm_resolves_to_action() {
+    let l: Layer<(), 1> = layer!(Stats, TYPE_WPM);
+    assert_eq!(l.get(0), Some(Action::TypeWpm));
+}
+
+#[test]
 fn layer_macro_function_keys_resolve_correctly() {
-    let l: Layer<()> = layer!(Fn, F1, F2, F12);
+    let l: Layer<(), 3> = layer!(Fn, F1, F2, F12);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::F1)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::F2)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::F12)));
@@ -49,7 +55,7 @@ fn layer_macro_function_keys_resolve_correctly() {
 
 #[test]
 fn layer_macro_modifier_keys_resolve_correctly() {
-    let l: Layer<()> = layer!(Mods, LSFT, LCTL, LALT, LGUI);
+    let l: Layer<(), 4> = layer!(Mods, LSFT, LCTL, LALT, LGUI);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::LShift)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::LCtrl)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::LAlt)));
@@ -58,7 +64,7 @@ fn layer_macro_modifier_keys_resolve_correctly() {
 
 #[test]
 fn layer_macro_space_enter_escape_tab_backspace() {
-    let l: Layer<()> = layer!(Nav, SPC, ENT, ESC, TAB, BSPC);
+    let l: Layer<(), 5> = layer!(Nav, SPC, ENT, ESC, TAB, BSPC);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::Space)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::Enter)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::Escape)));
@@ -68,7 +74,7 @@ fn layer_macro_space_enter_escape_tab_backspace() {
 
 #[test]
 fn layer_macro_navigation_keys() {
-    let l: Layer<()> = layer!(Nav, UP, DOWN, LEFT, RGHT, HOME, END, PGUP, PGDN);
+    let l: Layer<(), 8> = layer!(Nav, UP, DOWN, LEFT, RGHT, HOME, END, PGUP, PGDN);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::Up)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::Down)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::Left)));
@@ -81,7 +87,8 @@ fn layer_macro_navigation_keys() {
 
 #[test]
 fn layer_macro_punctuation_keys() {
-    let l: Layer<()> = layer!(Sym, MINS, EQL, LBRC, RBRC, BSLS, SCLN, QUOT, GRV, COMM, DOT, SLSH);
+    let l: Layer<(), 11> =
+        layer!(Sym, MINS, EQL, LBRC, RBRC, BSLS, SCLN, QUOT, GRV, COMM, DOT, SLSH);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::Minus)));
     assert_eq!(l.get(1), Some(Action::Key(KeyCode::Equal)));
     assert_eq!(l.get(2), Some(Action::Key(KeyCode::LeftBrace)));
@@ -97,14 +104,14 @@ fn layer_macro_punctuation_keys() {
 
 #[test]
 fn layer_macro_digits_resolve_correctly() {
-    let l: Layer<()> = layer!(Num, N1, N2, N3, N4, N5, N6, N7, N8, N9, N0);
+    let l: Layer<(), 10> = layer!(Num, N1, N2, N3, N4, N5, N6, N7, N8, N9, N0);
     assert_eq!(l.get(0), Some(Action::Key(KeyCode::N1)));
     assert_eq!(l.get(9), Some(Action::Key(KeyCode::N0)));
 }
 
 #[test]
 fn layer_macro_mt_inside_layer_produces_modtap() {
-    let l: Layer<()> = layer!(Base, MT!(LSFT, A), B, C);
+    let l: Layer<(), 3> = layer!(Base, MT!(LSFT, A), B, C);
     assert_eq!(
         l.get(0),
         Some(Action::ModTap {
@@ -117,7 +124,7 @@ fn layer_macro_mt_inside_layer_produces_modtap() {
 
 #[test]
 fn layer_macro_lt_inside_layer_produces_layertap() {
-    let l: Layer<()> = layer!(Base, LT!(1, SPC), A);
+    let l: Layer<(), 2> = layer!(Base, LT!(1, SPC), A);
     assert_eq!(
         l.get(0),
         Some(Action::LayerTap {
@@ -237,7 +244,7 @@ fn lt_forward_reference_resolves_correctly() {
 }
 
 #[test]
-fn lt_numeric_index_still_works_inside_keymap() {
+fn lt_numeric_index_resolves_inside_keymap() {
     let stack: LayerStack<2, 2, ()> = keymap! {
         layer!(Base, LT!(1, A), B),
         layer!(Fn,   TRNS,      F1),
@@ -498,4 +505,26 @@ fn mt_and_lt_need_tap_hold() {
 fn compile_fail_cases() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/*.rs");
+}
+
+#[test]
+fn keymap_macro_preserves_all_102_dense_matrix_positions() {
+    let stack: LayerStack<1, 102> = keymap! {
+        layer!(Base,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A,
+            A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, RGHT, B
+        ),
+    };
+    assert_eq!(
+        stack.resolve(KeyPos::new(5, 15), 17),
+        Action::Key(KeyCode::Right)
+    );
+    assert_eq!(
+        stack.resolve(KeyPos::new(5, 16), 17),
+        Action::Key(KeyCode::B)
+    );
 }

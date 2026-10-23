@@ -71,7 +71,7 @@ fn build_processor() -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
 
     let overlay = [Action::<()>::NoOp; KEYS];
 
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
+    let mut layers = HVec::<Layer<(), KEYS>, LAYERS>::new();
     layers.push(Layer::new(&base)).ok();
     layers.push(Layer::new(&overlay)).ok();
     KeyboardProcessor::new(

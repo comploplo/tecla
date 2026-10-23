@@ -137,6 +137,7 @@ enum State {
 pub struct TapHoldRecognizer<const BUF: usize = 32> {
     config: TapHoldConfig,
     tap_key_pos: KeyPos,
+    pressed_at_ms: u64,
     tap_keycode: KeyCode,
     hold_action: HoldAction,
     state: State,
@@ -168,6 +169,7 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
         Self {
             config,
             tap_key_pos: press_event.pos,
+            pressed_at_ms: press_event.timestamp_ms,
             tap_keycode: tap,
             hold_action: HoldAction::Mod(hold),
             state: State::Deciding {
@@ -191,6 +193,7 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
         Self {
             config,
             tap_key_pos: press_event.pos,
+            pressed_at_ms: press_event.timestamp_ms,
             tap_keycode: tap,
             hold_action: HoldAction::Layer(layer),
             state: State::Deciding {
@@ -209,6 +212,7 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
         Self {
             config,
             tap_key_pos: press_event.pos,
+            pressed_at_ms: press_event.timestamp_ms,
             tap_keycode: KeyCode::None,
             hold_action: HoldAction::Layer(layer),
             state: State::Deciding {
@@ -269,6 +273,12 @@ impl<const BUF: usize> TapHoldRecognizer<BUF> {
     #[must_use]
     pub fn tap_pos(&self) -> KeyPos {
         self.tap_key_pos
+    }
+
+    /// Returns the original press time, including after tap-hold resolution.
+    #[must_use]
+    pub fn pressed_at_ms(&self) -> u64 {
+        self.pressed_at_ms
     }
 
     fn resolve_tap(&mut self) -> Recognition<TapHoldDecision> {

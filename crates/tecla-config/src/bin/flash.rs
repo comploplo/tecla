@@ -3,7 +3,8 @@
 //! The flash logic stays in Rust, but the final transport step is delegated to
 //! the existing tools:
 //! - `cargo run` for probe-rs-backed boards
-//! - `elf2uf2-rs --deploy` for UF2 boards
+//! - `elf2uf2-rs` for UF2 conversion, followed by a copy to the bootloader volume
+//! - `dfu-util` for DFU boards, after objcopy and image-size validation
 
 use std::ffi::OsStr;
 use std::fs;
@@ -14,9 +15,10 @@ use std::thread;
 use std::time::Duration;
 
 use tecla_config::flash::{
-    cargo_args, discover_native_profiles, is_rp2_bootloader, method_name, qmk_family,
-    resolve_native_profile, suggest_usb_flash, usb_device_id, usb_device_name,
-    usb_source_matches_selector, BoardProfile, FlashMethod, UsbDevice, UsbSourceInfo,
+    cargo_args, dfu_flash_args, dfu_preview_target, discover_native_profiles, is_rp2_bootloader,
+    method_name, qmk_family, resolve_native_profile, select_dfu_target, suggest_usb_flash,
+    usb_device_id, usb_device_name, usb_source_matches_selector, validate_dfu_image_size,
+    BoardProfile, DfuTarget, FlashMethod, UsbDevice, UsbSourceInfo,
 };
 use tecla_config::qmk::info_json;
 
@@ -29,10 +31,12 @@ fn main() {
     let mut qmk_keyboard = None;
     let mut tecla_config = None;
     let mut list = false;
+    let mut dry_run = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--list" => list = true,
+            "--dry-run" => dry_run = true,
             "--device" => {
                 device = Some(next_value("--device", &mut args));
             }
@@ -56,11 +60,11 @@ fn main() {
     }
 
     match (qmk_keyboard, tecla_config) {
-        (Some(keyboard_name), None) => flash_qmk(device.as_deref(), &keyboard_name),
+        (Some(keyboard_name), None) => flash_qmk(device.as_deref(), &keyboard_name, dry_run),
         (None, Some(profile_name)) => {
             let profile = resolve_native_profile(Path::new(PROFILE_ROOT), &profile_name)
                 .unwrap_or_else(|err| fail(&err));
-            flash_profile(profile, device.as_deref());
+            flash_profile(profile, device.as_deref(), dry_run);
         }
         (Some(_), Some(_)) => fail("use only one of --qmk-keyboard or --tecla-config"),
         (None, None) => fail("one of --qmk-keyboard or --tecla-config is required"),
@@ -71,7 +75,12 @@ fn usage_and_exit() -> ! {
     eprintln!("usage:");
     eprintln!("  flash --list");
     eprintln!("  flash [--device <usb-device>] --qmk-keyboard <keyboard_name>");
-    eprintln!("  flash [--device <usb-device>] --tecla-config <profile>");
+    eprintln!("  flash [--device <usb-device>] --tecla-config <profile> [--dry-run]");
+    eprintln!("  --dry-run: DFU only; build, convert, validate and print without USB discovery or flashing");
+    eprintln!(
+        "  DFU --device: exact USB path or serial, optionally path:<path> or serial:<serial>"
+    );
+    eprintln!("  DFU --dry-run --device requires the path: or serial: prefix");
     std::process::exit(2);
 }
 
@@ -132,7 +141,7 @@ fn print_list() {
     }
 }
 
-fn flash_qmk(device: Option<&str>, keyboard_name: &str) -> ! {
+fn flash_qmk(device: Option<&str>, keyboard_name: &str, dry_run: bool) -> ! {
     let root = Path::new(".vendor/qmk_firmware/keyboards");
     let Some(found) = find_qmk_keyboard(root, keyboard_name) else {
         fail(&format!(
@@ -152,7 +161,7 @@ fn flash_qmk(device: Option<&str>, keyboard_name: &str) -> ! {
         [] => fail(&format!(
             "keyboard `{keyboard_name}` is present in vendored QMK, but Tecla has no qmk-backed native profile for family `{family}`"
         )),
-        [profile] => flash_profile(profile.clone(), device),
+        [profile] => flash_profile(profile.clone(), device, dry_run),
         many => {
             let profiles = many
                 .iter()
@@ -166,9 +175,13 @@ fn flash_qmk(device: Option<&str>, keyboard_name: &str) -> ! {
     }
 }
 
-fn flash_profile(profile: BoardProfile, device: Option<&str>) -> ! {
+fn flash_profile(profile: BoardProfile, device: Option<&str>, dry_run: bool) -> ! {
+    if dry_run && profile.method != FlashMethod::Dfu {
+        fail("--dry-run currently supports DFU profiles only");
+    }
     eprintln!(
-        "flashing {name} via {package}::{example}",
+        "{operation} {name} via {package}::{example}",
+        operation = if dry_run { "dry-run" } else { "flashing" },
         name = profile.name,
         package = profile.package,
         example = profile.example,
@@ -179,7 +192,7 @@ fn flash_profile(profile: BoardProfile, device: Option<&str>) -> ! {
     match profile.method {
         FlashMethod::ProbeRs => run_cargo(&cargo_args),
         FlashMethod::Uf2 => run_uf2(&profile, &cargo_args, device),
-        FlashMethod::Dfu => run_dfu(&profile, &cargo_args, device),
+        FlashMethod::Dfu => run_dfu(&profile, &cargo_args, device, dry_run),
     }
 }
 
@@ -290,7 +303,12 @@ fn auto_select_uf2_mount() -> Option<PathBuf> {
     }
 }
 
-fn run_dfu(profile: &BoardProfile, cargo_args: &[String], device: Option<&str>) -> ! {
+fn run_dfu(
+    profile: &BoardProfile,
+    cargo_args: &[String],
+    device: Option<&str>,
+    dry_run: bool,
+) -> ! {
     let status = run_command("cargo", cargo_args);
     ensure_success("cargo", status);
 
@@ -309,27 +327,25 @@ fn run_dfu(profile: &BoardProfile, cargo_args: &[String], device: Option<&str>) 
     );
     ensure_success(&objcopy, status);
     eprintln!("firmware BIN: {}", bin.display());
+    let size = fs::metadata(&bin)
+        .unwrap_or_else(|err| fail(&format!("cannot read firmware BIN size: {err}")))
+        .len();
+    validate_dfu_image_size(profile, size).unwrap_or_else(|err| fail(&err));
 
     let Some(vid_pid) = profile.dfu_vid_pid.as_deref() else {
         fail("DFU flashing requires `dfu_vid_pid` in board.toml");
     };
+    if dry_run {
+        let target = dfu_preview_target(device, vid_pid).unwrap_or_else(|err| fail(&err));
+        let args = dfu_flash_args(profile, &bin, target.as_ref()).unwrap_or_else(|err| fail(&err));
+        eprintln!("DFU dry-run: validated {size} firmware bytes; no device discovery or flashing");
+        eprintln!("+ dfu-util {}", args.join(" "));
+        std::process::exit(0);
+    }
     ensure_command_available("dfu-util", "install `dfu-util` to flash DFU keyboards");
-    wait_for_dfu_target(vid_pid, device);
-
-    let address = profile.dfu_address.as_deref().unwrap_or("0x08000000:leave");
-    let status = run_command(
-        "dfu-util",
-        &[
-            "-d".to_string(),
-            vid_pid.to_string(),
-            "-a".to_string(),
-            "0".to_string(),
-            "-s".to_string(),
-            address.to_string(),
-            "-D".to_string(),
-            bin.display().to_string(),
-        ],
-    );
+    let target = wait_for_dfu_target(vid_pid, device);
+    let args = dfu_flash_args(profile, &bin, Some(&target)).unwrap_or_else(|err| fail(&err));
+    let status = run_command("dfu-util", &args);
     exit_status("dfu-util", status);
 }
 
@@ -342,7 +358,7 @@ fn ensure_command_available(program: &str, hint: &str) {
     ));
 }
 
-fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) {
+fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) -> DfuTarget {
     match selector {
         Some(selector) => eprintln!(
             "waiting for DFU device `{selector}` ({vid_pid}); put the keyboard into bootloader mode now"
@@ -354,9 +370,9 @@ fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) {
 
     let mut attempts = 0u32;
     loop {
-        if dfu_target_present(vid_pid, selector) {
+        if let Some(target) = find_dfu_target(vid_pid, selector) {
             eprintln!("found DFU device {vid_pid}");
-            return;
+            return target;
         }
 
         attempts = attempts.saturating_add(1);
@@ -367,25 +383,19 @@ fn wait_for_dfu_target(vid_pid: &str, selector: Option<&str>) {
     }
 }
 
-fn dfu_target_present(vid_pid: &str, selector: Option<&str>) -> bool {
+fn find_dfu_target(vid_pid: &str, selector: Option<&str>) -> Option<DfuTarget> {
     let output = Command::new("dfu-util").arg("-l").output();
     let Ok(output) = output else {
-        return false;
+        return None;
     };
-    let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    let errors = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    let text = String::from_utf8_lossy(&output.stdout);
+    let errors = String::from_utf8_lossy(&output.stderr);
     let listing = format!("{text}\n{errors}");
 
-    let vid_pid = vid_pid.to_ascii_lowercase().replace('/', ":");
-    if !listing.contains(&format!("[{vid_pid}]")) && !listing.contains(&vid_pid) {
-        return false;
+    if !output.status.success() {
+        fail(&format!("dfu-util device discovery failed: {listing}"));
     }
-
-    let Some(selector) = selector else {
-        return true;
-    };
-    let selector = selector.to_ascii_lowercase().replace('/', ":");
-    selector == vid_pid || listing.contains(&selector)
+    select_dfu_target(&listing, vid_pid, selector).unwrap_or_else(|err| fail(&err))
 }
 
 fn print_uf2_info(mount: &Path) {
@@ -631,19 +641,11 @@ fn read_trimmed(path: &Path) -> Option<String> {
 }
 
 fn build_uf2_path(profile: &BoardProfile) -> PathBuf {
-    Path::new("target")
-        .join(&profile.target)
-        .join("release")
-        .join("examples")
-        .join(format!("{}.uf2", profile.example))
+    build_output_directory(profile).join(format!("{}.uf2", profile.example))
 }
 
 fn build_bin_path(profile: &BoardProfile) -> PathBuf {
-    Path::new("target")
-        .join(&profile.target)
-        .join("release")
-        .join("examples")
-        .join(format!("{}.bin", profile.example))
+    build_output_directory(profile).join(format!("{}.bin", profile.example))
 }
 
 fn copy_with_progress(src: &Path, dst: &Path) -> io::Result<u64> {
@@ -677,11 +679,16 @@ fn unescape_mount_path(path: &str) -> String {
 }
 
 fn build_elf_path(profile: &BoardProfile) -> PathBuf {
-    Path::new("target")
+    build_output_directory(profile).join(&profile.example)
+}
+
+fn build_output_directory(profile: &BoardProfile) -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target"))
         .join(&profile.target)
         .join("release")
         .join("examples")
-        .join(&profile.example)
 }
 
 /// Picks the first available objcopy: `rust-objcopy` (cargo-binutils),

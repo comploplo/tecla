@@ -1,8 +1,8 @@
 //! Accessibility telemetry.
 //!
-//! Tracks filter rejection rates, usage patterns, and fatigue indicators
-//! for slow keys, bounce keys, and sticky keys. These metrics drive
-//! adaptive threshold tuning without inferring health or ability state.
+//! Tracks filter rejection rates, usage patterns, and hold-time changes
+//! for slow keys, bounce keys, and sticky keys. Timing changes alone do not
+//! establish fatigue or a change in ability.
 
 /// Accessibility telemetry collector.
 ///
@@ -34,7 +34,7 @@ pub struct AccessibilitySnapshot {
     pub sticky_uses: u32,
     /// Sticky key activations since the last snapshot.
     pub delta_sticky_uses: u16,
-    /// Hold time trend: positive means getting slower (fatigue).
+    /// Hold-time trend: positive means longer recent holds than earlier holds.
     pub hold_time_trend: i8,
 }
 
@@ -63,7 +63,7 @@ impl AccessibilityTelemetry {
         self.delta_sticky_uses = self.delta_sticky_uses.saturating_add(1);
     }
 
-    /// Record a hold time sample for fatigue trend analysis.
+    /// Record a hold-time sample for timing trend analysis.
     pub fn record_hold_time(&mut self, ms: u16) {
         if self.hold_time_samples.is_full() {
             self.hold_time_samples.pop_front();

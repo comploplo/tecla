@@ -8,6 +8,8 @@ runs:
       run: |
         apt-get update
         apt-get install -y --no-install-recommends build-essential ca-certificates curl git pkg-config
+        # Checkout uses a temporary HOME; persist trust for this workspace only.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$RUNNER_TEMP/rustup-init.sh"
         sh "$RUNNER_TEMP/rustup-init.sh" -y --profile minimal --default-toolchain none
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"

@@ -1,0 +1,22 @@
+[package]
+name = "tecla-instrument-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Repository-only mutation discovery for Tecla instrument firmware"
+
+[lints]
+workspace = true
+
+[dependencies]
+tecla = { path = "../tecla", default-features = false }
+heapless = { workspace = true }
+
+# cargo-mutants discovers binaries, but not integration-test module roots.
+# The tests stay in tecla; `--test-package tecla` runs their independent oracles
+# against these same source files in the mutation runner's scratch checkout.
+[[bin]]
+name = "instrument-mutations"
+path = "mutation.rs"
+test = false
+bench = false

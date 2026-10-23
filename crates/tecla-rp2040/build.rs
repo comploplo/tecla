@@ -4,10 +4,7 @@ fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     if std::env::var_os("CARGO_FEATURE_STENO_DICTIONARY").is_some() {
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        let dict_dir = std::path::Path::new(&manifest_dir)
-            .join("..")
-            .join("..")
-            .join("dictionaries");
+        let dict_dir = std::path::Path::new(&manifest_dir).join("dictionaries");
         let out_file = std::path::Path::new(&out_dir).join("lapwing_dict.rs");
 
         println!("cargo:rerun-if-changed={}", dict_dir.display());
@@ -72,5 +69,12 @@ fn main() {
     }
 
     println!("cargo:rustc-link-search={manifest_dir}");
+    for flag in ["--nmagic", "-Tlink.x", "-Tdefmt.x"] {
+        println!("cargo:rustc-link-arg={flag}");
+    }
+    // thumbv6m is also used by STM32F0 boards; keep RP2040's extra script local.
+    if std::env::var("TARGET").as_deref() == Ok("thumbv6m-none-eabi") {
+        println!("cargo:rustc-link-arg=-Tlink-rp.x");
+    }
     println!("cargo:rerun-if-changed=memory.x");
 }

@@ -8,5 +8,8 @@ fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::copy("memory.x", out.join("memory.x")).unwrap();
     println!("cargo:rustc-link-search={}", out.display());
+    for flag in ["--nmagic", "-Tlink.x", "-Tdefmt.x"] {
+        println!("cargo:rustc-link-arg={flag}");
+    }
     println!("cargo:rerun-if-changed=memory.x");
 }

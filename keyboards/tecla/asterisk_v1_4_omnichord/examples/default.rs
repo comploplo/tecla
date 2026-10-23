@@ -4,14 +4,14 @@ use tecla_macros::keyboard_main;
 mod controls {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/asterisk_v1_4_omnichord/controls.rs"
+        "/profiles/asterisk_v1_4_omnichord/controls.rs"
     ));
 }
 
 mod firmware {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/asterisk_v1_4/midi.rs"
+        "/profiles/asterisk_v1_4/midi.rs"
     ));
 }
 

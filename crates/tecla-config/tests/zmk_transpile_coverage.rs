@@ -51,14 +51,15 @@ fn zmk_transpile_coverage_gap() {
             continue;
         }
         let source = std::fs::read_to_string(&keymap_path).unwrap();
-        let layers = dts::extract_bindings(&source);
+        let keymap = dts::parse_document(&source);
+        let layers = keymap.bindings();
         if layers.is_empty() {
             continue;
         }
 
         shields_with_keymaps += 1;
 
-        for layer in &layers {
+        for layer in layers {
             for binding in layer {
                 total_bindings += 1;
                 match binding_to_tecla(binding) {

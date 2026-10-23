@@ -9,8 +9,8 @@ Thumbs steer its direction, the # bars reinterpret the played notes, and the
 stars open richer harmonic choices. There is no internal sound engine.
 
 The note layout uses C major, MIDI channel 1, and fixed velocity 100. Generated
-harmony may contain chromatic notes. This layout follows the hardware-mapped
-steno profile; physical validation of this revision is pending.
+harmony may contain chromatic notes. Basic playing has been confirmed on the
+Asterisk; the latest harmony changes still need hardware audition.
 
 ## Install and connect
 
@@ -171,7 +171,7 @@ For a cadential six-four, attack C2/E4, D2/F4, then G2/C5 as separate pairs
 (lower S/-G, lower K/-S, upper S/upper -L). A brief release between pairs
 preserves the phrase history. Keep upper-left S held and move **-L to -P**:
 the melody falls C5–B4 while the alto falls E4–D4. Finish on lower-left **S**
-+ upper **-L** (C2/C5). The stars now permit harmonic colour; they do not delay
++ upper **-L** (C2/C5). The stars permit harmonic colour; they do not delay
 this resolution.
 
 For a moving bass, hold lower-right **-Z** (G4) and play lower-left **S–K–W**

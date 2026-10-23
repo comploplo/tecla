@@ -1,40 +1,54 @@
-# bindgen (via nrf-mpsl-sys/nrf-sdc-sys, used by the `ble` feature) needs
-# libclang. macOS keeps it inside the Xcode toolchain, which bindgen does not
-# search on its own; elsewhere this resolves to empty and bindgen's normal
-# lookup applies. Only fills in when LIBCLANG_PATH is not already set.
-_libclang := `xcode-select -p 2>/dev/null | sed 's|$|/Toolchains/XcodeDefault.xctoolchain/usr/lib|' || true`
-export LIBCLANG_PATH := env_var_or_default("LIBCLANG_PATH", _libclang)
-
 default: test
 
 # Host-only crates — exclude embedded board crates that require cross-compilation
-_host := "--workspace --exclude tecla-rp2040 --exclude tecla-nrf52840 --exclude tecla-stm32f4 --exclude tecla-stm32f3"
+_host := "--workspace --exclude tecla-rp2040 --exclude tecla-nrf52840 --exclude tecla-stm32f4 --exclude tecla-stm32f3 --exclude tecla-stm32f0"
 
-# Every tecla feature that can build on the host. NOT --all-features: `usb`
-# pulls embassy-usb -> ssmarshal, which cannot compile alongside `std`. The
-# `usb`/`usb-midi` features are covered by `just build-boards` instead, which
-# cross-compiles the board crates with them on.
+# Host feature bundle. usb/usb-midi require no_std and are checked by build-boards;
+# optional host features are also tested individually by hack.
 _host_features := "--features tecla/testing,tecla/embassy,tecla/storage,tecla/via,tecla/autocorrect,tecla/autocomplete"
 
 # Run the host test suite
 test:
     cargo nextest run {{_host}} {{_host_features}}
 
+# Run documentation examples (nextest does not run doctests).
+test-doc:
+    cargo test --locked --doc {{_host}} {{_host_features}}
+
 # Mutation-test the keyed instruments in a scratch copy (needs cargo-mutants).
 mutants-instruments *args:
-    cargo mutants -p tecla --features mutation-testing --gitignore true --cap-lints true \
+    # cargo-mutants 27.1 needs explicit Cargo package selection for its baseline too.
+    cargo mutants -p tecla-instrument-tests --test-package tecla --features tecla/testing,tecla/embassy --gitignore true --cap-lints true \
         --file '**/keyboards/tecla/asterisk_v1_4_chromatica/controls.rs' \
+        --file '**/keyboards/tecla/asterisk_v1_4_suspension/controls.rs' \
         --file '**/keyboards/tecla/voyager_tonnetz/instrument.rs' \
         --file '**/keyboards/tecla/voyager_tonnetz/scan_guard.rs' \
+        --cargo-arg=--package=tecla \
         --cargo-arg=--test=asterisk_chromatica \
+        --cargo-arg=--test=asterisk_suspension \
         --cargo-arg=--test=voyager_note_layouts \
         --cargo-arg=--test=voyager_tonnetz \
         --output target/mutations {{args}}
 
-# Check each feature compiles and passes tests on its own. Not the full
-# powerset: the features are additive, so the failure this catches — a feature
-# missing its own deps or cfg gates — shows up with that feature alone.
-# Test each feature on its own (needs cargo-hack, cargo-nextest)
+# Mutation-test active typing statistics and their processor/keymap integration.
+mutants-typing *args:
+    cargo mutants -p tecla --features testing --gitignore true --cap-lints true \
+        --file 'crates/tecla/src/telemetry/typing.rs' \
+        --cargo-arg=--lib \
+        --cargo-arg=--test=typing_stats \
+        --cargo-arg=--test=typing_stats_keymaps \
+        --output target/mutations-typing {{args}}
+
+# Mutation-test the reusable harmonic realization engine.
+mutants-harmony *args:
+    cargo mutants -p tecla --features testing --gitignore true --cap-lints true \
+        --file 'crates/tecla/src/music/realization.rs' \
+        --cargo-arg=--lib \
+        --cargo-test-arg=music::realization::tests \
+        --output target/mutations-harmony {{args}}
+
+# Needs cargo-hack and cargo-nextest; does not test every feature combination.
+# Test each host-compatible feature independently.
 hack:
     cargo hack {{_host}} --each-feature --exclude-features usb,usb-midi nextest run
 
@@ -42,12 +56,13 @@ hack:
 lint:
     cargo clippy {{_host}} {{_host_features}} --all-targets
 
-# Build the docs.rs documentation, failing on any broken intra-doc link.
-# This is the gate that catches doc rot — module tours and links that describe
-# a layout the code has moved on from.
-# Build the docs, failing on broken intra-doc links
+# Build host API docs with warnings denied, including broken intra-doc links.
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps {{_host}} {{_host_features}}
+
+# Build all publishable archives outside the checkout, including firmware examples.
+package-check *args:
+    python3 scripts/check-packages.py {{args}}
 
 # Format all crates
 fmt:
@@ -57,36 +72,18 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Coverage report in a browser. Gates are cov-core / cov-all below.
-# Coverage report in a browser (needs cargo-llvm-cov)
+# Open host coverage in a browser (needs cargo-llvm-cov); gates are below.
 cov:
     cargo llvm-cov {{_host}} --features tecla/testing --open
 
-# Coverage gate for the core crate: 95% of lines.
-#
-# keyboard/processor.rs reads lower than its source coverage because
-# llvm-cov counts every monomorphization of the generic
-# KeyboardProcessor<ROWS,COLS,LAYERS,KEYS> separately. That is a real effect,
-# but it is not a licence to stop at whatever number falls out: the gate is
-# enforced on the workspace total, which is currently above it.
 # Coverage gate: tecla core crate, 95% of lines
 cov-core:
     cargo llvm-cov -p tecla --features testing \
         --fail-under-lines 95 \
         --lcov --output-path lcov-core.info
 
-# Coverage gate for all host crates: 90% of lines.
-#
-# `src/bin/` is excluded. What that leaves out is now only CLI driver code:
-# process spawning, sysfs walking, waiting for a bootloader volume, and the
-# `-> !` exit paths. The decision-making logic that used to live in the binary
-# — profile discovery, selector matching, flash-command suggestion, cargo
-# argument assembly — was moved to `tecla_config::flash`, which sits at ~98%
-# and is included in this number.
-#
-# Be honest about what the exclusion buys: 92.3% with it, 88.9% without. If
-# `src/bin/` ever grows real logic again, move that logic to the library
-# rather than widening this exclusion.
+# CLI process/USB/filesystem plumbing in src/bin/ is excluded; profile discovery,
+# selector matching and command assembly in tecla_config::flash remain measured.
 # Coverage gate: all host crates, 90% of lines
 cov-all:
     cargo llvm-cov {{_host}} --features tecla/testing \
@@ -97,18 +94,11 @@ cov-all:
 _rp2040_target := "thumbv6m-none-eabi"
 _cortex_m4_target := "thumbv7em-none-eabihf"
 
-# Cross-compile every board crate and its examples. `lint`/`test`/`hack` all
-# run on {{_host}}, which excludes these crates entirely — without this recipe
-# nothing ever compiles them and board code silently rots against dependency
-# updates.
-#
-# --release because that is what gets flashed, and because a debug build does
-# not fit: the STM32F303CC has 256KB of flash and the unoptimised Voyager
-# firmware overflows it. Release is ~78KB, so the headroom is real.
-# Cross-compile every board crate and its examples
+# Separate builds avoid STM32 chip feature conflicts; release fits Voyager flash.
+# Excludes ESP32 and core1-autocorrect.
+# Build supported Cortex-M configurations and their enabled examples.
 build-boards:
-    # storage/via pull serde+postcard into a no_std build — a combination that
-    # silently never compiled until it was checked here.
+    # Check storage/via serialization with no_std, separately from host tests.
     cargo check --release -p tecla --features usb,usb-midi,via,storage,embassy --target {{_rp2040_target}}
     cargo build --release -p tecla-rp2040    --lib --examples --features hil,steno-dictionary,usb-midi --target {{_rp2040_target}}
     cargo build --release -p tecla-nrf52840  --lib --examples --features hil --target {{_cortex_m4_target}}
@@ -118,60 +108,61 @@ build-boards:
     # in the same invocation.
     cargo build --release -p tecla-nrf52840  --lib --example planck_ble --no-default-features --features ble --target {{_cortex_m4_target}}
     cargo build --release -p tecla-stm32f4   --lib --examples --target {{_cortex_m4_target}}
+    cargo build --release -p tecla-stm32f3   --lib --examples --target {{_cortex_m4_target}}
     cargo build --release -p tecla-stm32f3   --lib --examples --features usb-midi --target {{_cortex_m4_target}}
+    cargo build --release -p tecla-stm32f0   --lib --examples --target thumbv6m-none-eabi
 
-# Clippy the board crates — same rot problem as build-boards.
-# Clippy the cross-compiled board crates
+# Clippy the same Cortex-M configurations as build-boards.
 lint-boards:
     cargo clippy -p tecla-rp2040   --lib --examples --features hil,steno-dictionary,usb-midi --target {{_rp2040_target}}
     cargo clippy -p tecla-nrf52840 --lib --examples --features hil --target {{_cortex_m4_target}}
     cargo clippy -p tecla-nrf52840 --lib --example planck_ble --no-default-features --features ble --target {{_cortex_m4_target}}
     cargo clippy -p tecla-stm32f4  --lib --examples --target {{_cortex_m4_target}}
+    cargo clippy -p tecla-stm32f3  --lib --examples --target {{_cortex_m4_target}}
     cargo clippy -p tecla-stm32f3  --lib --examples --features usb-midi --target {{_cortex_m4_target}}
+    cargo clippy -p tecla-stm32f0  --lib --examples --target thumbv6m-none-eabi
 
-# Run RP2040 HIL smoke test in Renode via Podman
+# Run the RP2040 smoke test in a Renode container.
 hil-rp2040:
     cargo build -p tecla-rp2040 --example hil_keyboard --features hil --target {{_rp2040_target}} --release
     cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_rp2040 -- --ignored
 
-# Run nRF52840 HIL smoke test in Renode via Podman
+# Run the nRF52840 smoke test in a Renode container.
 hil-nrf52840:
     cargo build -p tecla-nrf52840 --example hil_keyboard --features hil --target {{_cortex_m4_target}} --release
     cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_nrf52840 -- --ignored
 
-# Run RP2040 matrix integration test — presses every key via simulated GPIO
+# Verify RP2040 matrix reports in Renode (Linux x86_64 harness).
 hil-matrix-rp2040:
     cargo build -p tecla-rp2040 --example hil_matrix_test --features hil --target {{_rp2040_target}} --release
     cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_matrix_rp2040 --target x86_64-unknown-linux-gnu -- --ignored
 
-# Run nRF52840 matrix integration test — presses every key via simulated GPIO
+# Verify nRF52840 matrix reports in Renode (Linux x86_64 harness).
 hil-matrix-nrf52840:
     cargo build -p tecla-nrf52840 --example hil_matrix_test --features hil --target {{_cortex_m4_target}} --release
     cargo test --manifest-path crates/tecla-hil-tests/Cargo.toml --features hil --test hil_matrix_nrf52840 --target x86_64-unknown-linux-gnu -- --ignored
 
-# Run all HIL tests
+# Run the smoke and matrix emulation suites.
 hil: hil-rp2040 hil-nrf52840 hil-matrix-rp2040 hil-matrix-nrf52840
 
-# Flash a board using the central Rust flash coordinator.
-# Usage:
-#   just flash --device <usb-target> --qmk-keyboard <keyboard_name>
-#   just flash --device <usb-target> --tecla-config <profile>
-# Build and flash a board: just flash --tecla-config <profile> (see --list)
+# Build and flash a profile or QMK board; use --list for profiles and devices.
 flash *args:
     cargo run -p tecla-config --bin flash -- {{args}}
 
-# Check for outdated dependencies
-# List dependencies with newer releases (needs cargo-outdated)
+# List host dependencies with newer releases (needs cargo-outdated).
 outdated:
     cargo outdated {{_host}} --exit-code 1
 
-# Run everything — same gates as CI
+# Run CI gates plus local per-feature tests and Renode emulation.
 ci:
     just fmt-check
     just lint
+    just test
+    just test-doc
     just build-boards
     just lint-boards
     just doc
+    just package-check
     just hack
     just cov-core
     just cov-all

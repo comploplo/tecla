@@ -12,9 +12,9 @@
 //!
 //! # Build requirements
 //!
-//! The `nrf-sdc` build runs bindgen against CMSIS C headers. Set
-//! `LIBCLANG_PATH=/usr/lib/llvm-18/lib` (or your system's libclang path) so
-//! that clang can locate `stdint.h` for the `thumbv7em-none-eabihf` target.
+//! The `nrf-sdc` build runs bindgen against CMSIS C headers and requires
+//! libclang. Set `LIBCLANG_PATH` to its library directory only if automatic
+//! discovery fails.
 
 use trouble_host::prelude::*;
 

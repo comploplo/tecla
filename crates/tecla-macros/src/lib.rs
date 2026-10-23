@@ -85,6 +85,7 @@
 //! |------------|---------|
 //! | `TRNS`, `TRANSPARENT` | Fall through to the next active layer below. |
 //! | `NOOP`, `NoOp`, `XXXXXXX` | Explicitly block fallthrough — produce no key. |
+//! | `TYPE_WPM` | Type the active typing average as `<n> WPM`; requires processor typing statistics. |
 //!
 //! **Mouse identifiers** (also `layer!`/`keymap!` only):
 //!
@@ -155,6 +156,7 @@ fn special_token(name: &str) -> Option<TokenStream2> {
     match name {
         "TRNS" | "TRANSPARENT" => Some(quote! { ::tecla::action::Action::<()>::Transparent }),
         "NOOP" | "NoOp" | "XXXXXXX" => Some(quote! { ::tecla::action::Action::<()>::NoOp }),
+        "TYPE_WPM" => Some(quote! { ::tecla::action::Action::<()>::TypeWpm }),
         "OUT_USB" => Some(
             quote! { ::tecla::action::Action::<()>::OutputSelect(::tecla::hid::OutputMode::Usb) },
         ),
@@ -909,7 +911,7 @@ pub fn keymap(input: TokenStream) -> TokenStream {
     quote! {
         {
             let mut _layers: ::heapless::Vec<
-                ::tecla::pipeline::keymap::Layer<()>,
+                ::tecla::pipeline::keymap::Layer<(), #num_keys>,
                 #num_layers
             > = ::heapless::Vec::new();
             #(#layer_pushes)*
@@ -985,7 +987,7 @@ pub fn steno(input: TokenStream) -> TokenStream {
     quote! {
         {
             let mut _layers: ::heapless::Vec<
-                ::tecla::pipeline::keymap::Layer<()>,
+                ::tecla::pipeline::keymap::Layer<(), #num_keys>,
                 #num_layers
             > = ::heapless::Vec::new();
             #(#layer_pushes)*
@@ -1014,7 +1016,7 @@ pub fn steno(input: TokenStream) -> TokenStream {
 /// use tecla::pipeline::keymap::Layer;
 /// use tecla_macros::{layer, LT, MT};
 ///
-/// let l: Layer<()> = layer!(Base, A, B, MT!(LSFT, ENT), LT!(1, SPC));
+/// let l: Layer<(), 4> = layer!(Base, A, B, MT!(LSFT, ENT), LT!(1, SPC));
 /// ```
 #[proc_macro]
 pub fn layer(input: TokenStream) -> TokenStream {

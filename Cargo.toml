@@ -3,10 +3,12 @@ members = [
     "crates/tecla",
     "crates/tecla-config",
     "crates/tecla-macros",
+    "crates/tecla-instrument-tests",
     "crates/tecla-rp2040",
     "crates/tecla-nrf52840",
     "crates/tecla-stm32f4",
     "crates/tecla-stm32f3",
+    "crates/tecla-stm32f0",
 ]
 # ESP32 uses a separate Xtensa toolchain; re-include after its firmware build
 # and hardware behavior are validated.

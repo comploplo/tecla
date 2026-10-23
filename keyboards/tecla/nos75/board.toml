@@ -1,0 +1,10 @@
+name = "nos75"
+crate = "tecla-stm32f0"
+example = "nos75"
+target = "thumbv6m-none-eabi"
+flash = "dfu"
+vendor = "NuPhy"
+dfu_vid_pid = "0483:df11"
+dfu_address = "0x08000000:leave"
+# Stock reserves the last 8 KiB for emulated EEPROM.
+dfu_max_size = 122880

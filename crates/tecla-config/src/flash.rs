@@ -59,6 +59,9 @@ pub struct BoardManifest {
     #[serde(default)]
     /// Flash address to write to in DFU mode.
     pub dfu_address: Option<String>,
+    #[serde(default)]
+    /// Maximum raw firmware bytes allowed by this DFU profile.
+    pub dfu_max_size: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +89,173 @@ pub struct BoardProfile {
     pub dfu_vid_pid: Option<String>,
     /// Flash address to write to in DFU mode.
     pub dfu_address: Option<String>,
+    /// Maximum raw firmware bytes allowed by this DFU profile.
+    pub dfu_max_size: Option<u32>,
+}
+
+/// Physical selectors forwarded to dfu-util after resolving one DFU device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DfuTarget {
+    /// USB topology path, when available.
+    pub path: Option<String>,
+    /// USB serial number, when nonempty.
+    pub serial: Option<String>,
+}
+
+/// Rejects empty images and images exceeding the profile's application region.
+pub fn validate_dfu_image_size(profile: &BoardProfile, size: u64) -> Result<(), String> {
+    if size == 0 {
+        return Err("DFU firmware image is empty".to_string());
+    }
+    if let Some(maximum) = profile.dfu_max_size {
+        if size > u64::from(maximum) {
+            return Err(format!(
+                "DFU image is {size} bytes; profile `{}` allows at most {maximum} bytes",
+                profile.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn quoted_dfu_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
+    line.split_once(&format!("{field}=\""))?
+        .1
+        .split_once('"')
+        .map(|(value, _)| value)
+}
+
+fn normalized_vid_pid(value: &str) -> String {
+    value.to_ascii_lowercase().replace('/', ":")
+}
+
+fn dfu_selector_matches(target: &DfuTarget, selector: &str, vid_pid: &str) -> bool {
+    if let Some(path) = selector.strip_prefix("path:") {
+        return !path.is_empty() && target.path.as_deref() == Some(path);
+    }
+    if let Some(serial) = selector.strip_prefix("serial:") {
+        return !serial.is_empty() && target.serial.as_deref() == Some(serial);
+    }
+    normalized_vid_pid(selector) == normalized_vid_pid(vid_pid)
+        || target.path.as_deref() == Some(selector)
+        || target.serial.as_deref() == Some(selector)
+}
+
+/// Selects one physical DFU device; alternate settings do not count as devices.
+///
+/// Selectors match an exact USB path or serial, optionally prefixed by `path:`
+/// or `serial:`. A VID:PID selector still requires a unique physical device.
+pub fn select_dfu_target(
+    listing: &str,
+    vid_pid: &str,
+    selector: Option<&str>,
+) -> Result<Option<DfuTarget>, String> {
+    let expected = normalized_vid_pid(vid_pid);
+    let mut targets = Vec::new();
+    for line in listing.lines().map(str::trim) {
+        let Some(rest) = line.strip_prefix("Found DFU: [") else {
+            continue;
+        };
+        let Some((identity, _)) = rest.split_once(']') else {
+            continue;
+        };
+        if normalized_vid_pid(identity) != expected {
+            continue;
+        }
+        let target = DfuTarget {
+            path: quoted_dfu_field(line, "path")
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            serial: quoted_dfu_field(line, "serial")
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        };
+        if target.path.is_none() && target.serial.is_none() {
+            return Err(
+                "matching DFU device has no path or serial; refusing an unqualified flash"
+                    .to_string(),
+            );
+        }
+        if selector.is_none_or(|selector| dfu_selector_matches(&target, selector, vid_pid))
+            && !targets.contains(&target)
+        {
+            targets.push(target);
+        }
+    }
+    match targets.len() {
+        0 => Ok(None),
+        1 => Ok(targets.pop()),
+        _ => Err(
+            "multiple matching DFU devices; pass --device path:<usb-path> or serial:<serial>"
+                .to_string(),
+        ),
+    }
+}
+
+/// Interprets an explicitly typed selector without discovering or opening USB.
+pub fn dfu_preview_target(
+    selector: Option<&str>,
+    vid_pid: &str,
+) -> Result<Option<DfuTarget>, String> {
+    let Some(selector) = selector else {
+        return Ok(None);
+    };
+    if normalized_vid_pid(selector) == normalized_vid_pid(vid_pid) {
+        return Ok(None);
+    }
+    if let Some(path) = selector
+        .strip_prefix("path:")
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(DfuTarget {
+            path: Some(path.to_string()),
+            serial: None,
+        }));
+    }
+    if let Some(serial) = selector
+        .strip_prefix("serial:")
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(DfuTarget {
+            path: None,
+            serial: Some(serial.to_string()),
+        }));
+    }
+    Err("DFU dry-run selectors require path:<usb-path> or serial:<serial>; no discovery is performed".to_string())
+}
+
+/// Builds the DFU command with the physical selectors used during discovery.
+pub fn dfu_flash_args(
+    profile: &BoardProfile,
+    binary: &Path,
+    target: Option<&DfuTarget>,
+) -> Result<Vec<String>, String> {
+    let vid_pid = profile
+        .dfu_vid_pid
+        .as_deref()
+        .ok_or("DFU flashing requires `dfu_vid_pid` in board.toml")?;
+    let mut args = vec!["-d".to_string(), normalized_vid_pid(vid_pid)];
+    if let Some(target) = target {
+        if let Some(path) = &target.path {
+            args.extend(["-p".to_string(), path.clone()]);
+        }
+        if let Some(serial) = &target.serial {
+            args.extend(["-S".to_string(), serial.clone()]);
+        }
+    }
+    args.extend([
+        "-a".to_string(),
+        "0".to_string(),
+        "-s".to_string(),
+        profile
+            .dfu_address
+            .as_deref()
+            .unwrap_or("0x08000000:leave")
+            .to_string(),
+        "-D".to_string(),
+        binary.display().to_string(),
+    ]);
+    Ok(args)
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +487,7 @@ pub fn discover_native_profiles(root: &Path) -> Vec<BoardProfile> {
                 vendor: manifest.vendor,
                 dfu_vid_pid: manifest.dfu_vid_pid,
                 dfu_address: manifest.dfu_address,
+                dfu_max_size: manifest.dfu_max_size,
             });
         }
     }
@@ -361,6 +532,7 @@ mod tests {
             vendor: vendor.map(str::to_string),
             dfu_vid_pid: None,
             dfu_address: None,
+            dfu_max_size: None,
         }
     }
 
@@ -381,6 +553,125 @@ mod tests {
         assert_eq!(method_name(FlashMethod::ProbeRs), "probe-rs");
         assert_eq!(method_name(FlashMethod::Uf2), "uf2");
         assert_eq!(method_name(FlashMethod::Dfu), "dfu");
+    }
+
+    const STM32_DFU: &str = concat!(
+        "Found DFU: [0483:df11] ver=2200, devnum=1, cfg=1, intf=0, path=\"20-4.1\", alt=1, name=\"@Option Bytes /0x1ffff800/01*016 e\", serial=\"TEST01\"\n",
+        "Found DFU: [0483:df11] ver=2200, devnum=1, cfg=1, intf=0, path=\"20-4.1\", alt=0, name=\"@Internal Flash /0x08000000/064*002Kg\", serial=\"TEST01\"\n",
+    );
+
+    #[test]
+    fn dfu_alternates_select_one_physical_target_and_forward_its_selectors() {
+        let target = select_dfu_target(STM32_DFU, "0483:DF11", None)
+            .unwrap()
+            .expect("one physical device despite two alternates");
+        assert_eq!(target.path.as_deref(), Some("20-4.1"));
+        assert_eq!(target.serial.as_deref(), Some("TEST01"));
+        for selector in [
+            "20-4.1",
+            "path:20-4.1",
+            "TEST01",
+            "serial:TEST01",
+            "0483/df11",
+        ] {
+            assert_eq!(
+                select_dfu_target(STM32_DFU, "0483:df11", Some(selector)).unwrap(),
+                Some(target.clone())
+            );
+        }
+        let mut p = profile("nos75", FlashMethod::Dfu, None);
+        p.dfu_vid_pid = Some("0483:df11".to_string());
+        p.dfu_address = Some("0x08000000:leave".to_string());
+        let args = dfu_flash_args(&p, Path::new("nos75.bin"), Some(&target)).unwrap();
+        assert_eq!(
+            args,
+            [
+                "-d",
+                "0483:df11",
+                "-p",
+                "20-4.1",
+                "-S",
+                "TEST01",
+                "-a",
+                "0",
+                "-s",
+                "0x08000000:leave",
+                "-D",
+                "nos75.bin"
+            ]
+        );
+    }
+
+    #[test]
+    fn dfu_selection_rejects_ambiguity_and_cross_device_substring_matches() {
+        let second = STM32_DFU
+            .replace("20-4.1", "20-4.2")
+            .replace("TEST01", "TEST02");
+        let both = format!("{STM32_DFU}{second}");
+        assert!(select_dfu_target(&both, "0483:df11", None).is_err());
+        assert!(select_dfu_target(&both, "0483:df11", Some("0483:df11")).is_err());
+        let target = select_dfu_target(&both, "0483:df11", Some("serial:TEST02"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.path.as_deref(), Some("20-4.2"));
+        assert!(select_dfu_target(&both, "0483:df11", Some("TEST0"))
+            .unwrap()
+            .is_none());
+        let unrelated = second.replace("0483:df11", "1234:5678");
+        assert!(select_dfu_target(
+            &format!("{STM32_DFU}{unrelated}"),
+            "0483:df11",
+            Some("TEST02")
+        )
+        .unwrap()
+        .is_none());
+        assert!(select_dfu_target(
+            &STM32_DFU.replace("Found DFU", "Found Runtime"),
+            "0483:df11",
+            None
+        )
+        .unwrap()
+        .is_none());
+        assert!(select_dfu_target("Found DFU: [0483:df11] alt=0", "0483:df11", None).is_err());
+    }
+
+    #[test]
+    fn dfu_preview_requires_typed_selectors_without_discovery() {
+        assert!(dfu_preview_target(None, "0483:df11").unwrap().is_none());
+        assert!(dfu_preview_target(Some("0483/df11"), "0483:df11")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            dfu_preview_target(Some("path:20-4.1"), "0483:df11")
+                .unwrap()
+                .unwrap()
+                .path
+                .as_deref(),
+            Some("20-4.1")
+        );
+        assert_eq!(
+            dfu_preview_target(Some("serial:TEST01"), "0483:df11")
+                .unwrap()
+                .unwrap()
+                .serial
+                .as_deref(),
+            Some("TEST01")
+        );
+        assert!(dfu_preview_target(Some("TEST01"), "0483:df11").is_err());
+        assert!(dfu_preview_target(Some("serial:"), "0483:df11").is_err());
+    }
+
+    #[test]
+    fn dfu_size_limit_keeps_the_reserved_tail_out_of_the_image() {
+        let mut p = profile("nos75", FlashMethod::Dfu, None);
+        p.dfu_max_size = Some(122_880);
+        assert!(validate_dfu_image_size(&p, 0).is_err());
+        assert!(validate_dfu_image_size(&p, 1).is_ok());
+        assert!(validate_dfu_image_size(&p, 122_880).is_ok());
+        assert!(validate_dfu_image_size(&p, 122_881).is_err());
+        p.dfu_max_size = None;
+        assert!(validate_dfu_image_size(&p, 131_072).is_ok());
+        assert!(validate_dfu_image_size(&p, 0).is_err());
     }
 
     #[test]
@@ -678,6 +969,18 @@ mod discovery_tests {
     }
 
     #[test]
+    fn nos75_profile_uses_rom_dfu_and_reserves_configuration_flash() {
+        let profile = resolve_native_profile(&profile_root(), "nos75").expect("NOS75 profile");
+        assert_eq!(profile.package, "tecla-stm32f0");
+        assert_eq!(profile.example, "nos75");
+        assert_eq!(profile.target, "thumbv6m-none-eabi");
+        assert_eq!(profile.method, FlashMethod::Dfu);
+        assert_eq!(profile.dfu_vid_pid.as_deref(), Some("0483:df11"));
+        assert_eq!(profile.dfu_address.as_deref(), Some("0x08000000:leave"));
+        assert_eq!(profile.dfu_max_size, Some(122_880));
+    }
+
+    #[test]
     fn asterisk_music_profiles_do_not_change_the_typing_profiles_features() {
         for (name, features) in [
             ("asterisk_v1_4", &["steno-dictionary"][..]),
@@ -686,6 +989,7 @@ mod discovery_tests {
             ("asterisk_v1_4_autochord", &["usb-midi"][..]),
             ("asterisk_v1_4_omnichord", &["usb-midi"][..]),
             ("asterisk_v1_4_chromatica", &["usb-midi"][..]),
+            ("asterisk_v1_4_suspension", &["usb-midi"][..]),
         ] {
             let p = resolve_native_profile(&profile_root(), name).expect("Asterisk profile");
             assert_eq!(p.package, "tecla-rp2040");

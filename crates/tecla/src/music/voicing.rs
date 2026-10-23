@@ -1208,7 +1208,7 @@ mod tests {
             arrival.realized,
             true
         ));
-        // The legacy chord solver still requires consonant preparation.
+        // The strict solver requires consonant preparation.
         assert_eq!(
             realize_holds(
                 Key::C_MAJOR,

@@ -52,7 +52,7 @@ use crate::telemetry::gamepad::GamepadTelemetry;
 use crate::telemetry::midi::MidiTelemetry;
 use crate::telemetry::pointing::PointingTelemetry;
 use crate::telemetry::steno::StenoTelemetry;
-use crate::telemetry::CoreTelemetry;
+use crate::telemetry::{CoreTelemetry, TypingSnapshot, TypingTelemetry};
 
 use super::steno_playback;
 
@@ -65,13 +65,13 @@ pub struct ProcessorTelemetry<const KEYS: usize> {
     pub core: CoreTelemetry<KEYS>,
     /// Steno chord accuracy and dictionary metrics.
     pub steno: StenoTelemetry,
-    /// Accessibility filter rejection rates and fatigue tracking.
+    /// Accessibility filter rejection rates and hold-duration trends.
     pub accessibility: AccessibilityTelemetry,
     /// MIDI velocity distributions and polyphony.
     pub midi: MidiTelemetry,
     /// Gamepad axis range and button combinations.
     pub gamepad: GamepadTelemetry,
-    /// Pointing device velocity and click patterns.
+    /// Pointing movement per sample and button-down patterns.
     pub pointing: PointingTelemetry,
 }
 
@@ -95,6 +95,7 @@ impl<const KEYS: usize> ProcessorTelemetry<KEYS> {
             pointing: Some(self.pointing.snapshot()),
             encoder: None,
             accessibility: Some(self.accessibility.snapshot()),
+            typing: None,
         }
     }
 
@@ -112,6 +113,7 @@ impl<const KEYS: usize> ProcessorTelemetry<KEYS> {
         self.accessibility.clear_deltas();
     }
 
+    #[cfg(any(feature = "processor-telemetry", test))]
     pub(crate) fn new() -> Self {
         Self {
             core: CoreTelemetry::new(),
@@ -230,7 +232,7 @@ pub struct KeyboardProcessor<
     mouse_buttons: u8,
     gamepad: GamepadState,
     bootmagic_triggered: bool,
-    last_any_press_ms: u64,
+    last_any_press_ms: Option<u64>,
     last_tap_hold_tap: Option<(KeyPos, u64)>,
     pending_ble: Option<crate::transport::ble::BleCommand>,
     pending_rgb: Option<crate::rgb::RgbCommand>,
@@ -253,6 +255,9 @@ pub struct KeyboardProcessor<
     steno_chord: u64,
     steno_held_count: u32,
     accessibility: Option<AccessibilityState<KEYS>>,
+    typing_stats: Option<TypingTelemetry>,
+    pending_wpm: Option<u16>,
+    #[cfg(feature = "processor-telemetry")]
     telemetry: Option<ProcessorTelemetry<KEYS>>,
 }
 
@@ -263,7 +268,10 @@ where
 {
     /// Creates a new processor with the given layer stack and tap-hold config.
     #[must_use]
-    pub fn new(layer_stack: LayerStack<LAYERS, KEYS, Ext>, tap_hold_config: TapHoldConfig) -> Self {
+    pub const fn new(
+        layer_stack: LayerStack<LAYERS, KEYS, Ext>,
+        tap_hold_config: TapHoldConfig,
+    ) -> Self {
         Self {
             layer_stack,
             modifier_state: ModifierState::new(),
@@ -292,7 +300,7 @@ where
             mouse_buttons: 0,
             gamepad: GamepadState::new(),
             bootmagic_triggered: false,
-            last_any_press_ms: 0,
+            last_any_press_ms: None,
             last_tap_hold_tap: None,
             pending_ble: None,
             pending_rgb: None,
@@ -312,6 +320,9 @@ where
             steno_chord: 0,
             steno_held_count: 0,
             accessibility: None,
+            typing_stats: None,
+            pending_wpm: None,
+            #[cfg(feature = "processor-telemetry")]
             telemetry: None,
         }
     }
@@ -337,11 +348,10 @@ where
         self
     }
 
-    /// Sets combo definitions and timing.
+    /// Sets live chord definitions.
     ///
-    /// Combo keys are buffered until either a combo resolves or the configured
-    /// combo term expires. On timeout/failure, buffered events are replayed
-    /// through the normal processor path.
+    /// An exact held-key match fires immediately, without a timing window.
+    /// Unmatched chords replay their buffered events when all keys release.
     #[must_use]
     pub fn with_combos(mut self, config: ComboConfig<Ext>) -> Self {
         self.combo_config = config;
@@ -417,21 +427,77 @@ where
     }
 
     /// Enables telemetry collection, consuming and returning `self`.
+    #[cfg(feature = "processor-telemetry")]
     #[must_use]
     pub fn with_telemetry(mut self) -> Self {
         self.telemetry = Some(ProcessorTelemetry::new());
+        self.with_typing_stats()
+    }
+
+    /// Enables the lightweight, cumulative active-typing average.
+    ///
+    /// Unlike detailed processor telemetry, this is available on small boards
+    /// without the `processor-telemetry` feature. Totals live until reboot.
+    #[must_use]
+    pub const fn with_typing_stats(mut self) -> Self {
+        if self.typing_stats.is_none() {
+            self.typing_stats = Some(TypingTelemetry::new());
+        }
         self
+    }
+
+    /// Snapshots active typing totals, if collection was enabled.
+    #[must_use]
+    pub fn typing_stats(&self) -> Option<TypingSnapshot> {
+        self.typing_stats.as_ref().map(TypingTelemetry::snapshot)
+    }
+
+    /// Snapshots all enabled telemetry, including lightweight typing stats.
+    #[must_use]
+    pub fn telemetry_frame(&self) -> Option<crate::telemetry::transport::TelemetryFrame> {
+        let typing = self.typing_stats();
+        let mut frame = match (self.telemetry(), typing) {
+            (None, None) => return None,
+            (Some(telemetry), _) => telemetry.frame(),
+            (None, Some(_)) => crate::telemetry::transport::TelemetryFrame::default(),
+        };
+        frame.typing = typing;
+        Some(frame)
+    }
+
+    /// Clears transport deltas without resetting lifetime typing totals.
+    /// Returns whether any telemetry collector is enabled.
+    pub fn clear_telemetry_deltas(&mut self) -> bool {
+        let enabled = self.telemetry().is_some() || self.typing_stats.is_some();
+        if let Some(telemetry) = self.telemetry_mut() {
+            telemetry.clear_deltas();
+        }
+        enabled
     }
 
     /// Returns a reference to the telemetry state, if enabled.
     #[must_use]
     pub fn telemetry(&self) -> Option<&ProcessorTelemetry<KEYS>> {
-        self.telemetry.as_ref()
+        #[cfg(feature = "processor-telemetry")]
+        {
+            self.telemetry.as_ref()
+        }
+        #[cfg(not(feature = "processor-telemetry"))]
+        {
+            None
+        }
     }
 
     /// Returns a mutable reference to the telemetry state, if enabled.
     pub fn telemetry_mut(&mut self) -> Option<&mut ProcessorTelemetry<KEYS>> {
-        self.telemetry.as_mut()
+        #[cfg(feature = "processor-telemetry")]
+        {
+            self.telemetry.as_mut()
+        }
+        #[cfg(not(feature = "processor-telemetry"))]
+        {
+            None
+        }
     }
 
     /// Returns `true` if a [`Action::Bootmagic`] key was pressed.
@@ -544,6 +610,8 @@ where
     ///
     /// Events are queued internally and replayed after tap-hold resolution,
     /// so `emit` may be called zero or more times per call.
+    /// After sending these reports, call [`Self::drain_wpm_readout`] to emit any
+    /// ready typing-speed text as a separate batch.
     pub fn process_event<F: FnMut(HidReport) + ?Sized>(
         &mut self,
         event: KeyEvent,
@@ -553,13 +621,16 @@ where
         if let Some(ref mut acc) = self.accessibility {
             if event.pressed {
                 match acc.should_accept_press(event.pos, now_ms, COLS) {
-                    SlowKeyResult::Accept => {
+                    SlowKeyResult::Accept =>
+                    {
+                        #[cfg(feature = "processor-telemetry")]
                         if let Some(ref mut t) = self.telemetry {
                             t.accessibility.record_slow_accept();
                         }
                     }
                     SlowKeyResult::Defer(_) => return,
                     SlowKeyResult::Reject => {
+                        #[cfg(feature = "processor-telemetry")]
                         if let Some(ref mut t) = self.telemetry {
                             t.accessibility.record_bounce_reject();
                         }
@@ -567,8 +638,10 @@ where
                     }
                 }
             } else {
+                #[cfg(feature = "processor-telemetry")]
                 let was_pending_slow = acc.is_pending_slow(event.pos);
                 acc.record_release(event.pos, now_ms, COLS);
+                #[cfg(feature = "processor-telemetry")]
                 if was_pending_slow {
                     if let Some(ref mut t) = self.telemetry {
                         t.accessibility.record_slow_reject();
@@ -584,6 +657,7 @@ where
     ///
     /// Call this when the Embassy timer fires at [`next_deadline_ms`]. Emits
     /// a hold-resolved report if the tapping term has expired.
+    /// Send those reports before calling [`Self::drain_wpm_readout`].
     ///
     /// [`next_deadline_ms`]: KeyboardProcessor::next_deadline_ms
     pub fn tick<F>(&mut self, now_ms: u64, emit: &mut F)
@@ -597,6 +671,7 @@ where
                 // *accepted* slow key. Without this, slow_reject_rate only
                 // ever sees rejects and reads 0 when nothing was rejected —
                 // indistinguishable from "a perfect 0% reject rate".
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     t.accessibility.record_slow_accept();
                 }
@@ -728,12 +803,14 @@ where
         }
 
         if event.pressed {
-            self.last_any_press_ms = event.timestamp_ms;
+            #[cfg(feature = "processor-telemetry")]
             if let Some(ref mut t) = self.telemetry {
                 t.core.record_press(event.pos, now_ms, COLS);
             }
             self.handle_press(event, now_ms, emit);
+            self.last_any_press_ms = Some(event.timestamp_ms);
         } else {
+            #[cfg(feature = "processor-telemetry")]
             if let Some(ref mut t) = self.telemetry {
                 let hold_ms = t.core.last_hold_time(event.pos, now_ms, COLS);
                 t.core.record_release(event.pos, now_ms, COLS);
@@ -787,6 +864,7 @@ where
                             // instantaneous flip, so fire them instantly, same
                             // as a directly-mapped key would.
                             Action::ModTap { tap: kc, .. } | Action::LayerTap { tap: kc, .. } => {
+                                self.record_typing_key(kc, event.timestamp_ms);
                                 self.press_keycode(kc, emit);
                                 self.release_keycode(kc, emit);
                             }
@@ -798,12 +876,7 @@ where
                                 // `event.pos` is the key that completed the
                                 // match — a real position to anchor the held
                                 // action, released on the first key-up below.
-                                self.handle_action_press(
-                                    combo.action,
-                                    KeyEvent::press(event.pos, now_ms),
-                                    now_ms,
-                                    emit,
-                                );
+                                self.handle_action_press(combo.action, event, now_ms, emit);
                                 self.combo_active = Some((combo.action, event.pos));
                             }
                         }
@@ -950,6 +1023,7 @@ where
     {
         match action {
             Action::Key(kc) => {
+                self.record_typing_key(kc, event.timestamp_ms);
                 self.press_keycode(kc, emit);
             }
             Action::Dks(dks) => {
@@ -959,6 +1033,7 @@ where
                 // forever, since `handle_action_release`'s Dks arm only
                 // releases keys it finds in `dks_active`.
                 if self.dks_active.push((event.pos, dks, dks.press)).is_ok() {
+                    self.record_typing_key(dks.press, event.timestamp_ms);
                     self.press_keycode(dks.press, emit);
                 }
             }
@@ -969,6 +1044,7 @@ where
                     .is_some_and(|a| a.config.sticky_keys);
                 if sticky {
                     self.modifier_state.register_oneshot(m);
+                    #[cfg(feature = "processor-telemetry")]
                     if let Some(ref mut t) = self.telemetry {
                         t.accessibility.record_sticky_use();
                     }
@@ -1005,9 +1081,9 @@ where
                                 && event.timestamp_ms.wrapping_sub(ts) < cfg.quick_tap_ms
                         });
                     let idle_too_short = cfg.require_prior_idle_ms > 0
-                        && self.last_any_press_ms > 0
-                        && event.timestamp_ms.wrapping_sub(self.last_any_press_ms)
-                            < cfg.require_prior_idle_ms;
+                        && self.last_any_press_ms.is_some_and(|previous| {
+                            event.timestamp_ms.saturating_sub(previous) < cfg.require_prior_idle_ms
+                        });
                     if quick_tap_hit || idle_too_short {
                         rec.set_force_tap(true);
                     }
@@ -1027,6 +1103,7 @@ where
             Action::RepeatKey => {
                 if let Some(kc) = self.last_keycode {
                     self.repeat_active = true;
+                    self.record_typing_key(kc, event.timestamp_ms);
                     self.press_keycode(kc, emit);
                     self.repeat_active = false;
                 }
@@ -1056,6 +1133,9 @@ where
                 }
                 self.drain_playback(emit);
             }
+            Action::TypeWpm => {
+                self.pending_wpm = self.typing_stats().map(|stats| stats.active_wpm);
+            }
             Action::LayerMod { layer, modifier } => {
                 self.layer_stack.apply(LayerOp::On(layer));
                 self.check_tri_layers();
@@ -1064,12 +1144,16 @@ where
             }
             Action::ModifiedKey { modifier, key } => {
                 self.modifier_state.press(modifier);
+                self.record_typing_key(key, event.timestamp_ms);
                 self.press_keycode(key, emit);
             }
             Action::Mouse(ma) => {
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     match ma {
-                        MouseAction::Move { dx, dy } => t.pointing.record_movement(dx, dy),
+                        MouseAction::Move { dx, dy } => {
+                            t.pointing.record_movement(i16::from(dx), i16::from(dy));
+                        }
                         MouseAction::Click(_) => t.pointing.record_click(false),
                         MouseAction::Scroll(_) => t.pointing.record_scroll(),
                     }
@@ -1077,6 +1161,7 @@ where
                 self.handle_mouse_press(ma, emit);
             }
             Action::Midi(ma) => {
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     match ma {
                         MidiAction::NoteOn { velocity, .. } => t.midi.record_note_on(velocity),
@@ -1088,6 +1173,7 @@ where
                 Self::emit_midi_press(ma, emit);
             }
             Action::Gamepad(ga) => {
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     if let GamepadAction::ButtonPress(btn) = ga {
                         t.gamepad.record_button_press(btn);
@@ -1255,6 +1341,7 @@ where
                 self.handle_mouse_release(ma, emit);
             }
             Action::Midi(ma) => {
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     if matches!(ma, MidiAction::NoteOn { .. }) {
                         t.midi.record_note_off();
@@ -1263,6 +1350,7 @@ where
                 Self::emit_midi_release(ma, emit);
             }
             Action::Gamepad(ga) => {
+                #[cfg(feature = "processor-telemetry")]
                 if let Some(ref mut t) = self.telemetry {
                     if let GamepadAction::ButtonPress(btn) = ga {
                         t.gamepad.record_button_release(btn);
@@ -1276,6 +1364,7 @@ where
                     let chord = crate::devices::steno::StenoChord {
                         keys: self.steno_chord,
                     };
+                    #[cfg(feature = "processor-telemetry")]
                     let was_pending = self
                         .steno_engine
                         .as_ref()
@@ -1285,6 +1374,7 @@ where
                         .as_mut()
                         .and_then(|engine| engine.process_stroke(chord));
                     if let Some(translation) = hit {
+                        #[cfg(feature = "processor-telemetry")]
                         if let Some(ref mut t) = self.telemetry {
                             t.steno.record_hit();
                             t.steno.record_stroke_time(event.timestamp_ms);
@@ -1297,10 +1387,12 @@ where
                             self.playback_steno_translation(owned.as_slice(), emit);
                         }
                     } else if self.steno_engine.is_some() {
+                        #[cfg(feature = "processor-telemetry")]
                         let now_pending = self
                             .steno_engine
                             .as_ref()
                             .is_some_and(|e| e.pending_stroke_count() > 0);
+                        #[cfg(feature = "processor-telemetry")]
                         if let Some(ref mut t) = self.telemetry {
                             if now_pending && !was_pending {
                                 t.steno.record_multi_stroke_start();
@@ -1331,6 +1423,7 @@ where
             | Action::OutputSelect(_)
             | Action::Rgb(_)
             | Action::SendString(_)
+            | Action::TypeWpm
             | Action::Sleep
             | Action::SlowKeysToggle
             | Action::StickyKeysToggle => {}
@@ -1360,6 +1453,7 @@ where
                 // press cache here or the next press would be ignored as a
                 // duplicate.
                 self.layer_stack.clear_cache(rec.tap_pos(), COLS);
+                self.record_typing_key(kc, rec.pressed_at_ms());
                 self.press_keycode(kc, emit);
                 rec.drain_pending(|e| {
                     let _ = self.pending.push_back(e);
@@ -1420,10 +1514,59 @@ where
         }
     }
 
+    fn record_typing_key(&mut self, kc: KeyCode, timestamp_ms: u64) {
+        let modifiers = self.modifier_state.report_byte();
+        let shortcuts = modifiers.without(ModifierKey::LSHIFT.union(ModifierKey::RSHIFT));
+        if !shortcuts.is_empty() || self.pressed_keys.contains(&kc.usage_id()) {
+            return;
+        }
+        if let Some(stats) = &mut self.typing_stats {
+            stats.record_keycode(kc, timestamp_ms);
+        }
+    }
+
+    /// Emits queued typing-speed text once ordinary keys have been released.
+    ///
+    /// Call after sending the reports from [`Self::process_event`] or
+    /// [`Self::tick`], reusing the emptied report buffer. The readout produces
+    /// at most 14 reports, restores held modifiers, and never counts its own
+    /// output. Keeping it separate prevents replayed keys and text together
+    /// from overflowing a small runtime report buffer.
+    pub fn drain_wpm_readout<F>(&mut self, emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
+        // Wait for ordinary keys to release so restoring them cannot retype them.
+        if !self.pressed_keys.is_empty() {
+            return;
+        }
+        let Some(wpm) = self.pending_wpm.take() else {
+            return;
+        };
+        use core::fmt::Write;
+        let mut text = heapless::String::<9>::new();
+        let _ = write!(text, "{wpm} WPM");
+        let mut previous_key = None;
+        for ch in text.chars() {
+            if let Some((modifier, key)) = steno_playback::char_to_key_action(ch) {
+                if previous_key == Some(key) {
+                    self.emit_keyboard_state(&ModifierState::new(), &[], emit);
+                }
+                let mut state = ModifierState::new();
+                state.press(modifier);
+                self.emit_keyboard_state(&state, &[key.usage_id()], emit);
+                previous_key = Some(key);
+            }
+        }
+        // Text output bypasses macros, correction, one-shots, and typing counts.
+        self.emit_keyboard(emit);
+    }
+
     fn press_keycode<F>(&mut self, kc: KeyCode, emit: &mut F)
     where
         F: FnMut(HidReport) + ?Sized,
     {
+        #[cfg(feature = "processor-telemetry")]
         if kc == KeyCode::Backspace {
             if let Some(ref mut t) = self.telemetry {
                 t.core.record_error();
@@ -1541,11 +1684,15 @@ where
         emit: &mut F,
     ) {
         let mut playback = core::mem::take(&mut self.steno_playback);
+        #[cfg(feature = "processor-telemetry")]
         let mut steno_telem = self
             .telemetry
             .as_mut()
             .map(|t| core::mem::take(&mut t.steno));
+        #[cfg(not(feature = "processor-telemetry"))]
+        let mut steno_telem = None;
         playback.play_translation(translation, steno_telem.as_mut(), self, emit);
+        #[cfg(feature = "processor-telemetry")]
         if let (Some(ref mut t), Some(telem)) = (&mut self.telemetry, steno_telem) {
             t.steno = telem;
         }
@@ -1681,14 +1828,19 @@ where
     where
         F: FnMut(HidReport) + ?Sized,
     {
+        self.emit_keyboard_state(&self.modifier_state, &self.pressed_keys, emit);
+    }
+
+    fn emit_keyboard_state<F>(&self, modifiers: &ModifierState, keys: &[u8], emit: &mut F)
+    where
+        F: FnMut(HidReport) + ?Sized,
+    {
         match self.rollover_mode {
             RolloverMode::Kro6 => emit(HidReport::Keyboard(KeyboardReport::from_state(
-                &self.modifier_state,
-                &self.pressed_keys,
+                modifiers, keys,
             ))),
             RolloverMode::Nkro => emit(HidReport::NkroKeyboard(NkroKeyboardReport::from_state(
-                &self.modifier_state,
-                &self.pressed_keys,
+                modifiers, keys,
             ))),
         }
     }

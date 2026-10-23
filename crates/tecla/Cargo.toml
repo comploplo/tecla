@@ -10,19 +10,27 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/tecla"
+# Integration tests and benchmarks use repository keyboard profiles, fixtures,
+# and path-only development tools. Run them from a checkout (`just test`);
+# they are not a standalone test suite for the published library archive.
+exclude = ["tests/", "benches/"]
 
 [lints]
 workspace = true
 
 [package.metadata.docs.rs]
 # Not all-features: `usb` pulls embassy-usb -> ssmarshal, which does not build
-# with `std`, and docs.rs builds for a host target. The USB reporter is
-# documented on the embedded target below instead.
+# with `std`, and docs.rs builds for a host target. The embedded package
+# checks cover the USB reporter separately.
 features = ["testing", "embassy", "storage", "via", "autocorrect", "autocomplete"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["autocorrect", "autocomplete"]
+default = ["autocorrect", "autocomplete", "processor-telemetry"]
+
+# Inline processor collectors cost several KiB even before collection is enabled.
+# Small boards can omit them while keeping the standalone telemetry types.
+processor-telemetry = []
 
 # Trie-based typo correction (AutocorrectEngine). Optional for minimal builds.
 # The edit-distance search is the heaviest pure-logic path in the crate; drop
@@ -38,9 +46,6 @@ std = []
 
 # Alias for `std`, used by the coverage and integration-test targets.
 testing = ["std"]
-
-# Host-only discovery target for firmware mutation tests.
-mutation-testing = ["testing", "embassy"]
 
 # Enables the async Embassy orchestrator — task::run() and the async scanner /
 # reporter traits. Requires an Embassy time driver in the final binary.
@@ -81,8 +86,8 @@ embedded-storage-async = { workspace = true, optional = true }
 sequential-storage     = { workspace = true, optional = true }
 
 [dev-dependencies]
-# Doc-tests in this crate use the macros to show a realistic keymap.
-# Path-only (no version) — see the matching note in tecla-macros/Cargo.toml.
+# Checkout integration tests exercise macro keymaps. Keep this path-only so
+# the published core does not depend on the macros crate.
 tecla-macros    = { path = "../tecla-macros" }
 similar-asserts = { workspace = true }
 serde_json      = { workspace = true }
@@ -105,11 +110,3 @@ required-features = ["testing"]
 name = "process_event"
 harness = false
 required-features = ["testing"]
-
-# cargo-mutants discovers binaries, but not integration-test module roots.
-[[bin]]
-name = "instrument-mutations"
-path = "mutation.rs"
-required-features = ["mutation-testing"]
-test = false
-bench = false

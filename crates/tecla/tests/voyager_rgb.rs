@@ -1,3 +1,5 @@
+//! Host tests for Voyager LED mapping, bounded bus writes, and driver recovery.
+#![cfg(feature = "embassy")]
 #![allow(
     clippy::tests_outside_test_module,
     missing_docs,

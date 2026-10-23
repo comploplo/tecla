@@ -11,6 +11,10 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/tecla-stm32f3"
 
+[package.metadata.docs.rs]
+default-target = "thumbv7em-none-eabihf"
+targets = ["thumbv7em-none-eabihf"]
+
 [lints]
 workspace = true
 
@@ -18,7 +22,7 @@ workspace = true
 usb-midi = ["tecla/usb-midi"]
 
 [dependencies]
-tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "usb", "via"] }
+tecla        = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "usb", "via", "processor-telemetry"] }
 tecla-macros = { version = "0.1.0", path = "../tecla-macros" }
 embedded-hal = { workspace = true }
 embedded-hal-async = { workspace = true }

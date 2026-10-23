@@ -1,4 +1,4 @@
-name: Instrument mutations
+name: Mutations
 
 on:
   workflow_dispatch:
@@ -7,9 +7,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  instruments:
+  mutations:
     runs-on: ubuntu-latest
     container: node:22-bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: [mutants-instruments, mutants-typing, mutants-harmony]
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v4
         with:
@@ -19,5 +23,5 @@ jobs:
         run: |
           cargo install --locked just
           cargo install --locked cargo-mutants --version 27.1.0
-      - name: Mutate instrument behaviour
-        run: just mutants-instruments --jobs 2
+      - name: Mutate tested behaviour
+        run: just ${{ matrix.recipe }} --jobs 2

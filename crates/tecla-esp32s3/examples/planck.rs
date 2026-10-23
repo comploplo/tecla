@@ -23,14 +23,14 @@ use embassy_usb::class::hid::{HidWriter, State};
 use embassy_usb::{Builder, Config};
 use esp_backtrace as _;
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
-use esp_hal::usb::otg::{embassy_usb_device, Usb};
+use esp_hal::usb::otg::{Usb, embassy_usb_device};
 use esp_println as _;
 use static_cell::StaticCell;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::keyboard::KeyboardProcessor;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::task::{EventChannel, ReportChannel};
-use tecla_esp32s3::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_esp32s3::{CompositeUsbReporter, GpioMatrixScanner, KEYBOARD_REPORT_DESCRIPTOR};
 use tecla_macros::keymap;
 
 const ROWS: usize = 4;
@@ -165,7 +165,7 @@ async fn main(spawner: Spawner) {
     };
 
     let processor = KeyboardProcessor::new(keymap, TapHoldConfig::default());
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());

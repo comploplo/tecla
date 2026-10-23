@@ -41,7 +41,7 @@ use tecla::pipeline::event::KeyEvent;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla::transport::SplitTransport;
 use tecla_macros::{keyboard_main, keymap};
-use tecla_rp2040::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_rp2040::{CompositeUsbReporter, GpioMatrixScanner, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -144,7 +144,7 @@ async fn main(spawner: Spawner) {
 
     let processor =
         KeyboardProcessor::<ROWS, TOTAL_COLS, 2, 48>::new(keymap, TapHoldConfig::default());
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
     let _split_cfg = SplitConfig::primary();
     let transport = DummyTransport;
 

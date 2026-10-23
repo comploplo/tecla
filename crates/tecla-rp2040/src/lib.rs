@@ -38,7 +38,7 @@ pub mod telemetry;
 
 pub use audio::PwmBuzzer;
 pub use haptic::Drv2605l;
-pub use reporter::{Capabilities, CompositeUsbReporter, UsbHidReporter};
+pub use reporter::{Capabilities, CompositeUsbReporter};
 pub use scanner::{CapTouchScanner, DirectPinScanner, GpioMatrixScanner};
 pub use telemetry::CdcTelemetryWriter;
 

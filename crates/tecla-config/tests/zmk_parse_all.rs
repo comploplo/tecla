@@ -125,7 +125,8 @@ fn every_shield_with_keymap_file_produces_layers() {
             continue;
         }
         let source = std::fs::read_to_string(&keymap_path).unwrap();
-        let layers = dts::extract_bindings(&source);
+        let keymap = dts::parse_document(&source);
+        let layers = keymap.bindings();
         if layers.is_empty() {
             failures.push(format!("{name}: .keymap exists but parsed 0 layers"));
         }

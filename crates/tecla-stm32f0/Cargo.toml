@@ -1,0 +1,48 @@
+[package]
+name = "tecla-stm32f0"
+version = "0.1.0"
+edition = "2021"
+description = "Tecla keyboard firmware for STM32F072 (NuPhy NOS75)"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tecla-stm32f0"
+
+[package.metadata.docs.rs]
+default-target = "thumbv6m-none-eabi"
+targets = ["thumbv6m-none-eabi"]
+
+[lints]
+workspace = true
+
+[dependencies]
+tecla = { version = "0.1.0", path = "../tecla", default-features = false, features = ["embassy", "usb"] }
+# Build this board separately: the workspace STM32 dependency selects an F4.
+embassy-stm32 = { version = "0.6", features = ["stm32f072cb", "time-driver-any", "time"] }
+embassy-executor = { workspace = true, features = ["platform-cortex-m"] }
+embassy-time = { workspace = true }
+embassy-sync = { workspace = true }
+embassy-futures = "0.1"
+embedded-hal-async = { workspace = true }
+embassy-usb = { workspace = true }
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt = { workspace = true }
+defmt = { workspace = true }
+defmt-rtt = { workspace = true }
+panic-probe = { workspace = true }
+static_cell = { workspace = true }
+portable-atomic = { version = "1", features = ["critical-section"] }
+heapless = { workspace = true }
+
+[[example]]
+name = "nos75"
+
+# Keep standalone example builds within the NOS75's RAM budget. The workspace
+# supplies the same settings when this crate is built from the repository.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

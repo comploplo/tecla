@@ -1,4 +1,4 @@
-//! Host-only discovery root for mutation testing the actual firmware modules.
+//! Repository-only discovery root for mutation testing actual firmware modules.
 #![allow(
     dead_code,
     missing_docs,
@@ -9,6 +9,8 @@
 mod chromatica;
 #[path = "../../keyboards/tecla/voyager_tonnetz/scan_guard.rs"]
 mod scan_guard;
+#[path = "../../keyboards/tecla/asterisk_v1_4_suspension/controls.rs"]
+mod suspension;
 #[path = "../../keyboards/tecla/voyager_tonnetz/instrument.rs"]
 mod voyager;
 

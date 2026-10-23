@@ -363,7 +363,12 @@ pub fn parse_shield(dir: &Path) -> Result<BoardConfig, ShieldError> {
 
     if keymap_path.exists() {
         let keymap_source = std::fs::read_to_string(&keymap_path).map_err(ShieldError::Io)?;
-        let layers = dts::extract_bindings(&keymap_source);
+        let keymap = dts::parse_document(&keymap_source);
+        let layers = keymap
+            .bindings()
+            .into_iter()
+            .map(<[_]>::to_vec)
+            .collect::<Vec<_>>();
         if !layers.is_empty() {
             config.zmk_keymap = Some(layers);
         }

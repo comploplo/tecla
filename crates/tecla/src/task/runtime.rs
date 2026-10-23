@@ -39,7 +39,7 @@ use crate::devices::mouse::pointing::AsyncPointingScanner;
 use crate::keyboard::KeyboardProcessor;
 use crate::matrix::debounce::Debouncer;
 use crate::matrix::{AsyncMatrixScanner, MatrixState};
-use crate::pipeline::event::{EncoderDirection, KeyEvent};
+use crate::pipeline::event::{EncoderDirection, KeyEvent, KeyPos};
 use crate::pipeline::hid::AsyncReporter;
 use crate::pipeline::report::{ConsumerReport, HidReport, KeyboardReport, MouseReport};
 use crate::telemetry::encoder::EncoderTelemetry;
@@ -150,7 +150,12 @@ async fn receive_and_process<
                     processor.tick(tick_ms, &mut |r| {
                         let _ = reports.push(r);
                     });
-                    send_reports(report_tx, reports).await;
+                    send_reports(report_tx, &reports).await;
+                    reports.clear();
+                    processor.drain_wpm_readout(&mut |r| {
+                        let _ = reports.push(r);
+                    });
+                    send_reports(report_tx, &reports).await;
                 }
                 None
             }
@@ -165,7 +170,12 @@ async fn receive_and_process<
         processor.process_event(event, ev_ms, &mut |r| {
             let _ = reports.push(r);
         });
-        send_reports(report_tx, reports).await;
+        send_reports(report_tx, &reports).await;
+        reports.clear();
+        processor.drain_wpm_readout(&mut |r| {
+            let _ = reports.push(r);
+        });
+        send_reports(report_tx, &reports).await;
         return Some(event);
     }
     None
@@ -173,10 +183,10 @@ async fn receive_and_process<
 
 async fn send_reports<M: RawMutex, const N: usize>(
     report_tx: &Sender<'_, M, HidReport, N>,
-    reports: Vec<HidReport, 64>,
+    reports: &[HidReport],
 ) {
     for report in reports {
-        report_tx.send(report).await;
+        report_tx.send(*report).await;
     }
 }
 
@@ -478,7 +488,7 @@ where
                 },
             );
         }
-        send_reports(&report_tx, reports).await;
+        send_reports(&report_tx, &reports).await;
     }
 }
 
@@ -617,7 +627,7 @@ where
 /// sends them to `telem_tx`.
 ///
 /// The telemetry interval is 250ms. If the processor has telemetry enabled
-/// (via [`KeyboardProcessor::with_telemetry`]), a
+/// (via `KeyboardProcessor::with_telemetry` or `with_typing_stats`), a
 /// [`TelemetryFrame`](crate::telemetry::transport::TelemetryFrame) is
 /// collected and sent each interval. If telemetry is not enabled, no frames
 /// are sent.
@@ -654,12 +664,10 @@ where
 
         let now = Instant::now().as_millis();
         if now.saturating_sub(last_telem_ms) >= TELEM_INTERVAL_MS {
-            if let Some(t) = processor.telemetry_mut() {
-                // ponytail: encoders are scanned in their own task with their
-                // own collector; boards that want encoder metrics in the frame
-                // call collect_frame directly with that snapshot.
-                let frame = crate::telemetry::transport::collect_frame(t, None);
-                let _ = telem_tx.try_send(frame);
+            if let Some(frame) = processor.telemetry_frame() {
+                if telem_tx.try_send(frame).is_ok() {
+                    processor.clear_telemetry_deltas();
+                }
             }
             last_telem_ms = now;
         }
@@ -755,10 +763,42 @@ pub async fn run<
     const KEYS: usize,
     Ext,
 >(
+    scanner: S,
+    debouncer: Db,
+    processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
+    reporter: R,
+) -> !
+where
+    S: AsyncMatrixScanner<ROWS, COLS>,
+    Db: Debouncer<ROWS, COLS>,
+    R: AsyncReporter,
+    Ext: Copy + PartialEq,
+{
+    run_with_rgb(scanner, debouncer, processor, reporter, |_| {}, |_| {}).await
+}
+
+/// Runs the single-task keyboard pipeline with nonblocking RGB feedback.
+///
+/// `on_event` receives debounced physical press/release events; `on_rgb` receives
+/// commands produced by `Action::Rgb`. Callbacks must return promptly, for
+/// example by using a channel's `try_send`, while a separate task renders LEDs.
+/// The scanner, report handling, and tap-hold deadlines match [`run`].
+pub async fn run_with_rgb<
+    S,
+    Db,
+    R,
+    const ROWS: usize,
+    const COLS: usize,
+    const LAYERS: usize,
+    const KEYS: usize,
+    Ext,
+>(
     mut scanner: S,
     mut debouncer: Db,
     processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     mut reporter: R,
+    mut on_event: impl FnMut(KeyEvent),
+    mut on_rgb: impl FnMut(crate::rgb::RgbCommand),
 ) -> !
 where
     S: AsyncMatrixScanner<ROWS, COLS>,
@@ -770,42 +810,63 @@ where
     let mut ticker = Ticker::every(Duration::from_millis(MATRIX_SCAN_MS));
     loop {
         ticker.next().await;
+        // Flush after each physical edge rather than accumulating an entire scan.
         let mut reports: Vec<HidReport, 16> = Vec::new();
 
-        let raw_opt = if let Some(deadline_ms) = processor.next_deadline_ms() {
-            let now_ms = Instant::now().as_millis();
-            let remaining = Duration::from_millis(deadline_ms.saturating_sub(now_ms));
-            match with_timeout(remaining, scanner.scan()).await {
-                Err(_timeout) => {
-                    let tick_ms = Instant::now().as_millis();
-                    processor.tick(tick_ms, &mut |r| {
-                        let _ = reports.push(r);
-                    });
-                    None
+        let (now_ms, stable) = {
+            let raw_opt = if let Some(deadline_ms) = processor.next_deadline_ms() {
+                let now_ms = Instant::now().as_millis();
+                let remaining = Duration::from_millis(deadline_ms.saturating_sub(now_ms));
+                match with_timeout(remaining, scanner.scan()).await {
+                    Err(_timeout) => {
+                        let tick_ms = Instant::now().as_millis();
+                        processor.tick(tick_ms, &mut |r| {
+                            let _ = reports.push(r);
+                        });
+                        for report in &reports {
+                            if let Err(e) = reporter.send(report).await {
+                                defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
+                            }
+                        }
+                        reports.clear();
+                        processor.drain_wpm_readout(&mut |r| {
+                            let _ = reports.push(r);
+                        });
+                        for report in &reports {
+                            if let Err(e) = reporter.send(report).await {
+                                defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
+                            }
+                        }
+                        reports.clear();
+                        None
+                    }
+                    Ok(Ok(raw)) => Some(raw),
+                    Ok(Err(_scan_err)) => None,
                 }
-                Ok(Ok(raw)) => Some(raw),
-                Ok(Err(_scan_err)) => None,
-            }
-        } else {
-            scanner.scan().await.ok()
-        };
-
-        if let Some(raw) = raw_opt {
+            } else {
+                scanner.scan().await.ok()
+            };
             let now_ms = Instant::now().as_millis();
+            (
+                now_ms,
+                raw_opt.and_then(|raw| debouncer.process(&raw, now_ms)),
+            )
+        };
+        if let Some(stable) = stable {
             process_scan(
-                &raw,
+                &stable,
                 &mut prev,
                 now_ms,
-                &mut debouncer,
                 processor,
                 &mut reports,
-            );
+                &mut reporter,
+                &mut on_event,
+            )
+            .await;
         }
 
-        for report in &reports {
-            if let Err(e) = reporter.send(report).await {
-                defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
-            }
+        if let Some(command) = processor.pending_rgb_command() {
+            on_rgb(command);
         }
 
         // No channels on this path — this warns if a keymap uses a feedback
@@ -817,40 +878,65 @@ where
     }
 }
 
-fn process_scan<
-    Db,
+async fn process_scan<
+    R,
     const ROWS: usize,
     const COLS: usize,
     const LAYERS: usize,
     const KEYS: usize,
     Ext,
 >(
-    raw: &MatrixState<ROWS, COLS>,
+    stable: &MatrixState<ROWS, COLS>,
     prev: &mut MatrixState<ROWS, COLS>,
     now_ms: u64,
-    debouncer: &mut Db,
     processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS, Ext>,
     reports: &mut Vec<HidReport, 16>,
+    reporter: &mut R,
+    on_event: &mut impl FnMut(KeyEvent),
 ) where
-    Db: Debouncer<ROWS, COLS>,
+    R: AsyncReporter,
     Ext: Copy + PartialEq,
 {
-    if let Some(stable) = debouncer.process(raw, now_ms) {
-        for (pos, pressed) in stable.iter_pos() {
-            let was_pressed = prev.get_pos(pos).unwrap_or(false);
-            if pressed != was_pressed {
-                let event = if pressed {
-                    KeyEvent::press(pos, now_ms)
-                } else {
-                    KeyEvent::release(pos, now_ms)
-                };
-                processor.process_event(event, now_ms, &mut |r| {
-                    let _ = reports.push(r);
-                });
+    // One index keeps iterator state out of the small-board async task storage.
+    let mut flat = 0;
+    while flat < ROWS * COLS {
+        let row = flat / COLS;
+        let col = flat % COLS;
+        flat += 1;
+        let pressed = stable.get(row, col).unwrap_or(false);
+        let was_pressed = prev.get(row, col).unwrap_or(false);
+        if pressed != was_pressed {
+            let pos = KeyPos::new(
+                row.try_into().unwrap_or(u8::MAX),
+                col.try_into().unwrap_or(u8::MAX),
+            );
+            let event = if pressed {
+                KeyEvent::press(pos, now_ms)
+            } else {
+                KeyEvent::release(pos, now_ms)
+            };
+            on_event(event);
+            processor.process_event(event, now_ms, &mut |r| {
+                let _ = reports.push(r);
+            });
+            for report in reports.iter() {
+                if let Err(e) = reporter.send(report).await {
+                    defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
+                }
             }
+            reports.clear();
+            processor.drain_wpm_readout(&mut |r| {
+                let _ = reports.push(r);
+            });
+            for report in reports.iter() {
+                if let Err(e) = reporter.send(report).await {
+                    defmt::warn!("run: report dropped: {}", defmt::Debug2Format(&e));
+                }
+            }
+            reports.clear();
         }
-        *prev = stable;
     }
+    *prev = stable.clone();
 }
 
 /// Receives [`KeyEvent`]s from a [`SplitTransport`] and forwards them into
@@ -1055,18 +1141,15 @@ where
     S: AsyncPointingScanner,
 {
     let mut last_moving = false;
+    let mut last_buttons = 0;
     loop {
         let event = scanner.scan().await;
         let moving = event.dx != 0 || event.dy != 0;
         if let Some(ref mut t) = telemetry {
             if moving {
-                #[expect(clippy::cast_possible_truncation, reason = "clamped to i8 range")]
-                let dx = event.dx.clamp(-128, 127) as i8;
-                #[expect(clippy::cast_possible_truncation, reason = "clamped to i8 range")]
-                let dy = event.dy.clamp(-128, 127) as i8;
-                t.record_movement(dx, dy);
+                t.record_movement(event.dx, event.dy);
             }
-            if event.buttons != 0 {
+            for _ in 0..(event.buttons & !last_buttons).count_ones() {
                 t.record_click(moving || last_moving);
             }
             if event.scroll != 0 {
@@ -1074,6 +1157,7 @@ where
             }
         }
         last_moving = moving;
+        last_buttons = event.buttons;
         report_tx.send(pointing_event_to_report(&event)).await;
     }
 }
@@ -1218,6 +1302,8 @@ where
     reason = "test code with small constants"
 )]
 mod tests {
+    extern crate std;
+
     use super::*;
     use crate::action::{Action, KeyCode};
     use crate::devices::keyboard::tapping::TapHoldConfig;
@@ -1352,7 +1438,7 @@ mod tests {
     const KEYS: usize = 6;
 
     fn make_processor(base: &[Action]) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-        let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
+        let mut layers: heapless::Vec<Layer<(), KEYS>, LAYERS> = heapless::Vec::new();
         let _ = layers.push(Layer::new(base));
         KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
     }
@@ -1379,13 +1465,269 @@ mod tests {
         }
     }
 
+    fn process_scan<Db: Debouncer<ROWS, COLS>>(
+        raw: &MatrixState<ROWS, COLS>,
+        prev: &mut MatrixState<ROWS, COLS>,
+        now_ms: u64,
+        debouncer: &mut Db,
+        processor: &mut KeyboardProcessor<ROWS, COLS, LAYERS, KEYS>,
+        reports: &mut Vec<HidReport, 64>,
+        on_event: &mut impl FnMut(KeyEvent),
+    ) {
+        use core::future::Future;
+        use core::task::{Context, Waker};
+
+        struct RecordingReporter<'a>(&'a mut Vec<HidReport, 64>);
+
+        impl AsyncReporter for RecordingReporter<'_> {
+            async fn send(
+                &mut self,
+                report: &HidReport,
+            ) -> Result<(), crate::pipeline::hid::ReportError> {
+                self.0.push(*report).unwrap();
+                Ok(())
+            }
+        }
+
+        let Some(stable) = debouncer.process(raw, now_ms) else {
+            return;
+        };
+        let mut batch = Vec::new();
+        let mut reporter = RecordingReporter(reports);
+        let mut task = core::pin::pin!(super::process_scan(
+            &stable,
+            prev,
+            now_ms,
+            processor,
+            &mut batch,
+            &mut reporter,
+            on_event,
+        ));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(task.as_mut().poll(&mut context).is_ready());
+    }
+
+    #[test]
+    fn rgb_feedback_follows_debounced_edges_and_retains_commands() {
+        use crate::rgb::RgbCommand;
+        let mut layout = key_a_layout();
+        layout[0] = Action::Rgb(RgbCommand::Next);
+        let mut proc = make_processor(&layout);
+        let mut prev = MatrixState::<ROWS, COLS>::new();
+        let mut raw = MatrixState::<ROWS, COLS>::new();
+        raw.set(0, 0, true);
+        let mut reports = Vec::new();
+        let mut events = std::vec::Vec::new();
+        process_scan(
+            &raw,
+            &mut prev,
+            0,
+            &mut RejectDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |event| events.push(event),
+        );
+        assert!(events.is_empty());
+        assert_eq!(proc.pending_rgb_command(), None);
+        process_scan(
+            &raw,
+            &mut prev,
+            1,
+            &mut PassthroughDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |event| events.push(event),
+        );
+        assert_eq!(proc.pending_rgb_command(), Some(RgbCommand::Next));
+        process_scan(
+            &raw,
+            &mut prev,
+            2,
+            &mut PassthroughDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |event| events.push(event),
+        );
+        raw.set(0, 0, false);
+        process_scan(
+            &raw,
+            &mut prev,
+            3,
+            &mut PassthroughDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |event| events.push(event),
+        );
+        assert_eq!(events.len(), 2);
+        assert!(events[0].pressed);
+        assert!(!events[1].pressed);
+        assert_eq!(events[0].timestamp_ms, 1);
+        assert_eq!(events[1].timestamp_ms, 3);
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn scan_streams_full_five_digit_wpm_readouts_and_simultaneous_edges() {
+        use crate::action::ModifierKey;
+
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::Key(KeyCode::B),
+            Action::TypeWpm,
+            Action::Modifier(ModifierKey::LSHIFT),
+            Action::TypeWpm,
+            Action::Modifier(ModifierKey::LCTRL),
+        ])
+        .with_typing_stats();
+        for (col, now_ms) in [(0, 0), (1, 1)] {
+            proc.process_event(
+                KeyEvent::press(crate::pipeline::event::KeyPos::new(0, col), now_ms),
+                now_ms,
+                &mut |_| {},
+            );
+            proc.process_event(
+                KeyEvent::release(crate::pipeline::event::KeyPos::new(0, col), now_ms),
+                now_ms,
+                &mut |_| {},
+            );
+        }
+
+        let mut prev = MatrixState::<ROWS, COLS>::new();
+        let mut reports = Vec::new();
+        let mut raw = MatrixState::<ROWS, COLS>::new();
+        raw.set(0, 0, true);
+        raw.set(1, 0, true);
+        process_scan(
+            &raw,
+            &mut prev,
+            2,
+            &mut PassthroughDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |_| {},
+        );
+        assert_eq!(proc.typing_stats().unwrap().active_wpm, 12_000);
+        reports.clear();
+
+        // Two readouts and ordinary edges exceed the per-event buffer together.
+        raw.set(0, 0, false);
+        raw.set(0, 2, true);
+        raw.set(1, 0, false);
+        raw.set(1, 1, true);
+        raw.set(1, 2, true);
+        process_scan(
+            &raw,
+            &mut prev,
+            3,
+            &mut PassthroughDebouncer,
+            &mut proc,
+            &mut reports,
+            &mut |_| {},
+        );
+
+        let mut text = std::string::String::new();
+        let mut previous_keys = [0; 6];
+        let mut first_readout_restored_shift = false;
+        let shift = ModifierKey::LSHIFT.union(ModifierKey::RSHIFT).bits();
+        for report in &reports {
+            let HidReport::Keyboard(keyboard) = report else {
+                panic!("expected keyboard reports");
+            };
+            if text == "12000 WPM"
+                && keyboard.keycodes == [0; 6]
+                && keyboard.modifiers == ModifierKey::LSHIFT.bits()
+            {
+                first_readout_restored_shift = true;
+            }
+            for usage in keyboard.keycodes {
+                if usage == 0 || previous_keys.contains(&usage) {
+                    continue;
+                }
+                assert_eq!(keyboard.modifiers & !shift, 0);
+                let ch = match usage {
+                    0x04..=0x1D if keyboard.modifiers & shift != 0 => {
+                        char::from(b'A' + usage - 0x04)
+                    }
+                    0x04..=0x1D => char::from(b'a' + usage - 0x04),
+                    0x1E..=0x26 => char::from(b'1' + usage - 0x1E),
+                    0x27 => '0',
+                    0x2C => ' ',
+                    _ => panic!("unexpected text keycode"),
+                };
+                text.push(ch);
+            }
+            previous_keys = keyboard.keycodes;
+        }
+        assert_eq!(text, "12000 WPM12000 WPM");
+        assert!(reports.len() > 16);
+        assert!(first_readout_restored_shift);
+        let HidReport::Keyboard(final_state) = reports.last().unwrap() else {
+            panic!("expected final keyboard state");
+        };
+        assert_eq!(final_state.modifiers, ModifierKey::LCTRL.bits());
+        assert_eq!(final_state.keycodes, [0; 6]);
+        assert_eq!(proc.typing_stats().unwrap().characters, 3);
+    }
+
+    #[test]
+    fn scan_flushes_a_deferred_readout_after_tap_hold_replay_without_sticking_keys() {
+        use crate::action::ModifierKey;
+
+        let mut proc = make_processor(&[
+            Action::Key(KeyCode::A),
+            Action::Key(KeyCode::Right),
+            Action::TypeWpm,
+            Action::ModTap {
+                hold: ModifierKey::LSHIFT,
+                tap: KeyCode::Left,
+            },
+        ])
+        .with_typing_stats();
+        for index in 0..1_001 {
+            let timestamp = index * 1_080 / 1_000;
+            let pos = KeyPos::new(0, 0);
+            proc.process_event(KeyEvent::press(pos, timestamp), timestamp, &mut |_| {});
+            proc.process_event(KeyEvent::release(pos, timestamp), timestamp, &mut |_| {});
+        }
+        assert_eq!(proc.typing_stats().unwrap().active_wpm, 11_111);
+
+        let mut prev = MatrixState::<ROWS, COLS>::new();
+        let mut raw = MatrixState::<ROWS, COLS>::new();
+        let mut reports = Vec::new();
+        for (row, col, pressed, timestamp) in [
+            (0, 1, true, 1_100),
+            (0, 2, true, 1_110),
+            (1, 0, true, 1_120),
+            (0, 1, false, 1_130),
+            (1, 0, false, 1_140),
+        ] {
+            raw.set(row, col, pressed);
+            process_scan(
+                &raw,
+                &mut prev,
+                timestamp,
+                &mut PassthroughDebouncer,
+                &mut proc,
+                &mut reports,
+                &mut |_| {},
+            );
+        }
+        // The final edge produces three replay reports and fourteen text
+        // reports, so collecting both into the runtime's Vec<_, 16> drops key-up.
+        assert_eq!(reports.len(), 18);
+        assert_eq!(
+            reports.last(),
+            Some(&HidReport::Keyboard(KeyboardReport::new()))
+        );
+    }
+
     #[test]
     fn key_press_generates_report_with_keycode() {
         let mut proc = make_processor(&key_a_layout());
         let mut prev = MatrixState::<ROWS, COLS>::new();
         let mut raw = MatrixState::<ROWS, COLS>::new();
         raw.set(0, 0, true);
-        let mut reports: Vec<HidReport, 16> = Vec::new();
+        let mut reports: Vec<HidReport, 64> = Vec::new();
 
         process_scan(
             &raw,
@@ -1394,6 +1736,7 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut reports,
+            &mut |_| {},
         );
 
         assert_eq!(reports.len(), 1);
@@ -1414,10 +1757,11 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut Vec::new(),
+            &mut |_| {},
         );
 
         let released = MatrixState::<ROWS, COLS>::new();
-        let mut reports: Vec<HidReport, 16> = Vec::new();
+        let mut reports: Vec<HidReport, 64> = Vec::new();
         process_scan(
             &released,
             &mut prev,
@@ -1425,6 +1769,7 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut reports,
+            &mut |_| {},
         );
 
         assert_eq!(reports.len(), 1);
@@ -1436,7 +1781,7 @@ mod tests {
         let mut proc = make_processor(&key_a_layout());
         let mut prev = MatrixState::<ROWS, COLS>::new();
         let raw = MatrixState::<ROWS, COLS>::new();
-        let mut reports: Vec<HidReport, 16> = Vec::new();
+        let mut reports: Vec<HidReport, 64> = Vec::new();
 
         process_scan(
             &raw,
@@ -1445,6 +1790,7 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut reports,
+            &mut |_| {},
         );
         process_scan(
             &raw,
@@ -1453,6 +1799,7 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut reports,
+            &mut |_| {},
         );
 
         assert!(reports.is_empty());
@@ -1464,7 +1811,7 @@ mod tests {
         let mut prev = MatrixState::<ROWS, COLS>::new();
         let mut raw = MatrixState::<ROWS, COLS>::new();
         raw.set(0, 0, true);
-        let mut reports: Vec<HidReport, 16> = Vec::new();
+        let mut reports: Vec<HidReport, 64> = Vec::new();
 
         process_scan(
             &raw,
@@ -1473,6 +1820,7 @@ mod tests {
             &mut RejectDebouncer,
             &mut proc,
             &mut reports,
+            &mut |_| {},
         );
 
         assert!(reports.is_empty());
@@ -1492,6 +1840,7 @@ mod tests {
             &mut PassthroughDebouncer,
             &mut proc,
             &mut Vec::new(),
+            &mut |_| {},
         );
 
         assert_eq!(prev.get_pos(KeyPos::new(0, 0)), Some(true));
@@ -1674,6 +2023,70 @@ mod tests {
     }
 
     #[test]
+    fn pointing_task_records_full_deltas_and_only_new_button_down_edges() {
+        use core::future::Future;
+        use core::task::{Context, Waker};
+        use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
+        struct Scanner(std::array::IntoIter<crate::pipeline::event::PointingEvent, 12>);
+        impl AsyncPointingScanner for Scanner {
+            async fn scan(&mut self) -> crate::pipeline::event::PointingEvent {
+                match self.0.next() {
+                    Some(event) => event,
+                    None => core::future::pending().await,
+                }
+            }
+        }
+
+        let events = [
+            (300, -400, 0, 0),
+            (0, 0, 1, 0),   // One button down after movement.
+            (200, 0, 1, 1), // Movement/scrolling with the button held is no new click.
+            (0, 0, 1, 0),
+            (0, 0, 3, 0), // A second button down while the first stays held.
+            (0, 0, 2, 0), // Release only.
+            (i16::MIN, i16::MAX, 2, -1),
+            (0, 0, 0, 0),
+            (0, 0, 5, 0), // Two simultaneous new button-down edges.
+            (0, 0, 5, 0),
+            (0, 0, 0, 0),
+            (0, 0, 1, 0), // Pressing the released button again counts once more.
+        ]
+        .map(
+            |(dx, dy, buttons, scroll)| crate::pipeline::event::PointingEvent {
+                dx,
+                dy,
+                buttons,
+                scroll,
+            },
+        );
+        let channel = Channel::<NoopRawMutex, HidReport, 16>::new();
+        let mut telemetry = PointingTelemetry::default();
+        {
+            let mut task = core::pin::pin!(pointing_task_with_telemetry(
+                Scanner(events.into_iter()),
+                channel.sender(),
+                Some(&mut telemetry),
+            ));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(task.as_mut().poll(&mut context).is_pending());
+        }
+        for event in &events {
+            assert_eq!(
+                channel.try_receive().unwrap(),
+                pointing_event_to_report(event)
+            );
+        }
+        assert!(channel.try_receive().is_err());
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.mean_counts_per_sample, 22_145);
+        assert_eq!(snapshot.total_clicks, 5);
+        assert_eq!(snapshot.delta_clicks, 5);
+        assert_eq!(snapshot.click_while_moving_rate, 51);
+        assert_eq!(snapshot.scroll_count, 2);
+    }
+
+    #[test]
     fn encoder_event_through_processor_produces_press_and_release() {
         use crate::devices::encoder::encoder_key_pos;
         use crate::pipeline::event::EncoderDirection;
@@ -1690,7 +2103,7 @@ mod tests {
         layout[enc_cw_pos.flat(ENC_COLS)] = Action::Key(KeyCode::A);
         layout[enc_ccw_pos.flat(ENC_COLS)] = Action::Key(KeyCode::B);
 
-        let mut layers: heapless::Vec<crate::pipeline::keymap::Layer<()>, ENC_LAYERS> =
+        let mut layers: heapless::Vec<crate::pipeline::keymap::Layer<(), ENC_KEYS>, ENC_LAYERS> =
             heapless::Vec::new();
         let _ = layers.push(crate::pipeline::keymap::Layer::new(&layout));
         let mut proc: KeyboardProcessor<ENC_ROWS, ENC_COLS, ENC_LAYERS, ENC_KEYS> =
@@ -1729,7 +2142,7 @@ mod tests {
         layout[enc_cw_pos.flat(ENC_COLS)] = Action::Key(KeyCode::A);
         layout[enc_ccw_pos.flat(ENC_COLS)] = Action::Key(KeyCode::B);
 
-        let mut layers: heapless::Vec<crate::pipeline::keymap::Layer<()>, ENC_LAYERS> =
+        let mut layers: heapless::Vec<crate::pipeline::keymap::Layer<(), ENC_KEYS>, ENC_LAYERS> =
             heapless::Vec::new();
         let _ = layers.push(crate::pipeline::keymap::Layer::new(&layout));
         let mut proc: KeyboardProcessor<ENC_ROWS, ENC_COLS, ENC_LAYERS, ENC_KEYS> =

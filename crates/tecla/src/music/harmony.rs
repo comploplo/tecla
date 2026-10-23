@@ -38,7 +38,7 @@ pub enum Gesture {
     Reinterpret(AnchorVoice),
     /// Reduce colour/tension while retaining compatible played notes.
     Relax,
-    /// Seek directed pull; the legacy selector requests the next colour tier.
+    /// Seek directed pull; without guidance, request the next colour tier.
     Tension,
     /// Realize the saved compatible destination, or settle when none is pending.
     Resolve,
@@ -1732,7 +1732,7 @@ fn destination(key: Key, chord: Chord, bass: u8, melody: u8) -> Option<Chord> {
     if target.tones().contains(bass) && target.tones().contains(melody) {
         return Some(target);
     }
-    // Preserve the existing explicit major/minor fallback for chromatic library anchors.
+    // Try the opposite chord quality when chromatic anchors require it.
     let shape = match target.shape {
         Shape::Major => Shape::Minor,
         Shape::Minor => Shape::Major,

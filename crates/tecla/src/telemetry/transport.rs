@@ -25,6 +25,7 @@ use super::midi::MidiSnapshot;
 use super::pointing::PointingSnapshot;
 use super::steno::StenoSnapshot;
 use super::CoreSnapshot;
+use super::TypingSnapshot;
 
 macro_rules! serialize_snapshot {
     ($buf:expr, $snap:expr, $($field:ident : $ty:tt),+ $(,)?) => {{
@@ -35,6 +36,7 @@ macro_rules! serialize_snapshot {
     (@push $buf:expr, $val:expr, i8)  => { let _ = $buf.push($val as u8); };
     (@push $buf:expr, $val:expr, u16) => { push_u16($buf, $val); };
     (@push $buf:expr, $val:expr, u32) => { push_u32($buf, $val); };
+    (@push $buf:expr, $val:expr, u64) => { push_u64($buf, $val); };
     (@push $buf:expr, $val:expr, [i8; $n:expr]) => {
         let _ = $buf.extend_from_slice(&$val.map(|v| v as u8));
     };
@@ -69,6 +71,11 @@ macro_rules! deserialize_snapshot {
         $pos = $pos.checked_add(4)?;
         Some(v)
     }};
+    (@read $buf:expr, $pos:ident, u64) => {{
+        let v = read_u64($buf, $pos)?;
+        $pos = $pos.checked_add(8)?;
+        Some(v)
+    }};
     (@read $buf:expr, $pos:ident, [i8; $n:expr]) => {{
         let mut arr = [0i8; $n];
         let end = $pos.checked_add($n)?;
@@ -90,6 +97,7 @@ const FLAG_GAMEPAD: u8 = 1 << 3;
 const FLAG_POINTING: u8 = 1 << 4;
 const FLAG_ENCODER: u8 = 1 << 5;
 const FLAG_ACCESSIBILITY: u8 = 1 << 6;
+const FLAG_TYPING: u8 = 1 << 7;
 
 const MAX_FRAME_SIZE: usize = 128;
 
@@ -110,6 +118,8 @@ pub struct TelemetryFrame {
     pub encoder: Option<EncoderSnapshot>,
     /// Accessibility filter metrics.
     pub accessibility: Option<AccessibilitySnapshot>,
+    /// Cumulative speed over active typing intervals.
+    pub typing: Option<TypingSnapshot>,
 }
 
 impl TelemetryFrame {
@@ -140,6 +150,9 @@ impl TelemetryFrame {
         if self.accessibility.is_some() {
             flags |= FLAG_ACCESSIBILITY;
         }
+        if self.typing.is_some() {
+            flags |= FLAG_TYPING;
+        }
         let _ = buf.push(flags);
 
         if let Some(ref s) = self.core {
@@ -164,7 +177,7 @@ impl TelemetryFrame {
         }
         if let Some(ref s) = self.pointing {
             serialize_snapshot!(buf, s,
-                avg_velocity: u16, click_while_moving_rate: u8,
+                mean_counts_per_sample: u16, click_while_moving_rate: u8,
                 total_clicks: u32, scroll_count: u32, delta_clicks: u16);
         }
         if let Some(ref s) = self.encoder {
@@ -175,6 +188,10 @@ impl TelemetryFrame {
             serialize_snapshot!(buf, s,
                 slow_reject_rate: u8, bounce_reject_rate: u8,
                 sticky_uses: u32, delta_sticky_uses: u16, hold_time_trend: i8);
+        }
+        if let Some(ref s) = self.typing {
+            serialize_snapshot!(buf, s,
+                active_wpm: u16, active_ms: u64, characters: u64);
         }
     }
 
@@ -209,7 +226,7 @@ impl TelemetryFrame {
         }
         if flags & FLAG_POINTING != 0 {
             frame.pointing = Some(deserialize_snapshot!(buf, p, PointingSnapshot,
-                avg_velocity: u16, click_while_moving_rate: u8,
+                mean_counts_per_sample: u16, click_while_moving_rate: u8,
                 total_clicks: u32, scroll_count: u32, delta_clicks: u16));
         }
         if flags & FLAG_ENCODER != 0 {
@@ -220,6 +237,10 @@ impl TelemetryFrame {
             frame.accessibility = Some(deserialize_snapshot!(buf, p, AccessibilitySnapshot,
                 slow_reject_rate: u8, bounce_reject_rate: u8,
                 sticky_uses: u32, delta_sticky_uses: u16, hold_time_trend: i8));
+        }
+        if flags & FLAG_TYPING != 0 {
+            frame.typing = Some(deserialize_snapshot!(buf, p, TypingSnapshot,
+                active_wpm: u16, active_ms: u64, characters: u64));
         }
 
         let _ = p;
@@ -244,6 +265,7 @@ pub fn collect_frame<const KEYS: usize>(
         pointing: Some(t.pointing.collect()),
         encoder,
         accessibility: Some(t.accessibility.collect()),
+        typing: None,
     }
 }
 
@@ -269,6 +291,10 @@ fn push_u32(buf: &mut Vec<u8, MAX_FRAME_SIZE>, v: u32) {
     let _ = buf.extend_from_slice(&v.to_le_bytes());
 }
 
+fn push_u64(buf: &mut Vec<u8, MAX_FRAME_SIZE>, v: u64) {
+    let _ = buf.extend_from_slice(&v.to_le_bytes());
+}
+
 fn read_u16(buf: &[u8], pos: usize) -> Option<u16> {
     let end = pos.checked_add(2)?;
     let bytes: [u8; 2] = buf.get(pos..end)?.try_into().ok()?;
@@ -279,6 +305,12 @@ fn read_u32(buf: &[u8], pos: usize) -> Option<u32> {
     let end = pos.checked_add(4)?;
     let bytes: [u8; 4] = buf.get(pos..end)?.try_into().ok()?;
     Some(u32::from_le_bytes(bytes))
+}
+
+fn read_u64(buf: &[u8], pos: usize) -> Option<u64> {
+    let end = pos.checked_add(8)?;
+    let bytes: [u8; 8] = buf.get(pos..end)?.try_into().ok()?;
+    Some(u64::from_le_bytes(bytes))
 }
 
 #[cfg(test)]
@@ -326,7 +358,7 @@ mod tests {
     fn pointing_round_trips() {
         let frame = TelemetryFrame {
             pointing: Some(PointingSnapshot {
-                avg_velocity: 42,
+                mean_counts_per_sample: 42,
                 click_while_moving_rate: 80,
                 total_clicks: 555,
                 scroll_count: 33,
@@ -338,7 +370,7 @@ mod tests {
         frame.serialize(&mut buf);
         let decoded = TelemetryFrame::deserialize(&buf).unwrap();
         let p = decoded.pointing.unwrap();
-        assert_eq!(p.avg_velocity, 42);
+        assert_eq!(p.mean_counts_per_sample, 42);
         assert_eq!(p.total_clicks, 555);
         assert_eq!(p.delta_clicks, 7);
     }
@@ -362,6 +394,55 @@ mod tests {
         assert_eq!(e.total_ccw, 120);
         assert_eq!(e.total_reversals, 8);
         assert_eq!(e.delta_ticks, 12);
+    }
+
+    #[test]
+    fn typing_round_trips_long_uptime_totals() {
+        let snapshot = TypingSnapshot {
+            active_wpm: 87,
+            active_ms: u64::from(u32::MAX) + 1_000,
+            characters: u64::from(u32::MAX) + 2_000,
+        };
+        let frame = TelemetryFrame {
+            typing: Some(snapshot),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        frame.serialize(&mut buf);
+        assert_eq!(buf.len(), 20);
+        assert_eq!(buf[1], FLAG_TYPING);
+        assert_eq!(
+            TelemetryFrame::deserialize(&buf).unwrap().typing,
+            Some(snapshot)
+        );
+        for len in 2..buf.len() {
+            assert!(TelemetryFrame::deserialize(&buf[..len]).is_none());
+        }
+    }
+
+    #[test]
+    fn optional_typing_payload_follows_other_modalities() {
+        let mut frame = TelemetryFrame {
+            core: Some(CoreSnapshot {
+                wpm: 42,
+                total_presses: 100,
+                ..Default::default()
+            }),
+            accessibility: Some(AccessibilitySnapshot::default()),
+            ..Default::default()
+        };
+        let mut without_typing = Vec::new();
+        frame.serialize(&mut without_typing);
+        frame.typing = Some(TypingSnapshot::default());
+        let mut with_typing = Vec::new();
+        frame.serialize(&mut with_typing);
+        assert_eq!(with_typing[1], without_typing[1] | FLAG_TYPING);
+        assert_eq!(&with_typing[2..without_typing.len()], &without_typing[2..]);
+        assert_eq!(with_typing.len(), without_typing.len() + 18);
+        assert!(TelemetryFrame::deserialize(&without_typing)
+            .unwrap()
+            .typing
+            .is_none());
     }
 
     #[test]
@@ -400,7 +481,7 @@ mod tests {
                 delta_presses: 12,
             }),
             pointing: Some(PointingSnapshot {
-                avg_velocity: 15,
+                mean_counts_per_sample: 15,
                 click_while_moving_rate: 80,
                 total_clicks: 100,
                 scroll_count: 25,
@@ -419,9 +500,16 @@ mod tests {
                 delta_sticky_uses: 7,
                 hold_time_trend: -3,
             }),
+            typing: Some(TypingSnapshot {
+                active_wpm: 70,
+                active_ms: 60_000,
+                characters: 400,
+            }),
         };
         let mut buf = Vec::new();
         frame.serialize(&mut buf);
+        assert_eq!(buf.len(), 108);
+        assert_eq!(buf[1], u8::MAX);
         let decoded = TelemetryFrame::deserialize(&buf).unwrap();
 
         assert_eq!(decoded.core.unwrap().wpm, 45);
@@ -433,6 +521,7 @@ mod tests {
         let acc = decoded.accessibility.unwrap();
         assert_eq!(acc.hold_time_trend, -3);
         assert_eq!(acc.delta_sticky_uses, 7);
+        assert_eq!(decoded.typing.unwrap().active_wpm, 70);
     }
 
     #[test]

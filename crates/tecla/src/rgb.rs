@@ -1,6 +1,6 @@
 //! RGB animation engine — pure core logic, no hardware drivers.
 //!
-//! Provides color types, an [`Animation`] trait, four built-in animations,
+//! Provides color types, an [`Animation`] trait, seven built-in animations,
 //! and an [`RgbController`] that board crates own and tick on a timer.
 
 use crate::pipeline::event::KeyEvent;
@@ -805,6 +805,11 @@ impl<const LEDS: usize> RgbController<LEDS> {
     }
 
     /// Advances the animation by one frame and applies master brightness.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "animation time deliberately wraps at u32::MAX milliseconds"
+    )]
     pub fn tick<A: Animation>(&mut self, elapsed_ms: u32, animation: &mut A) {
         if !self.enabled {
             self.buffer = [Rgb::BLACK; LEDS];
@@ -812,9 +817,8 @@ impl<const LEDS: usize> RgbController<LEDS> {
         }
         animation.set_base_color(self.base_color);
         // `speed` is a master rate multiplier: 128 is 1×, 0 freezes, 255 is ~2×.
-        let scaled_ms = elapsed_ms
-            .saturating_mul(u32::from(self.speed))
-            .wrapping_div(128);
+        // Widen before scaling: a u32 product saturates after only a few hours.
+        let scaled_ms = (u64::from(elapsed_ms) * u64::from(self.speed)).wrapping_div(128) as u32;
         animation.tick(LEDS, scaled_ms, &mut self.buffer);
         if self.brightness < 255 {
             for led in &mut self.buffer {
@@ -836,6 +840,13 @@ impl<const LEDS: usize> RgbController<LEDS> {
     #[must_use]
     pub fn buffer(&self) -> &[Rgb] {
         &self.buffer
+    }
+
+    /// Returns the rendered frame for board-specific output limiting.
+    ///
+    /// Apply limits after `tick`; the next animation frame replaces these edits.
+    pub fn buffer_mut(&mut self) -> &mut [Rgb] {
+        &mut self.buffer
     }
 
     /// Returns whether RGB output is enabled.
@@ -1233,6 +1244,31 @@ mod tests {
             slow.buffer()[0],
             "SpeedDown never reached the animation"
         );
+    }
+
+    #[test]
+    fn controller_speed_scaling_keeps_advancing_after_long_uptimes() {
+        #[derive(Default)]
+        struct Clock(u32);
+        impl Animation for Clock {
+            fn tick(&mut self, _: usize, elapsed_ms: u32, _: &mut [Rgb]) {
+                self.0 = elapsed_ms;
+            }
+        }
+
+        let mut ctrl = RgbController::<0>::new();
+        let mut clock = Clock::default();
+        for (speed, elapsed_ms, expected) in [
+            (0, u32::MAX, 0),
+            (64, 60_000_000, 30_000_000),
+            (128, 60_000_000, 60_000_000),
+            (128, u32::MAX, u32::MAX),
+            (255, u32::MAX, 4_261_412_862),
+        ] {
+            ctrl.set_speed(speed);
+            ctrl.tick(elapsed_ms, &mut clock);
+            assert_eq!(clock.0, expected);
+        }
     }
 
     #[test]

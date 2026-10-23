@@ -278,11 +278,7 @@ pub fn transpile(layers: &[ParsedLayer], cols: Option<usize>) -> Result<String, 
     }
     out.push_str("keymap! {\n");
     for layer in layers {
-        // No `#[rustfmt::skip]` here. `keymap!` parses a bare `layer` ident
-        // first and rejects any attribute, so emitting one produced output that
-        // could not compile — and every golden snapshot recorded it. It bought
-        // nothing anyway: transpiled keymaps are `include!`d, and rustfmt does
-        // not format files it cannot reach through a module tree.
+        // `keymap!` expects a bare layer identifier, so attributes cannot appear here.
         out.push_str("    layer!(");
         out.push_str(&layer.name);
         out.push(',');

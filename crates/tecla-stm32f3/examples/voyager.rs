@@ -78,7 +78,7 @@ use tecla_stm32f3::reporter::{MOUSE_REPORT_DESCRIPTOR, MOUSE_REPORT_SIZE};
 use tecla_stm32f3::scanner::{VoyagerScanner, COLS, ROWS};
 use tecla_stm32f3::shared_i2c::SharedI2c;
 use tecla_stm32f3::voyager_leds::{remap_for_rgb, VoyagerLeds, LEDS, LED_POSITIONS};
-use tecla_stm32f3::{UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_stm32f3::{CompositeUsbReporter, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN_RX0 => InterruptHandler<USB>;
@@ -150,7 +150,7 @@ static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 // LayerStack copy from a tuple return would add unnecessary stack pressure.
 static VOYAGER_COMBO_CONFIG: ComboConfig = include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../keyboards/tecla/voyager/keymaps/default/combos.rs"
+    "/profiles/voyager/keymaps/default/combos.rs"
 ));
 
 /// 72 MHz from an 8 MHz HSE crystal; the USB clock is derived automatically as
@@ -325,7 +325,7 @@ async fn main(spawner: Spawner) {
 
     let keymap = include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/voyager/keymaps/default/keymap.rs"
+        "/profiles/voyager/keymaps/default/keymap.rs"
     ));
     // Not TapHoldConfig::default(): that is `new(200)`, which leaves both
     // anti-misfire guards off (`quick_tap_ms` and `require_prior_idle_ms` are
@@ -351,7 +351,7 @@ async fn main(spawner: Spawner) {
             .with_combos(VOYAGER_COMBO_CONFIG)
             .with_telemetry()
     });
-    let reporter = UsbHidReporter::new(hid_writer).with_mouse(mouse_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer).with_mouse(mouse_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());

@@ -10,6 +10,11 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/tecla-rp2040"
+exclude = ["dictionaries/.*", "dictionaries/*.py", "dictionaries/*.txt", "dictionaries/*.modal"]
+
+[package.metadata.docs.rs]
+default-target = "thumbv6m-none-eabi"
+targets = ["thumbv6m-none-eabi"]
 
 [lints]
 workspace = true
@@ -61,6 +66,10 @@ required-features = ["usb-midi"]
 
 [[example]]
 name = "asterisk_v1_4_chromatica"
+required-features = ["usb-midi"]
+
+[[example]]
+name = "asterisk_v1_4_suspension"
 required-features = ["usb-midi"]
 
 [[example]]

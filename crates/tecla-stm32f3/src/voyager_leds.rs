@@ -1,8 +1,8 @@
 //! Combines the Voyager's two IS31FL3731 chips into one 52-LED
-//! [`LedDriver`](tecla::rgb::LedDriver), plus the matrix-position → LED-index
+//! [`LedDriver`], plus the matrix-position → LED-index
 //! table used to route reactive animations to the right physical key.
 //!
-//! [`LED_CHANNELS`] (which chip, and which of its 144 PWM registers, drives a
+//! `LED_CHANNELS` (which chip, and which of its 144 PWM registers, drives a
 //! given LED's R/G/B) is taken from ZSA's own QMK source for this board —
 //! `keyboards/zsa/voyager/voyager.c`'s `g_is31fl3731_leds` table, cross-
 //! referenced by LED index against `keyboard.json`'s `rgb_matrix.layout`

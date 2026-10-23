@@ -25,11 +25,11 @@ use crate::storage::eeprom::EepromShim;
 
 const VIA_PROTOCOL_VERSION: u16 = 0x000C;
 
-// Command IDs from QMK's `quantum/via.h` (`enum via_command_id`). These are
-// fixed by Via's host application — the numbering below is not ours to choose,
-// and an earlier revision of this file had most of it wrong: 0x04 was treated
-// as "get layer count" when Via defines it as "get keycode", so the host and
-// the firmware disagreed about every keymap command.
+/// Tecla's keyboard-specific VIA keycode for the active WPM readout.
+pub const VIA_TYPE_WPM: u16 = 0x7E00;
+
+// Command IDs from QMK's `quantum/via.h` (`enum via_command_id`), shared
+// with Via's host application.
 const CMD_GET_PROTOCOL_VERSION: u8 = 0x01;
 const CMD_GET_KEYBOARD_VALUE: u8 = 0x02;
 const CMD_DYNAMIC_KEYMAP_GET_KEYCODE: u8 = 0x04;
@@ -191,7 +191,7 @@ impl<const COLS: usize> ViaProtocol<COLS> {
                 }
             }
             CMD_TECLA_TELEMETRY => {
-                let Some(telemetry) = processor.telemetry() else {
+                let Some(frame) = processor.telemetry_frame() else {
                     // Telemetry not enabled on this build — say so rather than
                     // returning a zero-length frame the host would read as
                     // "collected nothing".
@@ -199,7 +199,7 @@ impl<const COLS: usize> ViaProtocol<COLS> {
                     return;
                 };
                 let mut buf = heapless::Vec::new();
-                telemetry.frame().serialize(&mut buf);
+                frame.serialize(&mut buf);
 
                 let chunk = usize::from(request[1]);
                 response[2] = buf.len() as u8;
@@ -214,9 +214,7 @@ impl<const COLS: usize> ViaProtocol<COLS> {
                 }
             }
             CMD_TECLA_TELEMETRY_CLEAR => {
-                if let Some(telemetry) = processor.telemetry_mut() {
-                    telemetry.clear_deltas();
-                } else {
+                if !processor.clear_telemetry_deltas() {
                     response[0] = CMD_UNHANDLED;
                 }
             }
@@ -278,6 +276,9 @@ impl<const COLS: usize> ViaProtocol<COLS> {
     reason = "extracting bytes from u16 wire keycode"
 )]
 pub fn via_keycode_to_action<Ext: Copy + PartialEq>(via_kc: u16) -> Action<Ext> {
+    if via_kc == VIA_TYPE_WPM {
+        return Action::TypeWpm;
+    }
     if via_kc == 0x0000 {
         return Action::NoOp;
     }
@@ -321,6 +322,7 @@ pub fn via_keycode_to_action<Ext: Copy + PartialEq>(via_kc: u16) -> Action<Ext> 
 pub fn action_to_via_keycode<Ext: Copy + PartialEq>(action: &Action<Ext>) -> u16 {
     match action {
         Action::NoOp => 0x0000,
+        Action::TypeWpm => VIA_TYPE_WPM,
         Action::Key(kc) => u16::from(kc.usage_id()),
         Action::Modifier(m) => {
             let bits = m.bits();
@@ -354,7 +356,7 @@ mod tests {
     use crate::pipeline::keymap::{Layer, LayerStack};
 
     pub(crate) fn make_processor() -> KeyboardProcessor<2, 3, 2, 6> {
-        let mut layers: heapless::Vec<Layer<()>, 2> = heapless::Vec::new();
+        let mut layers: heapless::Vec<Layer<(), 6>, 2> = heapless::Vec::new();
         layers
             .push(Layer::new(&[
                 Action::Key(KeyCode::A),
@@ -489,8 +491,9 @@ mod tests {
 
     #[test]
     fn via_keycode_roundtrip_basic() {
-        let cases: [Action<()>; 12] = [
+        let cases: [Action<()>; 13] = [
             Action::NoOp,
+            Action::TypeWpm,
             Action::Key(KeyCode::A),
             Action::Key(KeyCode::Z),
             Action::Key(KeyCode::N1),
@@ -615,8 +618,11 @@ mod tests {
 /// than only on hardware.
 #[cfg(test)]
 mod transport_tests {
+    extern crate std;
+
     use super::tests::*;
     use super::*;
+    #[cfg(feature = "processor-telemetry")]
     use crate::pipeline::event::{KeyEvent, KeyPos};
     use crate::pipeline::report::VIA_REPORT_SIZE;
 
@@ -634,6 +640,7 @@ mod transport_tests {
     }
 
     #[test]
+    #[cfg(feature = "processor-telemetry")]
     fn telemetry_reassembles_across_chunks_and_round_trips() {
         use crate::telemetry::transport::TelemetryFrame;
 
@@ -668,6 +675,7 @@ mod transport_tests {
     }
 
     #[test]
+    #[cfg(feature = "processor-telemetry")]
     fn telemetry_reads_do_not_clear_deltas_but_the_clear_command_does() {
         let via: ViaProtocol<3> = ViaProtocol::new(&[]);
         let mut proc = make_processor().with_telemetry();
@@ -704,6 +712,47 @@ mod transport_tests {
         );
         let resp = exchange(&via, &mut proc, &[CMD_TECLA_TELEMETRY_CLEAR]);
         assert_eq!(resp[0], CMD_UNHANDLED);
+    }
+
+    #[test]
+    fn lightweight_typing_telemetry_survives_reads_and_delta_clears() {
+        use crate::pipeline::event::{KeyEvent, KeyPos};
+        use crate::telemetry::transport::TelemetryFrame;
+
+        let via: ViaProtocol<3> = ViaProtocol::new(&[]);
+        let mut proc = make_processor().with_typing_stats();
+        for (col, ms) in [(0, 0), (1, 200)] {
+            proc.process_event(KeyEvent::press(KeyPos::new(0, col), ms), ms, &mut |_| {});
+            proc.process_event(
+                KeyEvent::release(KeyPos::new(0, col), ms + 20),
+                ms + 20,
+                &mut |_| {},
+            );
+        }
+        let expected = proc.typing_stats().unwrap();
+        assert_eq!(expected.active_wpm, 60);
+        for _ in 0..2 {
+            let response = exchange(&via, &mut proc, &[CMD_TECLA_TELEMETRY, 0]);
+            assert_eq!(response[0], CMD_TECLA_TELEMETRY);
+            let len = usize::from(response[2]);
+            let frame = TelemetryFrame::deserialize(&response[3..3 + len]).unwrap();
+            assert!(frame.core.is_none());
+            assert_eq!(frame.typing, Some(expected));
+            let cleared = exchange(&via, &mut proc, &[CMD_TECLA_TELEMETRY_CLEAR]);
+            assert_eq!(cleared[0], CMD_TECLA_TELEMETRY_CLEAR);
+            assert_eq!(proc.typing_stats(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn default_keymap_reset_preserves_the_wpm_binding() {
+        static DEFAULTS: &[&[u16]] = &[&[VIA_TYPE_WPM]];
+        let via: ViaProtocol<3> = ViaProtocol::new(DEFAULTS);
+        let mut proc = make_processor();
+        let _ = exchange(&via, &mut proc, &[CMD_DYNAMIC_KEYMAP_RESET]);
+        assert_eq!(proc.get_action(0, 0), Some(Action::TypeWpm));
+        let response = exchange(&via, &mut proc, &[CMD_DYNAMIC_KEYMAP_GET_KEYCODE, 0, 0, 0]);
+        assert_eq!(u16::from_be_bytes([response[4], response[5]]), VIA_TYPE_WPM);
     }
 
     #[test]

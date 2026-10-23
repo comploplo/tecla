@@ -3043,6 +3043,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tecla-instrument-tests"
+version = "0.1.0"
+dependencies = [
+ "heapless 0.9.3",
+ "tecla",
+]
+
+[[package]]
 name = "tecla-macros"
 version = "0.1.0"
 dependencies = [
@@ -3104,6 +3112,28 @@ dependencies = [
  "tecla",
  "tecla-config",
  "tecla-macros",
+]
+
+[[package]]
+name = "tecla-stm32f0"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt 1.2.0",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-usb",
+ "embedded-hal-async",
+ "heapless 0.9.3",
+ "panic-probe",
+ "portable-atomic",
+ "static_cell",
+ "tecla",
 ]
 
 [[package]]

@@ -1,258 +1,150 @@
 # tecla
 
-Keyboard firmware written in Rust. `no_std`, async via
-[Embassy](https://github.com/embassy-rs/embassy), and independent of the MCU
-through `embedded-hal`.
+Tecla is a Rust firmware framework for keyboards, musical instruments, and
+other input controllers. It provides reusable input processing, output
+protocols, feedback, and hardware integrations so a device can have its own
+interaction model without rebuilding the firmware around it.
 
-> [!IMPORTANT]
-> Tecla is pre-release software. The core is well tested on the host, but the
-> public API and board crates will change before 1.0, and only some boards have
-> been run on real hardware. Check [Supported boards](#supported-boards) before
-> flashing anything you rely on.
+The core runs under `no_std` with fixed-capacity data structures. Its processing
+logic is synchronous and takes timestamps as input, so it can be tested on a
+desktop. Board crates supply drivers through the `embedded-hal` ecosystem and
+use [Embassy](https://embassy.dev) for asynchronous scanning and communication.
 
-## Features
+## Capabilities
 
-- Layers, tap-hold (mod-tap / layer-tap), combos, one-shot keys, Caps Word,
-  repeat key, key overrides, dynamic macros
-- Steno with an on-board dictionary (Lapwing), so the keyboard types words
-  without Plover
-- Mouse keys, media keys, MIDI, gamepad, rotary encoders, RGB, audio
-- Split keyboards over UART, NKRO, persistent keymaps in flash, and a subset of
-  the Via protocol
-- Keymaps written with QMK key names and checked at compile time
-- Importers for QMK (`info.json`, `keymap.c`) and ZMK configurations
-- `unsafe_code = deny` across the workspace; the input pipeline is synchronous
-  with injected timestamps, so it runs and is tested on the host without
-  hardware
+- **Keyboard behavior:** layers, tap-hold, combos, one-shot keys, Caps Word,
+  repeat, key overrides, dynamic macros, configurable slow/bounce/sticky keys,
+  and steno with an onboard dictionary.
+- **Input:** matrix and direct-pin scanning, capacitive keys, rotary encoders,
+  and pointing devices. Analog scanning interfaces, calibration, filtering,
+  rapid trigger, and dynamic keystroke primitives are available; a Hall-effect
+  board integration remains to be built.
+- **Output:** USB HID keyboard, mouse, media, and gamepad reports; USB MIDI;
+  UART split communication; and an experimental nRF52840 Bluetooth path.
+- **Musical systems:** reusable pitch, scale, chord, voice-leading, harmonic
+  movement, and Tonnetz primitives for building different instruments.
+  Musical output goes to an external synthesizer or DAW over MIDI.
+- **Feedback and configuration:** RGB lighting, PWM buzzer feedback,
+  flash-backed keymaps, a subset of Via, and optional telemetry including
+  active typing statistics and a typed WPM readout.
+- **Authoring tools:** compile-time keymap checks with QMK key names,
+  QMK/ZMK configuration import, dictionary compilation, and a shared
+  build-and-flash tool.
 
-## Supported boards
+Features are composed by each firmware profile. A controller can reuse the
+scanners, report types, MIDI transport, and lighting with its own state machine;
+it does not have to behave like a typing keyboard.
 
-Each board is a profile under [`keyboards/tecla/`](keyboards/tecla/).
-The [native board guide](keyboards/tecla/README.md) lists every profile,
-including the Asterisk and Voyager instruments with their controls and ranges.
+## Architecture
 
-| Profile | Keyboard | MCU | Flash method | Status |
-|---------|----------|-----|--------------|--------|
-| `asterisk_v1_4` | StenoKeyboards Asterisk v1.4 (steno) | RP2040 | UF2 | Runs on hardware |
-| [`asterisk_v1_4_midi`](keyboards/tecla/asterisk_v1_4_midi/) | Asterisk v1.4 MIDI pad controller | RP2040 | UF2 | Basic playing confirmed on hardware |
-| [`asterisk_v1_4_autochord`](keyboards/tecla/asterisk_v1_4_autochord/) | Asterisk four-voice harmony instrument | RP2040 | UF2 | Builds; hardware validation pending |
-| `steno_uni_v4` | StenoKeyboards Uni v4 (steno) | RP2040 | UF2 | Builds |
-| `planck-rp2040` | Planck-style 4×12 | RP2040 | probe-rs | Builds |
-| `split-rp2040` | Split keyboard over UART | RP2040 | probe-rs | Builds |
-| `voyager` | ZSA Voyager | STM32F303 | DFU | Boots and enumerates over USB; bring-up in progress |
-| `planck-stm32f4` | Planck-style 4×12 | STM32F411 | probe-rs | Builds |
-| `planck-nrf52840` | Planck-style 4×12 | nRF52840 | probe-rs | Builds |
-| `planck-nrf52840-ble` | Planck-style 4×12, Bluetooth | nRF52840 | probe-rs | Builds; not yet tested on hardware |
+```text
+physical inputs → scan / debounce → device behavior → reports / transport
+                                         │
+                                         └→ lighting, feedback, telemetry
+```
 
-"Builds" means CI compiles the firmware but it has not been run on a real
-keyboard. Separately, RP2040 and nRF52840 test firmware runs in the Renode
-emulator in CI. There are also diagnostic profiles (`asterisk_v1_4_keytest`,
-`voyager_matrix_test`, `voyager_usbtest`, `voyager_i2c_scan`,
-`voyager_trackball`) used during bring-up. ESP32-S3 remains outside the
-workspace and CI; its current `esp-hal`/`esp-rtos` migration still needs an
-Xtensa firmware build and hardware validation.
+For typing firmware, `KeyboardProcessor` turns timestamped key events into HID
+reports and handles layers, tap-hold, combos, and text playback. Embassy tasks
+connect it to scanners and reporters. Instrument profiles use their own
+behavior while sharing the hardware and protocol code.
 
-## Quick start: flash a board
+The reusable logic lives in [`crates/tecla`](crates/tecla/). The
+[`tecla-macros`](crates/tecla-macros/) crate provides keymap syntax, and
+[`tecla-config`](crates/tecla-config/) handles import, dictionary compilation,
+and flashing. MCU crates contain board drivers and firmware entry points;
+[`keyboards/tecla`](keyboards/tecla/) contains the native profiles and wiring.
 
-1. Install [rustup](https://rustup.rs). The repository pins its Rust version
-   and embedded targets in `rust-toolchain.toml`; rustup installs them
-   automatically the first time you build.
-
-2. Install the flashing tool for your board (see [deps.md](deps.md) for Linux
-   packages):
-
-   ```sh
-   cargo install just
-   cargo install elf2uf2-rs   # UF2 boards (RP2040)
-   cargo install probe-rs     # probe-rs boards (needs an SWD debug probe)
-   cargo install cargo-binutils  # DFU boards (Voyager), plus dfu-util from your package manager
-   ```
-
-3. Clone the repository. Steno boards also need the Lapwing dictionary
-   submodule:
-
-   ```sh
-   git clone https://github.com/comploplo/tecla
-   cd tecla
-   git submodule update --init .vendor/plover-lapwing-aio
-   ```
-
-4. Flash:
-
-   ```sh
-   just flash --list                        # profiles, connected USB devices, mounted UF2 drives
-   just flash --tecla-config asterisk_v1_4  # build and flash one profile
-   ```
-
-   The firmware is built first; then the tool waits for the board's
-   bootloader. For RP2040 boards, hold the BOOT button **only while plugging
-   the board in**, then release it. A drive called `RPI-RP2` appears and the
-   tool copies the firmware onto it. If more than one bootloader drive is
-   connected, pass `--device <name>` (from `--list`).
-
-   On RP2040 boards the bootloader is in ROM, so a bad flash cannot brick the
-   board; to go back to the vendor firmware, copy its `.uf2` file onto the
-   `RPI-RP2` drive.
-
-Steno boards type words themselves using the built-in dictionary, so turn
-Plover off while you use them.
-
-## Writing a keymap
-
-Keymaps use the `keymap!` macro from `tecla-macros` with QMK key names. Key
-count, layer names, and key names are checked at compile time.
+### A small keymap
 
 ```rust
-let keymap = keymap! {
-    layer!(Base,
-        TAB,  Q, W, E, R, T, Y, U, I, O, P,    BSPC,
-        ESC,  A, S, D, F, G, H, J, K, L, SCLN, ENT,
-        LSFT, Z, X, C, V, B, N, M, COMM, DOT,  SLSH, RSFT,
-        LCTL, LGUI, LALT, LSFT, LT!(Fn, SPC), SPC, SPC, RSFT, LEFT, DOWN, UP, RGHT
-    ),
-    layer!(Fn,
-        GRV,  N1, N2, N3, N4,  N5,  N6,  N7,   N8,  N9,   N0,   DEL,
-        TRNS, F1, F2, F3, F4,  F5,  F6,  MINS, EQL, LBRC, RBRC, BSLS,
-        TRNS, F7, F8, F9, F10, F11, F12, TRNS, TRNS, TRNS, TRNS, TRNS,
-        TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS
-    ),
+use tecla::prelude::*;
+use tecla_macros::{keymap, layer, LT};
+
+let keymap: LayerStack<2, 4, ()> = keymap! {
+    layer!(Base, A, B, C, LT!(1, SPC)),
+    layer!(Fn,   F1, F2, F3, TRNS),
 };
-let processor = KeyboardProcessor::new(keymap, TapHoldConfig::default());
+
+let processor: KeyboardProcessor<1, 4, 2, 4> =
+    KeyboardProcessor::new(keymap, TapHoldConfig::default());
 ```
 
-- `LT!(layer, key)` is layer-tap and `MT!(modifier, key)` is mod-tap. Layers
-  are referenced by name, including layers declared later.
-- `TRNS` falls through to the layer below; `NOOP` blocks it.
-- Steno boards use `steno!`, which maps each key to a steno key instead.
+`LT!` makes a key tap Space or hold a layer; `MT!` provides modifier-tap.
+`TRNS` falls through to the layer below. Layer counts, key counts, and names
+are checked at compile time. See the [macro documentation](crates/tecla-macros/src/lib.rs)
+and [board examples](crates/tecla-rp2040/examples/) for complete firmware.
 
-The full list of key names is in the
-[`tecla-macros` docs](crates/tecla-macros/src/lib.rs). For a complete board,
-start from an existing example such as
-[`crates/tecla-rp2040/examples/planck.rs`](crates/tecla-rp2040/examples/planck.rs).
+## Hardware and status
 
-## Feature status
+The main workspace has board crates for RP2040, nRF52840, and STM32F0/F3/F4.
+Physical keyboards, reference designs, instrument profiles, controls, and flash
+instructions are documented in the [native board guide](keyboards/tecla/README.md).
+That guide also distinguishes hardware-confirmed operation from build-only
+support. ESP32-S3 lives in a separate workspace and still needs an Xtensa
+firmware build and hardware validation.
 
-| Area | Status | Notes |
-|------|--------|-------|
-| Matrix scanning, debounce, layers | ✅ | |
-| Tap-hold (mod-tap, layer-tap, tap-toggle) | ✅ | Quick-tap and require-prior-idle send the tap on release, so holding a quick-tapped key does not auto-repeat |
-| Combos | ✅ | Fire as soon as the held keys match; no timing window |
-| Caps Word, repeat key, key overrides, one-shot keys, dynamic macros | ✅ | |
-| Steno with on-board dictionary | 🚧 | Single-stroke words work. Multi-stroke words whose first stroke is also a word are not reachable yet, and some Plover formatting (`{re^}`, `{-\|}`, `{>}`) is translated incorrectly |
-| Autocorrect | 🚧 | Known bugs: corrections can corrupt following words, especially after backspace. Leave it disabled for now |
-| Mouse, media, MIDI, gamepad, encoders | ✅ | |
-| RGB, audio | ✅ | Audio driver: RP2040 PWM buzzer |
-| Haptics | 🚧 | Controller and task only; no board driver yet |
-| Persistent storage (wear-leveled flash) | ✅ | |
-| Split keyboards (UART) | ✅ | |
-| Via | 🚧 | Keymap get/set/reset, layer count, keyboard values. No macros, lighting, or encoder commands; no Vial |
-| Bluetooth (nRF52840) | 🚧 | Builds in CI; not yet tested on hardware |
-| QMK / ZMK config import | ✅ | Tested against pinned QMK and ZMK checkouts |
+Tecla 0.1.0 is the first public release. Host tests cover the core extensively,
+while hardware validation varies by board. Bluetooth builds but awaits physical
+validation; haptics has a controller/task interface without a board driver.
+Via supports keymap editing, not its full protocol.
 
-See [ROADMAP.md](ROADMAP.md) for the detailed plan.
+Some text features have known limits: ambiguous multi-stroke steno words and
+some Plover formatting are unresolved. Autocorrect can corrupt subsequent text,
+especially after backspace, and should remain disabled. See the
+[roadmap](ROADMAP.md) for implemented foundations and remaining work.
 
-## How it works
+## Getting started
 
-```
-GPIO pins
-   │
-   ▼
-matrix_task      scan + debounce          → KeyEvent
-   │
-   ▼
-keyboard_task    KeyboardProcessor        → HidReport
-   │             (layers, tap-hold, combos, steno, …)
-   ▼
-usb_task         USB HID reporter
+[`rust-toolchain.toml`](rust-toolchain.toml) pins Rust and the embedded targets.
+Follow [development setup](deps.md#setup) for prerequisites, then use the
+[board guide](keyboards/tecla/README.md#flashing) to build and flash a
+profile. From a configured checkout:
+
+```sh
+just flash --list
+just flash --tecla-config <profile>
 ```
 
-The three stages are Embassy tasks connected by channels. `KeyboardProcessor`,
-the middle stage, is plain synchronous Rust: it takes key events with a
-timestamp and emits HID reports through a callback. It has no clock and no
-Embassy dependency, which is why the whole input pipeline can be driven and
-tested on a desktop.
-
-Keymap actions are `Action<Ext>`. A board crate can supply its own `Ext` type
-to add custom actions without forking the core.
-
-### Repository layout
-
-```
-crates/
-  tecla/            core library (no_std): input pipeline, reports, telemetry
-  tecla-macros/     keymap!, layer!, steno!, MT!, LT!, #[keyboard_main]
-  tecla-config/     QMK/ZMK importers, steno dictionary compiler, `flash` tool
-  tecla-rp2040/     board crates: MCU setup, drivers, and example firmware
-  tecla-stm32f3/
-  tecla-stm32f4/
-  tecla-nrf52840/
-  tecla-esp32s3/    separate workspace; Xtensa build remains unverified
-  tecla-hil-tests/  emulation tests (separate workspace)
-keyboards/tecla/    board profiles used by `just flash`
-.vendor/            QMK, ZMK, and Lapwing submodules
-```
-
-## Development
-
-The QMK and ZMK compatibility tests need all submodules (about 1 GB):
+For development, initialize the submodules containing compatibility fixtures
+and the steno dictionary, then run the host checks:
 
 ```sh
 git submodule update --init --recursive
-cargo install cargo-nextest
 just test
+just lint
+just doc
 ```
 
-Tests run on the host; no embedded target or hardware is needed. Run
-`just --list` for every recipe. The common ones:
+`just build-boards` cross-compiles the configured Cortex-M firmware examples;
+`just lint-boards` checks those configurations with Clippy. `just --list` also
+lists coverage, per-feature tests, focused mutation tests, and Renode emulation.
+Tool requirements and platform limits are in [deps.md](deps.md).
 
-| Command | What it does |
-|---------|--------------|
-| `just test` | Run the host test suite |
-| `just mutants-instruments` | Check Chromatica and Voyager note-map tests against deliberate logic changes |
-| `just lint` | Clippy on the host crates |
-| `just fmt` | Format the code |
-| `just build-boards` | Cross-compile every board crate and example |
-| `just doc` | Build the docs, failing on broken links |
-| `just cov` | Coverage report in the browser |
-| `just hil` | Run firmware in the Renode emulator (needs Podman or Docker) |
-| `just ci` | Everything CI runs: format, lint, board builds, docs, per-feature tests, coverage gates, emulation |
+CI checks host tests, documentation, lint, board builds, and coverage. Coverage
+gates are 95% for the core and 90% for the host workspace; these measure code
+exercise rather than physical hardware behavior. Forgejo's focused mutation
+tests run through a separate manual workflow.
 
-CI requires at least 95% line coverage for the `tecla` core crate and 90% for
-the host workspace. [deps.md](deps.md) lists the tools each recipe needs.
+## Documentation
 
-For instrument mutation testing, install `cargo-mutants` with
-`cargo install cargo-mutants --version 27.1.0 --locked`, then run `just mutants-instruments`.
-It tests a scratch copy and writes results under `target/mutations/mutants.out`.
-Use `just mutants-instruments --list` to preview the mutations without running them.
+- [Board and profile guide](keyboards/tecla/README.md) — supported hardware,
+  controls, flashing, and typing statistics.
+- [Development tools](deps.md) — setup, optional checks, and emulation.
+- [Roadmap](ROADMAP.md) — implementation status and planned work.
+- [Adaptive UX design](docs/adaptive-ux.md) — proposed behavior, research, and
+  the boundary between observation and adaptation.
+- [Publishing](docs/publishing.md) — release checks and crate publication.
 
-Forgejo workflows are in [`.forgejo/workflows/`](.forgejo/workflows/).
-They check host tests, lint, documentation, firmware builds, BLE, and coverage
-on pushes to `main` and pull requests. Instrument mutation testing is a
-separate manual workflow. Enable Actions for the repository and provide a
-container-capable runner labelled `ubuntu-latest`; each job installs its own
-pinned Rust toolchain.
-
-## License
+## License and acknowledgements
 
 Tecla is dual licensed under [MIT](LICENSE-MIT) or
-[Apache-2.0](LICENSE-APACHE), at your option.
+[Apache-2.0](LICENSE-APACHE), at your option. Imported QMK, ZMK, and Lapwing
+material retains its upstream licenses; see
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). Steno firmware includes the
+MIT-licensed Lapwing dictionary.
 
-The QMK, ZMK, and Lapwing material in `.vendor/` and `keyboards/` belongs to
-its upstream projects and keeps their licenses; see
-[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). Firmware built with the steno
-dictionary includes Lapwing data, which is MIT-licensed. Maintainers: see
-[docs/publishing.md](docs/publishing.md) before cutting a release.
-
-## Acknowledgements
-
-- [QMK](https://github.com/qmk/qmk_firmware), which defined what keyboard
-  firmware can do; Tecla's key names, keycode values, and much of its feature
-  set follow QMK, and its keyboard definitions are the importer's test fixtures
-- [ZMK](https://github.com/zmkfirmware/zmk), whose shield and keymap formats
-  Tecla imports and whose board definitions are its test fixtures
-- [Embassy](https://github.com/embassy-rs/embassy), the async embedded runtime
-  Tecla is built on
-- [rmk](https://github.com/HaoboGu/rmk), another Rust keyboard firmware worth
-  knowing about
-- [Lapwing](https://github.com/aerickt/plover-lapwing-aio), the steno theory
-  and dictionary used on steno boards
+Tecla draws on [QMK](https://github.com/qmk/qmk_firmware) for key names and
+keyboard conventions, [ZMK](https://github.com/zmkfirmware/zmk) for imported
+configurations, [Embassy](https://github.com/embassy-rs/embassy) for its runtime,
+and [Lapwing](https://github.com/aerickt/plover-lapwing-aio) for steno theory and
+dictionary data. QMK and ZMK checkouts also serve as compatibility fixtures.

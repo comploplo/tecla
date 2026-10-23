@@ -15,7 +15,7 @@ use tecla::devices::steno::StenoEngine;
 use tecla::devices::keyboard::tapping::TapHoldConfig;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, steno};
-use tecla_rp2040::{CapTouchScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_rp2040::{CapTouchScanner, CompositeUsbReporter, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -102,14 +102,14 @@ async fn main(spawner: Spawner) {
 
     let keymap = include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/asterisk_v1_4/keymaps/steno.rs"
+        "/profiles/asterisk_v1_4/keymaps/steno.rs"
     ));
 
     let steno_engine = StenoEngine::new(LAPWING_DICT);
     let processor =
         KeyboardProcessor::new(keymap, TapHoldConfig::default()).with_steno(steno_engine);
 
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());

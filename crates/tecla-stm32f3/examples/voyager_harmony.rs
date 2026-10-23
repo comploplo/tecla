@@ -4,21 +4,21 @@
 #![allow(unsafe_code, reason = "Embassy main and interrupt binding")]
 #![expect(clippy::unwrap_used, reason = "infallible firmware task spawning")]
 
-#[path = "../../../keyboards/tecla/voyager_tonnetz/expression.rs"]
+#[path = "../profiles/voyager_tonnetz/expression.rs"]
 mod expression;
-#[path = "../../../keyboards/tecla/voyager_tonnetz/firmware.rs"]
+#[path = "../profiles/voyager_tonnetz/firmware.rs"]
 mod firmware;
-#[path = "../../../keyboards/tecla/voyager_harmony/instrument.rs"]
+#[path = "../profiles/voyager_harmony/instrument.rs"]
 mod harmony_instrument;
-#[path = "../../../keyboards/tecla/voyager_tonnetz/instrument.rs"]
+#[path = "../profiles/voyager_tonnetz/instrument.rs"]
 #[allow(
     dead_code,
     reason = "shared lattice map also contains the manual Tonnetz instrument"
 )]
 mod instrument;
-#[path = "../../../keyboards/tecla/voyager_tonnetz/scan_guard.rs"]
+#[path = "../profiles/voyager_tonnetz/scan_guard.rs"]
 mod scan_guard;
-#[path = "../../../keyboards/tecla/voyager_harmony/telemetry.rs"]
+#[path = "../profiles/voyager_harmony/telemetry.rs"]
 mod telemetry;
 
 impl firmware::Performance for harmony_instrument::HarmonyInstrument {

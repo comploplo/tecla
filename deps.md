@@ -1,98 +1,98 @@
-# Tecla Dependencies
+# Development tools
 
-This repository is Rust-first. Most day-to-day work only needs the Rust toolchain plus a small set of helper binaries for flashing, HIL, and coverage.
+Rust dependencies are declared in the workspace manifests and locked in
+[`Cargo.lock`](Cargo.lock). [`rust-toolchain.toml`](rust-toolchain.toml) pins the
+compiler, Clippy, rustfmt, LLVM tools, and Cortex-M targets.
 
-## Required
+## Setup
 
-- `rustup` (the toolchain version is pinned by `rust-toolchain.toml`)
-- `cargo`
-- `just`
-- `git`
-- `pkg-config` on Linux
-
-## Common developer tools
-
-These are used by the `just` targets and CI-style workflows:
-
-- `cargo-nextest`
-- `cargo-hack`
-- `cargo-llvm-cov`
-- `cargo-outdated`
-
-Install with:
+Install `rustup`, `git`, `just`, and a native C compiler/linker. Linux builds
+also use `pkg-config`. From the repository root:
 
 ```sh
-cargo install cargo-nextest cargo-hack cargo-llvm-cov cargo-outdated
+rustup toolchain install
+git submodule update --init --recursive
+cargo install --locked just cargo-nextest
+just test
 ```
 
-## Flashing tools
+The submodules provide QMK/ZMK compatibility fixtures and the Lapwing steno
+dictionary. Parsing and transpilation run inside this workspace; a separate QMK
+installation is unnecessary.
 
-### RP2040 UF2 boards
+## Optional checks
 
-- `elf2uf2-rs`
+Install only the tools needed for the checks you run:
 
-Install with:
+| Tool | Commands |
+|---|---|
+| `cargo-hack` | `just hack`: tests each host-compatible feature separately |
+| `cargo-llvm-cov` | `just cov`, `just cov-core`, `just cov-all` |
+| `cargo-outdated` | `just outdated` |
+| `cargo-mutants` 27.1.0 | `just mutants-instruments`, `just mutants-typing`, `just mutants-harmony` |
 
 ```sh
-cargo install elf2uf2-rs
+cargo install --locked cargo-hack cargo-llvm-cov cargo-outdated
+cargo install --locked cargo-mutants --version 27.1.0
 ```
 
-Linux note:
-- `elf2uf2-rs` needs system `libudev` development files available through `pkg-config`.
-- On Debian/Ubuntu that usually means `libudev-dev`.
-- On Fedora/RHEL-like systems that usually means `systemd-libs` and `systemd-devel`.
+Append `--list` to a mutation recipe to inspect its scope. These are focused
+mutation suites, not a whole-repository sweep. Forgejo runs them on manual
+workflow dispatch; ordinary CI runs host checks, board builds, and coverage.
 
-### DFU boards (ZSA Voyager)
+Host checks exclude board crates and the `usb`/`usb-midi` features, which cannot
+be combined with the host `std` build. `just build-boards` and `just lint-boards`
+check the supported Cortex-M configurations separately. ESP32-S3 is excluded
+from the workspace pending firmware and hardware validation.
 
-- `dfu-util` (from your package manager, e.g. `brew install dfu-util` or `apt install dfu-util`)
-- an `objcopy`: `rust-objcopy` from cargo-binutils, `llvm-objcopy`, or `arm-none-eabi-objcopy`
+`just package-check` also needs Python 3.9 or newer and the Lapwing submodule.
+It builds and documents all eight publishable crates from extracted archives,
+including their firmware examples and the BLE configuration below. Use
+`just package-check --offline` when all Rust dependencies are already cached.
 
-Install with:
+The nRF52840 BLE build also needs `libclang` for bindgen (for example,
+`libclang-dev` on Debian/Ubuntu or Xcode's toolchain on macOS). Set
+`LIBCLANG_PATH` to your installed library directory if it is not discovered.
+
+## Flashing
+
+`just flash --list` lists native profiles, matching QMK board names, connected
+USB devices, and mounted UF2 targets. See the
+[board and profile guide](keyboards/tecla/README.md) for hardware-specific steps.
 
 ```sh
-cargo install cargo-binutils
+just flash --tecla-config <profile>
+just flash --device <usb-device> --qmk-keyboard <keyboard_name>
 ```
 
-### SWD boards
+Use `--device` to select a particular device when needed. DFU profiles also
+support `--dry-run` to build, convert, validate, and print the flash command
+without accessing a device.
 
-- `probe-rs`
+| Board family | Additional tools |
+|---|---|
+| RP2040 UF2 | `cargo install --locked elf2uf2-rs` |
+| DFU (Voyager, NOS75) | `dfu-util` plus an objcopy implementation |
+| SWD | `cargo install --locked probe-rs-tools` |
+| ESP32-S3 (unverified) | `espflash` and a separate esp-rs Xtensa toolchain |
 
-Install with:
+Install `dfu-util` with your package manager. `cargo install --locked cargo-binutils`
+provides `rust-objcopy`; `llvm-objcopy` and `arm-none-eabi-objcopy` are also accepted.
+On Linux, `elf2uf2-rs` needs libudev development files visible through
+`pkg-config` (for example, `libudev-dev` on Debian/Ubuntu).
+
+## Emulation
+
+The `just hil-*` recipes run firmware in Renode containers. They require a
+working Podman runtime, or Docker with `TECLA_CONTAINER_RUNTIME=docker`, plus
+`rust-objdump` and `rust-nm` from `cargo-binutils`:
 
 ```sh
-cargo install probe-rs
+cargo install --locked cargo-binutils
 ```
 
-### ESP32-S3 boards
-
-- `espflash`
-- the esp-rs toolchain for the target board
-
-Install with:
-
-```sh
-cargo install espflash
-```
-
-## HIL / emulation
-
-The HIL tests run Renode in a container:
-
-- `podman`, or `docker` if you set `TECLA_CONTAINER_RUNTIME=docker`
-- `rust-objdump`
-- `rust-nm`
-
-On a standard Rust install, `rust-objdump` and `rust-nm` usually come from:
-
-```sh
-rustup component add llvm-tools
-```
-
-## Notes
-
-- QMK parsing and transpilation are handled inside the workspace and do not require a separate QMK checkout beyond the vendored `keyboards/` tree.
-- Flashing support is split by board family:
-  - `just flash --device <usb-device> --qmk-keyboard <keyboard_name>` for QMK-derived boards
-  - `just flash --device <usb-device> --tecla-config <profile>` for Tecla-native examples
-  - `just flash --list` shows the current native profiles, matching QMK board names,
-    USB devices, and mounted UF2 flash targets so you can choose a safe `--device`
+The matrix recipes currently run their test harness with the
+`x86_64-unknown-linux-gnu` target, so use an appropriate Linux environment.
+`just ci` includes these emulation recipes and per-feature checks in addition
+to the ordinary CI gates; it requires their extra tools. Emulation does not
+replace physical hardware testing.

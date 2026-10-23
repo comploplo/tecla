@@ -35,6 +35,7 @@ pub fn collect<
 ) -> std::vec::Vec<HidReport> {
     let mut out = std::vec::Vec::new();
     proc.process_event(event, now, &mut |r| out.push(r));
+    proc.drain_wpm_readout(&mut |r| out.push(r));
     out
 }
 
@@ -42,7 +43,7 @@ pub fn collect<
 pub fn processor<const R: usize, const C: usize, const L: usize, const K: usize>(
     layers: &[&[Action<()>]],
 ) -> KeyboardProcessor<R, C, L, K> {
-    let mut stack = heapless::Vec::<Layer<()>, L>::new();
+    let mut stack = heapless::Vec::<Layer<(), K>, L>::new();
     for keys in layers {
         assert!(stack.push(Layer::new(keys)).is_ok(), "more than {L} layers");
     }

@@ -9,7 +9,7 @@
 //! `trouble-host` 0.8, `nrf-sdc` 0.4, `embassy-nrf` 0.11, `embassy-sync` 0.8.
 //!
 //! The `nrf-sdc` build requires ARM sysroot headers for bindgen.
-//! Set `LIBCLANG_PATH` to your system's libclang path (see `.cargo/config.toml`).
+//! Install libclang; set `LIBCLANG_PATH` only if automatic discovery fails.
 //!
 //! # Flashing
 //!

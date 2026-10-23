@@ -1,9 +1,9 @@
 //! USB HID reporters for STM32F4.
 //!
 //! The reporter implementation itself lives in tecla core as
-//! [`CompositeUsbReporter`](tecla::transport::usb::CompositeUsbReporter) —
+//! [`CompositeUsbReporter`] —
 //! routing a [`HidReport`](tecla::pipeline::report::HidReport) to the right USB
-//! interface is board-independent, and five copies of it drifted apart.
+//! interface is board-independent.
 //! This module re-exports it plus the descriptors each interface needs.
 //!
 //! # Usage
@@ -28,10 +28,3 @@ pub use tecla::pipeline::report::{
     MOUSE_REPORT_SIZE, NKRO_REPORT_DESCRIPTOR, NKRO_REPORT_SIZE,
 };
 pub use tecla::transport::usb::CompositeUsbReporter;
-
-/// Keyboard-only USB HID reporter.
-///
-/// Kept as an alias so existing board examples and downstream code keep
-/// building; it is a [`CompositeUsbReporter`] with no optional interfaces
-/// registered. Prefer naming `CompositeUsbReporter` directly in new code.
-pub type UsbHidReporter<'d, D> = CompositeUsbReporter<'d, D>;

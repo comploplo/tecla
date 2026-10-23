@@ -436,9 +436,7 @@ mod tests {
 
     #[test]
     fn ema_shift_at_or_above_32_does_not_panic() {
-        // A shift >= i32's bit width used to panic in debug builds and wrap
-        // the shift amount (mod 32) in release builds; it must now clamp
-        // instead of overflowing.
+        // Shift amounts at or above i32's bit width clamp without overflowing.
         let mut ema = Ema::new(0);
         assert_eq!(ema.update(255, 32), 0);
         assert_eq!(ema.update(255, 255), 0);

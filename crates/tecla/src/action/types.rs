@@ -313,6 +313,13 @@ where
     Rgb(crate::rgb::RgbCommand),
     /// Tap-toggle: tap toggles layer on/off, hold is momentary.
     TapToggle(u8),
+    /// Type the active typing average since startup as `<n> WPM`.
+    ///
+    /// Requires typing statistics to be enabled on the processor. Idle time
+    /// and this generated output are excluded from the average.
+    /// Runtimes emit queued text through `KeyboardProcessor::drain_wpm_readout`
+    /// after sending ordinary key reports.
+    TypeWpm,
     /// Emit a static sequence of keycodes as if typed.
     SendString(&'static [KeyCode]),
     /// Toggle slow keys on/off (require key held for threshold before accepting).
@@ -511,6 +518,7 @@ mod tests {
             Action::RepeatKey,
             Action::Rgb(crate::rgb::RgbCommand::Toggle),
             Action::SendString(&[KeyCode::A]),
+            Action::TypeWpm,
             Action::Ext(()),
         ];
         for a in actions {

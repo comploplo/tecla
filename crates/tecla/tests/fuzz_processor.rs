@@ -63,7 +63,7 @@ fn build_processor() -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
         Action::Modifier(ModifierKey::LALT),
         Action::NoOp,
     ];
-    let mut layers = HVec::<Layer<()>, LAYERS>::new();
+    let mut layers = HVec::<Layer<(), KEYS>, LAYERS>::new();
     layers.push(Layer::new(&base)).ok();
     layers.push(Layer::new(&overlay)).ok();
     KeyboardProcessor::new(

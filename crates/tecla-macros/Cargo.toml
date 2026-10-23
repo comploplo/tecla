@@ -26,7 +26,7 @@ proc-macro2 = { workspace = true }
 similar-asserts = { workspace = true }
 heapless        = { workspace = true }
 trybuild        = { workspace = true }
-# Path-only (no version): tecla dev-depends on tecla-macros too, so a
-# version requirement here would make the pair unpublishable. Cargo strips
-# path-only dev-dependencies from the packaged manifest.
-tecla = { path = "../tecla", features = ["std"] }
+# Keep the core dependency in release archives so documentation examples and
+# macro tests can compile. The core's reverse development dependency is path-only
+# and stripped during packaging, so it does not create a publication cycle.
+tecla = { version = "0.1.0", path = "../tecla", default-features = false, features = ["std"] }

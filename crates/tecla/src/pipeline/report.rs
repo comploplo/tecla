@@ -68,7 +68,9 @@ pub const CONSUMER_REPORT_DESCRIPTOR: &[u8] = &[
 
 /// Mouse HID report descriptor (3 buttons, X/Y movement, vertical wheel).
 ///
-/// Wire format is [`MOUSE_REPORT_SIZE`] bytes: `[buttons, dx, dy, scroll]`.
+/// Wire format is [`MOUSE_REPORT_SIZE`] bytes:
+/// `[buttons, dx_lo, dx_hi, dy_lo, dy_hi, scroll]`, with signed little-endian
+/// 16-bit movement and signed 8-bit scrolling.
 pub const MOUSE_REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x02, // Usage (Mouse)
@@ -184,7 +186,7 @@ pub const NKRO_REPORT_SIZE: usize = 1 + NKRO_BYTES;
 /// Wire size of a consumer-control report (one little-endian u16).
 pub const CONSUMER_REPORT_SIZE: usize = 2;
 
-/// Wire size of a mouse report (buttons, dx as u16, dy as u16, scroll).
+/// Wire size of a mouse report (buttons, signed 16-bit dx/dy, signed 8-bit scroll).
 pub const MOUSE_REPORT_SIZE: usize = 6;
 
 /// Wire size of a gamepad report (two button bytes + six axes).
@@ -772,9 +774,8 @@ mod wire_format_tests {
     }
 
     #[test]
-    fn mouse_report_carries_deltas_past_the_old_eight_bit_ceiling() {
-        // The whole point of widening: an optical sensor at speed exceeds 127
-        // in one poll, and this used to clamp there and cap the top speed.
+    fn mouse_report_carries_full_width_deltas() {
+        // An optical sensor at speed can exceed 127 counts in one poll.
         let r = MouseReport {
             buttons: 0,
             dx: 1000,

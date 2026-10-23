@@ -16,7 +16,7 @@ use tecla::task::{EventChannel, ReportChannel};
 use tecla::action::{Action, KeyCode};
 use tecla::pipeline::keymap::{Layer, LayerStack};
 use tecla_macros::keyboard_main;
-use tecla_rp2040::{CapTouchScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_rp2040::{CapTouchScanner, CompositeUsbReporter, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -114,11 +114,11 @@ async fn main(spawner: Spawner) {
     let scanner = CapTouchScanner::new(pins);
     let debouncer = AsymEagerDefer::new(5);
 
-    let mut layers: heapless::Vec<Layer, 1> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), KEYS>, 1> = heapless::Vec::new();
     layers.push(Layer::new(&LETTERS)).ok();
     let processor = KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default());
 
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());

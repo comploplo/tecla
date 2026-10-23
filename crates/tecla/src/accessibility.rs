@@ -56,7 +56,9 @@ pub struct AccessibilityState<const KEYS: usize> {
     /// Active configuration (may be toggled at runtime via actions).
     pub config: AccessibilityConfig,
     pending_slow: heapless::Vec<PendingSlowKey, 8>,
-    last_release_time: [Option<u64>; KEYS],
+    // Separate validity avoids a padded Option tag per timestamp.
+    last_release_time: [u64; KEYS],
+    has_release_time: [bool; KEYS],
 }
 
 impl<const KEYS: usize> AccessibilityState<KEYS> {
@@ -66,7 +68,8 @@ impl<const KEYS: usize> AccessibilityState<KEYS> {
         Self {
             config,
             pending_slow: heapless::Vec::new(),
-            last_release_time: [None; KEYS],
+            last_release_time: [0; KEYS],
+            has_release_time: [false; KEYS],
         }
     }
 
@@ -74,12 +77,10 @@ impl<const KEYS: usize> AccessibilityState<KEYS> {
     pub fn should_accept_press(&mut self, pos: KeyPos, now_ms: u64, cols: usize) -> SlowKeyResult {
         if let Some(bounce_ms) = self.config.bounce_keys_ms {
             let flat = pos.flat(cols);
-            if flat < KEYS {
-                if let Some(last_release) = self.last_release_time[flat] {
-                    let elapsed = now_ms.saturating_sub(last_release);
-                    if elapsed < u64::from(bounce_ms) {
-                        return SlowKeyResult::Reject;
-                    }
+            if flat < KEYS && self.has_release_time[flat] {
+                let elapsed = now_ms.saturating_sub(self.last_release_time[flat]);
+                if elapsed < u64::from(bounce_ms) {
+                    return SlowKeyResult::Reject;
                 }
             }
         }
@@ -107,7 +108,8 @@ impl<const KEYS: usize> AccessibilityState<KEYS> {
     pub fn record_release(&mut self, pos: KeyPos, now_ms: u64, cols: usize) {
         let flat = pos.flat(cols);
         if flat < KEYS {
-            self.last_release_time[flat] = Some(now_ms);
+            self.last_release_time[flat] = now_ms;
+            self.has_release_time[flat] = true;
         }
         self.pending_slow.retain(|p| p.pos != pos);
     }
@@ -147,4 +149,62 @@ pub enum SlowKeyResult {
     Defer(u16),
     /// Press rejected (bounce filter).
     Reject,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bounce_filter() -> AccessibilityState<2> {
+        AccessibilityState::new(AccessibilityConfig {
+            bounce_keys_ms: Some(100),
+            ..AccessibilityConfig::default()
+        })
+    }
+
+    #[test]
+    fn first_press_accepts_but_a_zero_timestamp_release_starts_the_bounce_window() {
+        let mut state = bounce_filter();
+        let key = KeyPos::new(0, 0);
+        assert_eq!(state.should_accept_press(key, 0, 2), SlowKeyResult::Accept);
+        state.record_release(key, 0, 2);
+        assert_eq!(state.should_accept_press(key, 99, 2), SlowKeyResult::Reject);
+        assert_eq!(
+            state.should_accept_press(key, 100, 2),
+            SlowKeyResult::Accept
+        );
+        // An untouched key has no release history, even at timestamp zero.
+        assert_eq!(
+            state.should_accept_press(KeyPos::new(0, 1), 0, 2),
+            SlowKeyResult::Accept
+        );
+    }
+
+    #[test]
+    fn full_width_timestamps_and_the_exact_bounce_boundary_are_preserved() {
+        let mut state = bounce_filter();
+        let key = KeyPos::new(0, 0);
+        state.record_release(key, u64::MAX - 100, 2);
+        assert_eq!(
+            state.should_accept_press(key, u64::MAX - 1, 2),
+            SlowKeyResult::Reject
+        );
+        assert_eq!(
+            state.should_accept_press(key, u64::MAX, 2),
+            SlowKeyResult::Accept
+        );
+        state.record_release(key, u64::MAX, 2);
+        assert_eq!(
+            state.should_accept_press(key, u64::MAX, 2),
+            SlowKeyResult::Reject
+        );
+    }
+
+    #[test]
+    fn dense_102_key_state_fits_within_optional_timestamp_storage_budget() {
+        assert!(
+            core::mem::size_of::<AccessibilityState<102>>()
+                < core::mem::size_of::<[Option<u64>; 102]>()
+        );
+    }
 }

@@ -65,7 +65,7 @@ use tecla::keyboard::KeyboardProcessor;
 use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, keymap};
-use tecla_stm32f4::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_stm32f4::{CompositeUsbReporter, GpioMatrixScanner, KEYBOARD_REPORT_DESCRIPTOR};
 
 bind_interrupts!(struct Irqs {
     OTG_FS => InterruptHandler<USB_OTG_FS>;
@@ -190,7 +190,7 @@ async fn main(spawner: Spawner) {
     };
 
     let processor = KeyboardProcessor::new(keymap, TapHoldConfig::default());
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
 
     let event_ch = EVENT_CHANNEL.init(EventChannel::new());
     let report_ch = REPORT_CHANNEL.init(ReportChannel::new());

@@ -53,7 +53,7 @@ use tecla::matrix::debounce::AsymEagerDefer;
 use tecla::prelude::KeyCode;
 use tecla::task::{EventChannel, ReportChannel};
 use tecla_macros::{keyboard_main, keymap};
-use tecla_rp2040::{GpioMatrixScanner, UsbHidReporter, KEYBOARD_REPORT_DESCRIPTOR};
+use tecla_rp2040::{CompositeUsbReporter, GpioMatrixScanner, KEYBOARD_REPORT_DESCRIPTOR};
 
 mod dict {
     include!(concat!(env!("OUT_DIR"), "/autocorrect_demo_dict.rs"));
@@ -163,7 +163,7 @@ async fn main(spawner: Spawner) {
 
     let processor =
         KeyboardProcessor::new(keymap, TapHoldConfig::default()).with_autocorrect_offload();
-    let reporter = UsbHidReporter::new(hid_writer);
+    let reporter = CompositeUsbReporter::new(hid_writer);
 
     // Shared (&'static, not &'static mut) so both cores can hold a handle.
     let event_ch: &'static EventChannel<CriticalSectionRawMutex, 16> =

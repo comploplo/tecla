@@ -1,3 +1,5 @@
+//! End-to-end processor telemetry tests, enabled with its inline collectors.
+#![cfg(feature = "processor-telemetry")]
 #![allow(
     clippy::tests_outside_test_module,
     reason = "integration tests live in tests/ by convention"
@@ -883,7 +885,7 @@ fn mouse_move_records_pointing_telemetry() {
     collect(&mut proc, release(pos(0, 0), 50), 50);
 
     let snap = proc.telemetry().unwrap().pointing.snapshot();
-    assert_eq!(snap.avg_velocity, 15);
+    assert_eq!(snap.mean_counts_per_sample, 15);
 }
 
 #[test]

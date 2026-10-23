@@ -1,9 +1,11 @@
-//! Tecla — embedded Rust keyboard firmware core.
+//! Tecla — embedded Rust firmware for keyboards, instruments, and input controllers.
 //!
-//! Tecla is a `no_std`, async-first keyboard firmware library built on
-//! [Embassy](https://embassy.dev) and the `embedded-hal` ecosystem. It
-//! provides the full input pipeline from raw GPIO matrix scans through HID
-//! report generation, with every stage independently testable on the host.
+//! Tecla provides `no_std` input processing, musical building blocks, reports,
+//! and feedback. Synchronous logic can be tested on the host; optional
+//! [Embassy](https://embassy.dev) tasks connect it to board drivers built on
+//! the `embedded-hal` ecosystem. Keyboard firmware uses [`KeyboardProcessor`](
+//! keyboard::KeyboardProcessor); instruments can reuse the scanner and transport
+//! boundaries with their own behavior.
 //!
 //! # Architecture
 //!
@@ -21,7 +23,8 @@
 //!   [`Debouncer`](matrix::debounce::Debouncer): raw key state in,
 //!   clean [`KeyEvent`](pipeline::event::KeyEvent)s out. Also
 //!   [`split`](matrix::split) for multi-half boards and
-//!   [`analog`](matrix::analog) for Hall-effect / continuous-travel scanning.
+//!   [`analog`](matrix::analog) for travel-processing primitives and scanner
+//!   interfaces; an analog board driver and runtime integration are still needed.
 //! - **[`pipeline`]** — the stage-agnostic types: [`event`](pipeline::event),
 //!   [`keymap`](pipeline::keymap) ([`Layer`](pipeline::keymap::Layer),
 //!   [`LayerStack`](pipeline::keymap::LayerStack)),
@@ -39,6 +42,9 @@
 //!   [`steno`](devices::steno), [`midi`](devices::midi),
 //!   [`mouse`](devices::mouse), [`gamepad`](devices::gamepad),
 //!   [`encoder`](devices::encoder)).
+//! - **[`music`]** — allocation-free theory, voice-leading, harmonic realization,
+//!   and Tonnetz primitives for instrument programs. MIDI output uses an external
+//!   sound source.
 //! - **[`action`]** — [`Action<Ext>`](action::Action), [`KeyCode`](action::KeyCode),
 //!   [`ModifierKey`](action::ModifierKey), [`LayerOp`](action::LayerOp).
 //! - **[`task`]** *(feature `embassy`)* — async Embassy tasks and channels
@@ -54,13 +60,14 @@
 //!
 //! ```rust
 //! use tecla::prelude::*;
-//! use tecla_macros::{keymap, layer, LT};
+//! use tecla::action::Action::{Key, LayerTap, Transparent};
+//! use tecla::action::KeyCode::{A, B, C, F1, F2, F3, Space};
 //!
-//! // 2 layers × 4 keys. `TRNS` falls through to the layer below.
-//! let keymap: LayerStack<2, 4, ()> = keymap! {
-//!     layer!(Base, A, B, C, LT!(1, SPC)),
-//!     layer!(Fn,   F1, F2, F3, TRNS),
-//! };
+//! // 2 layers × 4 keys. Transparent falls through to the layer below.
+//! let keymap: LayerStack<2, 4, ()> = LayerStack::new(heapless::Vec::from_array([
+//!     Layer::from_array([Key(A), Key(B), Key(C), LayerTap { layer: 1, tap: Space }]),
+//!     Layer::from_array([Key(F1), Key(F2), Key(F3), Transparent]),
+//! ]));
 //!
 //! let mut processor: KeyboardProcessor<1, 4, 2, 4> =
 //!     KeyboardProcessor::new(keymap, TapHoldConfig::default());
@@ -83,6 +90,7 @@
 //! |------|---------|--------|
 //! | `autocorrect` | **on** | Trie-based typo correction (`AutocorrectEngine`). |
 //! | `autocomplete` | **on** | Trie-based prefix completion (`AutocompleteEngine`). |
+//! | `processor-telemetry` | **on** | Inline processor collectors; omit on RAM-constrained boards. |
 //! | `std` | off | Enables `std`-dependent code paths (used in host tests). |
 //! | `testing` | off | Alias for `std`, used by the coverage and integration-test targets. |
 //! | `embassy` | off | Enables the [`task`] module and the async scanner / reporter traits. |

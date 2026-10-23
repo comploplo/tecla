@@ -1,10 +1,8 @@
 //! Pins tecla's Via command IDs to QMK's `quantum/via.h`.
 //!
 //! These numbers are a wire protocol owned by Via's host application, not by
-//! this project. An earlier revision had most of them wrong — 0x04 was treated
-//! as "get layer count" when Via defines it as "get keycode" — which made the
-//! whole implementation incompatible while every unit test still passed,
-//! because the tests used the same wrong constants as the code.
+//! this project. Comparing with the upstream header independently of the
+//! implementation prevents a copied constant table from validating itself.
 //!
 //! QMK is vendored at `.vendor/qmk_firmware`, so the authoritative header is
 //! right here: parse it and compare, rather than trusting a copied table.

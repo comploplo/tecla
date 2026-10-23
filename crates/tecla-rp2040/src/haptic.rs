@@ -7,7 +7,7 @@
 //! # Wiring
 //!
 //! DRV2605L on the I²C bus at address
-//! [`DRV2605L_ADDR`](tecla::haptic::DRV2605L_ADDR) (0x5A, fixed by the part),
+//! [`DRV2605L_ADDR`] (0x5A, fixed by the part),
 //! with an ERM or LRA actuator on OUT+/OUT−. `EN` tied high.
 //!
 //! # Usage

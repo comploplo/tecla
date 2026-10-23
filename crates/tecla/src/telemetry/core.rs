@@ -1,8 +1,8 @@
 //! Live telemetry collection for adaptive input research.
 //!
-//! The [`TelemetryExt`] trait is the generic extension point — users building
-//! novel controllers implement it and get the full collection/snapshot/transport
-//! pipeline for free. The `()` impl is a zero-cost no-op.
+//! The [`TelemetryExt`] trait gives collectors a shared snapshot/reset interface.
+//! Custom modalities supply their own recording calls and transport integration.
+//! The `()` impl is a zero-cost no-op.
 //!
 //! [`CoreTelemetry`] collects the canonical keystroke dynamics features
 //! identified by CMU, Aalto (136M keystrokes, CHI 2018), and BiDAlab:
@@ -11,11 +11,11 @@
 //! Modality-specific telemetry modules:
 //!
 //! - [`steno`] — chord accuracy, dictionary hit rates, retry patterns
-//! - [`accessibility`] — filter rejection rates, fatigue trend detection
-//! - [`midi`] — velocity distributions, polyphony depth, CC utilization
+//! - [`accessibility`] — filter rejection rates and observed hold-time trends
+//! - [`midi`] — velocity mean/min/max, peak polyphony, CC message counts
 //! - [`gamepad`] — axis range, button combos, simultaneous press tracking
-//! - [`pointing`] — movement velocity, click-while-moving, scroll usage
-//! - [`encoder`] — rotation velocity, direction reversals, per-encoder balance
+//! - [`pointing`] — counts per movement sample, click coincidence, scroll usage
+//! - [`encoder`] — direction counts and reversals, per-encoder balance
 
 use crate::pipeline::event::KeyPos;
 
@@ -293,10 +293,7 @@ impl<const KEYS: usize> CoreTelemetry<KEYS> {
         let avg_pp_ms = pp_sum.checked_div(pp_count).unwrap_or(0) as u16;
 
         let total_errors: u32 = self.error_count.iter().map(|&e| u32::from(e)).sum();
-        // Scaled to 0-255 like every other rate in this crate (rollover here,
-        // the steno rates, pointing, accessibility). This alone used to scale
-        // to 0-100, so anything decoding the snapshot uniformly read it 2.55x
-        // low.
+        // Rates use the same 0–255 scale across telemetry modalities.
         let error_rate = (total_errors * 255)
             .checked_div(self.total_presses)
             .unwrap_or(0)

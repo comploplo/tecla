@@ -6,8 +6,12 @@ like firmware second-guessing the user. The core UX rule is:
 > Observe quietly, adapt conservatively, explain clearly, and always let the
 > user win.
 
-This document turns the adaptive ideas in `ROADMAP.md` into user-facing product
-rules and implementation contracts.
+This is a design contract for the research proposals in
+[`ROADMAP.md`](../ROADMAP.md#research-program), not a guide to a shipped adaptive
+engine. Telemetry, configurable input filters, and ordinary typing features
+exist today; automatic timing recommendations, learned profiles, the actions
+listed below, and a doctor console remain planned. Unless stated otherwise,
+this document describes requirements for that future implementation.
 
 ## Global Principles
 
@@ -15,8 +19,9 @@ rules and implementation contracts.
    backs off immediately for that word, chord, key, or timing pattern.
 2. **Adaptation starts as suggestions.** New adaptive behavior runs in shadow
    mode first: it records what it would have done, but does not change output
-   until it has enough evidence.
-3. **No surprise mode switches.** Tecla can tune thresholds silently, but it
+   until it has enough evidence and the user enables the adaptive profile.
+3. **No surprise mode switches.** Within that profile, Tecla can tune thresholds
+   within explicit bounds, but it
    must not enable major behavior classes such as autocorrect, sticky keys, or
    dictionary mutation without an explicit profile setting.
 4. **Recent overrides matter most.** If a user rejects a correction or timing
@@ -46,7 +51,7 @@ The firmware should maintain three kinds of state:
 
 ### User Controls
 
-Minimum runtime actions:
+Proposed runtime actions (names are provisional, not current keymap tokens):
 
 - `AdaptiveToggle`
 - `AdaptiveResetSession`
@@ -59,8 +64,8 @@ Minimum runtime actions:
 - `StenoRawProtocolToggle`
 - `TelemetryToggle`
 
-Host-side commands should mirror those actions through a `tecla doctor` or
-`tecla console` surface.
+Planned host-side controls should mirror those actions through a doctor or
+console surface; neither CLI exists today.
 
 ## Hostless Autocorrect
 
@@ -169,15 +174,17 @@ inconsistent.
 
 ## Adaptive Combos
 
-Combos should tolerate the user's real finger spread without swallowing fast
-rolling text.
+Current live combos fire when the held set matches, without a timing window.
+The timing policies below apply only if a concrete board establishes a need
+for an optional timed combo model; they must preserve live combos by default.
 
 ### Signals
 
 - co-press spread for key pairs
 - combo hit/miss attempts
-- near-miss: same combo keys pressed just outside combo term
-- false positive: combo output followed by undo/backspace
+- near-miss under an optional timed model: same keys just outside its window
+- combo output followed by undo/backspace, as a candidate for review rather
+  than proof of an unintended activation
 
 ### Policy
 
@@ -234,6 +241,11 @@ action:  no output
 
 Accessibility features should be presented as input comfort and reliability,
 not as labels.
+
+Each mechanism needs its own evidence and reversible control. Longer debounce,
+tap-hold, combo or bounce windows can suppress intentional input or add delay;
+they are not successive levels of universally greater assistance. Compare a
+proposed change with the accepted stable settings and preserve manual overrides.
 
 ### Slow Keys
 

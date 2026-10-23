@@ -21,7 +21,7 @@ pub const KEYS: usize = 26;
 mod output {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../keyboards/tecla/asterisk_v1_4_midi/output.rs"
+        "/profiles/asterisk_v1_4_midi/output.rs"
     ));
 }
 

@@ -9,7 +9,7 @@
 //!   GPIO expander.
 //! - [`scanner::VoyagerScanner`] — combined left-half-GPIO / right-half-MCP23018
 //!   matrix scanner implementing [`tecla::matrix::AsyncMatrixScanner`].
-//! - [`reporter::UsbHidReporter`] — embassy-usb HID writer wrapper implementing
+//! - [`reporter::CompositeUsbReporter`] — embassy-usb HID writer wrapper implementing
 //!   [`tecla::pipeline::hid::AsyncReporter`].
 //!
 //! # Target
@@ -29,7 +29,7 @@ pub mod scanner;
 pub mod shared_i2c;
 pub mod voyager_leds;
 
-pub use reporter::UsbHidReporter;
+pub use reporter::CompositeUsbReporter;
 pub use scanner::VoyagerScanner;
 
 pub use tecla::pipeline::report::KEYBOARD_REPORT_DESCRIPTOR;

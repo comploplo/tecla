@@ -8,7 +8,7 @@
 //!
 //! - [`scanner::GpioMatrixScanner`] — row-strobe / column-read GPIO matrix
 //!   scanner that implements [`tecla::matrix::AsyncMatrixScanner`].
-//! - [`reporter::UsbHidReporter`] — embassy-usb HID writer wrapper that
+//! - [`reporter::CompositeUsbReporter`] — embassy-usb HID writer wrapper that
 //!   implements [`tecla::pipeline::hid::AsyncReporter`].
 //!
 //! # Wiring convention
@@ -41,7 +41,7 @@ pub mod ble_reporter;
 pub mod battery;
 
 pub use power::Nrf52840PowerManager;
-pub use reporter::UsbHidReporter;
+pub use reporter::CompositeUsbReporter;
 pub use scanner::{DirectPinScanner, GpioMatrixScanner};
 pub use telemetry::CdcTelemetryWriter;
 

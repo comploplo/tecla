@@ -12,5 +12,7 @@ pub mod midi;
 pub mod pointing;
 pub mod steno;
 pub mod transport;
+pub mod typing;
 
 pub use core::{BigramStat, CoreSnapshot, CoreTelemetry, TelemetryExt};
+pub use typing::{TypingSnapshot, TypingTelemetry};

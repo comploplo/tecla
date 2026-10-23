@@ -4,7 +4,7 @@
 //! byte array encoding a prefix trie. The firmware's `AutocorrectEngine` and
 //! `AutocompleteEngine` walk this byte array at runtime with zero allocation.
 //!
-//! This version implements DAFSA (Deterministic Acyclic Finite State Automaton)
+//! Implements DAFSA (Deterministic Acyclic Finite State Automaton)
 //! by merging identical subtrees during serialization, significantly reducing
 //! flash usage for large dictionaries.
 //!

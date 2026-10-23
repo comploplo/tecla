@@ -580,47 +580,6 @@ fn gpio_map_entries(input: &str) -> IResult<&str, Vec<(u32, String, u32)>> {
     separated_list0(preceded(ws, opt(char(','))), gpio_map_entry).parse(input)
 }
 
-// ── Legacy extraction API (delegates to DtsDocument) ─────────────────────────
-
-/// Extract a property by name from DTS source.
-pub fn extract_property(source: &str, name: &str) -> Option<DtsProperty> {
-    parse_document(source).property(name).cloned()
-}
-
-/// Extract a GPIO property from DTS source.
-pub fn extract_gpio_property(source: &str, name: &str) -> Option<DtsProperty> {
-    parse_document(source).gpio_property(name).cloned()
-}
-
-/// Extract `RC(row,col)` entries from a matrix transform map.
-pub fn extract_map(source: &str) -> Option<Vec<(u32, u32)>> {
-    parse_document(source).rc_map().map(|s| s.to_vec())
-}
-
-/// Extract all keymap layer bindings from a `.keymap` file.
-pub fn extract_bindings(source: &str) -> Vec<Vec<Binding>> {
-    parse_document(source)
-        .bindings()
-        .into_iter()
-        .map(|s| s.to_vec())
-        .collect()
-}
-
-/// Extract all encoders from DTS source.
-pub fn extract_encoders(source: &str) -> Vec<DtsEncoder> {
-    parse_document(source).encoders()
-}
-
-/// Extract the gpio-map pin translation table.
-pub fn extract_gpio_map(source: &str) -> Vec<(u32, String, u32)> {
-    parse_document(source).gpio_map()
-}
-
-/// Extract triggers-per-rotation from a sensor node.
-pub fn extract_triggers_per_rotation(source: &str) -> Option<u32> {
-    parse_document(source).triggers_per_rotation()
-}
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -689,7 +648,8 @@ mod tests {
     #[test]
     fn parse_with_comments() {
         let input = "/* matrix setup */\nrows = <4>; // 4 rows\n";
-        let prop = extract_property(input, "rows").unwrap();
+        let doc = parse_document(input);
+        let prop = doc.property("rows").unwrap();
         assert_eq!(prop.value, DtsValue::Cells(vec![4]));
     }
 
@@ -816,7 +776,7 @@ RC(2,0) RC(2,1) RC(2,2) RC(2,3) RC(2,4) RC(2,5)  RC(2,6) RC(2,7) RC(2,8) RC(2,9)
             };
         "#;
 
-        let encoders = extract_encoders(dts);
+        let encoders = parse_document(dts).encoders();
         assert_eq!(encoders.len(), 2);
         assert_eq!(encoders[0].a_pin.args, vec![21]);
         assert_eq!(encoders[1].a_pin.args, vec![20]);
@@ -836,20 +796,20 @@ RC(2,0) RC(2,1) RC(2,2) RC(2,3) RC(2,4) RC(2,5)  RC(2,6) RC(2,7) RC(2,8) RC(2,9)
             };
         "#;
 
-        let map = extract_gpio_map(dts);
+        let map = parse_document(dts).gpio_map();
         assert_eq!(map.len(), 4);
         assert_eq!(map[0], (0, "gpio0".into(), 8));
         assert_eq!(map[2], (4, "gpio0".into(), 22));
     }
 
     #[test]
-    fn extract_triggers_per_rotation_value() {
+    fn document_extracts_triggers_per_rotation() {
         let dts = r#"
             sensors: sensors {
                 compatible = "zmk,keymap-sensors";
                 triggers-per-rotation = <20>;
             };
         "#;
-        assert_eq!(extract_triggers_per_rotation(dts), Some(20));
+        assert_eq!(parse_document(dts).triggers_per_rotation(), Some(20));
     }
 }

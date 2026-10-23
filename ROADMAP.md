@@ -7,8 +7,8 @@ Also growing into an instrument firmware SDK: reusable input, musical behavior,
 and timing components for building new physical MIDI instruments. Phases 21–26
 cover this track; sound comes from external instruments or host software.
 
-**Primary targets:** RP2040, STM32, nRF52840, ESP32-S3 — modern MCUs
-with ample flash and RAM, all served by mature Rust HAL ecosystems.
+**Workspace targets:** RP2040, STM32, and nRF52840. The standalone ESP32-S3
+crate still needs a firmware build and hardware validation before joining CI.
 
 **Design goals:**
 
@@ -16,11 +16,12 @@ with ample flash and RAM, all served by mature Rust HAL ecosystems.
   fully-tested Rust implementation
 - One `Recognizer` trait for deadline-driven input disambiguation, so board
   crates and downstream consumers can add their own
-- `Action<Ext>` generic extension point: third-party features without forking
+- `Action<Ext>` carries custom action types; custom controllers must supply
+  their dispatch because the default keyboard processor ignores `Ext` actions
 - Embassy async pipeline eliminates busy-waiting; scan → process → report
   with zero CPU burn between events
-- `unsafe_code = deny` across the entire workspace — memory safety by
-  construction, not convention
+- `unsafe_code = deny` by default, with explicit exceptions for board startup
+  and interrupt glue
 - Support instrument programs alongside the keyboard processor, sharing drivers
   and runtime services while keeping playing techniques and musical rules explicit
 
@@ -61,7 +62,7 @@ ______________________________________________________________________
 
 ## Phase 4 — Layer System ✅
 
-- [x] `Layer<Ext>`, `LayerStack<LAYERS, KEYS, Ext>`
+- [x] `Layer<Ext, CAPACITY>`, `LayerStack<LAYERS, KEYS, Ext>` with key-sized layers
 - [x] Highest-active-layer wins, transparent fallthrough, `NoOp` blocks
 - [x] Press-time layer cache (prevents stuck keys on layer change mid-hold)
 - [x] `LayerOp` dispatch — momentary, toggle, set-default, on, off
@@ -79,12 +80,10 @@ ______________________________________________________________________
 
 ## Phase 6 — Extended Recognizers ✅
 
-- [ ] `LeaderRecognizer` — Emacs-style nested trie sequences, per-branch
-  timeouts, which-key metadata for display integration. Written once, then
-  deleted before publication: nothing in the pipeline ever reached it.
-- [ ] `ComboRecognizer` — eager/windowed simultaneous key-set. Superseded by
-  the live chord model below and deleted; re-add only if a board needs the
-  windowed semantics.
+- [ ] Leader sequences — Emacs-style nested tries, per-branch timeouts,
+  which-key metadata for display integration; require a concrete runtime consumer
+- [ ] Optional timed combos — eager/windowed simultaneous key-set; add only
+  if a board needs semantics beyond the live chord model below
 - [x] Live combo (chord) model in `KeyboardProcessor` — no timing window,
   press-to-fire: the action presses (held and repeating exactly like any
   other key, including host typematic repeat) the instant the held set
@@ -92,13 +91,12 @@ ______________________________________________________________________
   non-combo key press before any match aborts and replays the chord as
   normal keys; after a match it's ordinary rollover. Falls back to
   replaying buffered taps if the full set releases with no match
-- [ ] `TapDanceRecognizer` — counted rapid taps → action per count. Written
-  once, then deleted before publication: nothing in the pipeline ever reached
-  it, same as `LeaderRecognizer` above.
+- [ ] Tap dance — counted rapid taps → action per count; require a concrete
+  runtime consumer
 - [x] Steno — chord until all-release, GeminiPR / TXBOLT wire format
-  (dictionary stays on host in Plover). Lives in `devices::steno::StenoEngine`,
-  not as a `Recognizer`: the recognizer version was deleted with the others.
-  `TapHoldRecognizer` is currently the trait's only production implementor.
+  (dictionary stays on host in Plover), implemented by
+  `devices::steno::StenoEngine`. `TapHoldRecognizer` is the `Recognizer` trait's
+  production implementor.
 
 ______________________________________________________________________
 
@@ -138,7 +136,7 @@ First real hardware. Validates every architectural decision end-to-end.
 - [x] `tecla-rp2040` crate — depends on `embassy-rp`
 - [x] Row-strobe / col-read GPIO matrix scanner (`GpioMatrixScanner`)
 - [x] Direct-pin matrix scanner (`DirectPinScanner`)
-- [x] USB HID via `embassy-usb` (`UsbHidReporter`, 6KRO)
+- [x] USB HID via `embassy-usb` (`CompositeUsbReporter`, 6KRO)
 - [x] RTT logging via `defmt` + `probe-rs` (defmt-rtt, probe-rs runner)
 - [x] UF2 artifact for drag-and-drop flashing
 - [x] Example: 4×12 ortholinear layout (Planck-style)
@@ -200,7 +198,8 @@ ______________________________________________________________________
 
 ## Phase 13 — Extended Output
 
-The `Action<Ext>` hook makes these architectural additions, not bolt-ons.
+Built-in action and report variants carry these outputs through the keyboard
+pipeline. Custom instrument controllers can also emit reports directly.
 
 - [x] MIDI support — `MidiAction`, `MidiEvent`, `HidReport::Midi` + auto note-off on release
 - [x] Gamepad support — `GamepadAction`, `GamepadReport`, `HidReport::Gamepad` + button/axis tracking
@@ -249,10 +248,8 @@ Parser and protocol work is pure Rust — no hardware deps.
 - [x] `keymap.c` transpiler — parse QMK keycodes, emit `keymap!`/`layer!` Rust source
 - [x] Compile-time validation — dimension checks, unknown keycodes, layer consistency
 - [x] Via command decoder — protocol version, keyboard values, layer count,
-  per-key get/set, keymap reset. Command IDs and byte layouts corrected against
-  QMK's `quantum/via.h` and pinned there by `tests/via_protocol_ids.rs`; the
-  original table had most IDs wrong (0x04 was read as "get layer count" when
-  Via defines it as "get keycode"), so no real Via host could have talked to it.
+  per-key get/set, keymap reset. Command IDs and byte layouts follow QMK's
+  `quantum/via.h`, checked by `tests/via_protocol_ids.rs`.
 - [x] Raw-HID transport — `VIA_REPORT_DESCRIPTOR` + `via_usb_task`/`service_via`
 - [ ] Remaining Via commands: dynamic macros (0x0C–0x10), bulk keymap buffer
   (0x12/0x13), encoders (0x14/0x15), custom/lighting values, bootloader jump
@@ -277,9 +274,8 @@ ______________________________________________________________________
 
 ## Phase 17 — Wireless (BLE)
 
-nRF52840 via SoftDevice or nrf-softdevice crate. This is ZMK territory —
-tecla's goal is to match ZMK's BLE quality with a superior core.
-Blocked on nRF52840 hardware.
+nRF52840 via `trouble-host` and Nordic SDC. Firmware builds in CI; radio,
+pairing, and power behavior still need physical hardware validation.
 
 - [x] BLE HID profile — `BleReporter` trait extending `AsyncReporter` with connect/disconnect/advertise
 - [x] Pairing and bonding — `BondInfo`, `BleHostManager<MAX_HOSTS>`, `StorageKey::BleHost0..3`
@@ -293,23 +289,17 @@ ______________________________________________________________________
 
 ## Phase 18 — Additional MCU Targets
 
-Blocked on hardware.
+Hardware validation varies by board; see the
+[native board guide](keyboards/tecla/README.md#hardware-status).
 
 - [x] STM32F4 support — `tecla-stm32f4` board crate, Planck example, builds for thumbv7em-none-eabihf
-- [x] STM32F3 support — `tecla-stm32f3` board crate, ZSA Voyager example, first
-  successful HID enumeration. Bring-up bug: `memory.x` declared 32K RAM
-  (STM32F303CB) after `Cargo.toml` had already been corrected to the real
-  chip (STM32F303CC, 256K flash / 40K RAM, confirmed via the DFU bootloader's
-  own flash report + `stm32-metapac`'s chip data). The under-declared RAM
-  put `PROCESSOR.init_with`'s ~10K stack build right at the edge of what the
-  linker thought was available, hard-faulting `main()` after `usb_device_task`
-  was already spawned — the executor never got back around to poll it, so
-  every `SetAddress` timed out identically on every build, cable, and port.
-  Added a compile-time guard asserting `KeyboardProcessor`'s size against a
-  stack budget so a future regression fails the build instead of hard-faulting
-  silently on hardware
+- [x] STM32F3 support — `tecla-stm32f3` board crate and ZSA Voyager profiles;
+  USB and MIDI playing confirmed. The linker uses the STM32F303CC memory map,
+  with compile-time processor/stack budget checks
+- [x] STM32F0 support — `tecla-stm32f0` board crate and NuPhy NOS75 profile;
+  initial USB enumeration confirmed, remaining hardware checks documented
 - [ ] CH32V3 support (`ch32-hal`, ultra-low-cost RISC-V)
-- [ ] ESP32-S3 validation — the standalone `tecla-esp32s3` crate now targets
+- [ ] ESP32-S3 validation — the standalone `tecla-esp32s3` crate targets
   current `esp-hal`/`esp-rtos` APIs and resolves its dependencies, but still
   needs an Xtensa firmware build and hardware validation; excluded from CI
 - [ ] Shared HAL abstraction layer
@@ -318,12 +308,16 @@ ______________________________________________________________________
 
 ## Phase 19 — Flash CLI and Artifacts
 
-Hardware-dependent tooling from original Phase 16.
-
-- [ ] `tecla flash --keyboard <qmk-id>` CLI
-  - [ ] Fetches `info.json` from QMK firmware repo
-  - [ ] Compiles and flashes in one step via `probe-rs` or UF2
-- [ ] UF2 / DFU / `adafruit-nrfutil` artifacts per target
+- [x] Shared `just flash --tecla-config <profile>` build-and-flash coordinator
+- [x] Profile, USB device, and mounted UF2 target discovery through `--list`
+- [x] UF2 conversion/copy, DFU `.bin` generation and flashing, and probe-rs
+  dispatch for configured native profiles
+- [x] DFU image-size validation, explicit device selection, and `--dry-run`
+- [x] `--qmk-keyboard <qmk-id>` resolves vendored QMK definitions to an existing
+  native profile when the family match is unambiguous
+- [ ] Generate complete firmware for arbitrary imported QMK boards; current
+  imports and native-profile matching do not provide universal board support
+- [ ] `adafruit-nrfutil` artifacts for applicable targets
 
 ______________________________________________________________________
 
@@ -342,13 +336,12 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## Phase 20 — Device Module Refactor
+## Phase 20 — Device Module Structure
 
-Reorganize the flat `src/*.rs` layout into a device-oriented module tree.
-Each input/output modality gets its own directory bundling action types,
-report types, processing logic, and telemetry. Shared infrastructure
-moves to `core/`. Users building novel controllers can study any device
-module as a self-contained template.
+The device-oriented module tree groups input/output modalities with their
+action types, report types, processing logic, and telemetry. Shared
+infrastructure lives in `pipeline/`. Device modules work alongside shared action,
+report, telemetry, and runtime modules; they do not contain the entire output path.
 
 - [x] Create `pipeline/` — event, recognizer, modifier, keymap, hid, report, power
 - [x] Create `matrix/` — scanner traits, debounce, split
@@ -361,15 +354,13 @@ module as a self-contained template.
 - [x] Create `storage/` — StorageKey, EepromShim, VIA
 - [x] Create `keyboard/` module — KeyboardProcessor, steno_playback, tests
 - [x] Extract steno playback engine with KeyOutput trait for independent testability
-- [x] Update all imports across workspace (no re-exports, direct paths only)
-- [x] Update board crate imports (tecla-rp2040, tecla-nrf52840, etc.)
-- [x] Preserve all 660+ tests and all integration test suites
+- [x] Direct module imports across the workspace and board crates
+- [x] Unit and integration test coverage for the shared device modules
 - [ ] Create `devices/gamepad/` — extract GamepadAction dispatch from
   keyboard processor, GamepadReport, gamepad telemetry
 
-Goal: a user building a custom MIDI foot controller reads `devices/midi/`
-and sees the complete MIDI path in one place. They create
-`devices/pressure_pad/` following the same pattern.
+Goal: a custom controller can reuse the scanner traits, device helpers, reports,
+and transports, supplying its own behavior independently of keyboard processing.
 
 ______________________________________________________________________
 
@@ -491,8 +482,8 @@ around those literal notes.
 Tension chords retain destinations even while the current played notes prevent
 arrival. Ordinary note changes can unlock those arrivals without an Arrive press;
 thumbs steer subsequent changes, # bars reinterpret the played notes, and stars
-permit borrowing and richer chord colours. Physical stars no longer catch voices;
-the program's explicit voice-catch API remains available and tested.
+permit borrowing and richer chord colours. Voice catches are available through
+the program API independently of the physical star mapping.
 Phrase tests cover classical cadences, jazz ii–V–I guide tones, inversions,
 pedal harmony, ascending/descending bass figures, inner passing lines,
 prepared ornaments, and applied dominants. Idle scans and modifier releases do
@@ -503,8 +494,7 @@ vocabulary rather than a complete Baroque or jazz grammar.
 The [`AutoChord profile`](keyboards/tecla/asterisk_v1_4_autochord/) documents the
 current playing map. **Software gate passed:** workspace host tests, host and
 RP2040 Clippy, the `no_std` target check, release profile build, and UF2 generation.
-Physical testing of an earlier AutoChord revision does not validate this control
-revision. **Physical completion gate pending:** play
+**Physical completion gate pending:** play
 connected phrases, try each thumb and direct bar, compare independent/combined
 star permissions, and verify both-# Stop and USB recovery with
 an external sound source. Add timed execution with its first consumer in Phase 23.
@@ -622,16 +612,17 @@ ______________________________________________________________________
 **Thesis:** Tecla is a research platform for adaptive physical text entry
 and accessible expert input.
 
-The architecture is built around a unified `Recognizer` model, a
-pure/testable `KeyboardProcessor`, and an extensible `Action<Ext>` action
-space. Research directions are natural extensions of the existing core,
-not side quests.
+Existing foundations include a pure/testable `KeyboardProcessor`, telemetry,
+configurable filters, and reusable scanner/report boundaries. The `Recognizer`
+trait currently has one production implementor, tap-hold; live combos and steno
+use their own state machines. Unless checked complete below, research items
+are proposals, not shipped adaptive behavior.
 
 ### Cross-cutting method: Bayesian parameter tuning
 
-Multi-objective Bayesian optimization (MOBO) is the methodological
-backbone for on-device adaptation across all three labs. Kristensson's
-group has published the full progression:
+Multi-objective Bayesian optimization (MOBO) is one candidate method for
+evaluating parameter recommendations. It is not implemented in Tecla.
+Relevant work from Kristensson's group includes:
 
 - AdaptiKeyboard (ISMAR 2022) — per-user MOBO for speed/accuracy tradeoff
 - Cooperative MOBO (TiiS 2024) — firmware proposes, user's typing confirms
@@ -639,9 +630,10 @@ group has published the full progression:
 - CaBoP (CHI 2026) — cost-aware BO that prioritizes low-disruption tweaks
 - Bayesian Methods for Interaction and Design (CUP 2022) — the textbook
 
-On-device, this means: start from group-optimal defaults, silently tune
-debounce/chord timing/actuation per user using a lightweight Gaussian
-process or bandit, weighting parameter changes by disruption cost.
+First compare recommendations against stable user-selected settings. A
+lightweight Gaussian process or bandit is a possible later experiment if simpler
+methods prove insufficient. Any output-changing adaptation must follow the
+opt-in, bounded, reversible policy below; evaluation must include disruption.
 
 ______________________________________________________________________
 
@@ -649,29 +641,31 @@ ______________________________________________________________________
 
 The strongest single research pillar. High-impact, fits ASSETS-style
 work, connects directly to things Tecla already has: debounce, per-key
-thresholds, telemetry, haptics, layer logic, and personalized adaptation.
+thresholds, telemetry, haptic interfaces, and layer logic. Personalized
+adaptation remains planned.
 
 **ABD-MT adaptive typing** ⭐ core research
 
 Unified typing adaptation using the ABD-MT pattern (Wobbrock MobileHCI
 2024): observe → model → adapt. Not a clinical tool — the system measures
 keystroke timing statistics, models consistency relative to the user's
-own baseline, and adjusts firmware parameters accordingly. No diagnosis,
-no ability labels, no medical claims. Benefits all users: fast typists
-get tighter recognition, inconsistent typists get wider tolerance, steno
-students get faster chord detection as their technique improves.
+own baseline, and proposes firmware parameter changes. No diagnosis,
+no ability labels, no medical claims. The research goal is to reduce unwanted
+input without suppressing deliberate fast taps, repeated presses, or rolled
+steno chords; benefits must be measured for each mechanism and user.
 
-Silent by default — no setup wizard, no accessibility menu, no mode
-switch (Findlater & Wobbrock CHI 2012: silent adaptation outperforms
-explicit adaptation interfaces).
+Observation is quiet by default. Output-changing adaptation starts in shadow
+mode and requires an explicit profile setting, with bounded changes, manual
+overrides, and rollback. A result from one adaptive interface does not establish
+that silent adaptation is preferable for every recognizer or user.
 
 User-facing rules for making adaptation reversible, inspectable, and
 non-hostile live in [`docs/adaptive-ux.md`](docs/adaptive-ux.md). That
 document is the product contract for this research section.
 
-Design principle: each telemetry struct collects one domain's raw
-events. `ProcessorTelemetry` is the only place that synthesizes across
-domains to produce adaptation recommendations. No struct computes
+Proposed design principle: each telemetry struct collects one domain's raw
+events. `ProcessorTelemetry` would synthesize across domains to produce
+adaptation recommendations. No struct should compute
 rates or trends from another struct's data. No struct duplicates
 another's observations.
 
@@ -684,16 +678,13 @@ another's observations.
   `delta_slow_accepts`, `delta_slow_rejects`, `delta_bounce_rejects`,
   `delta_sticky_uses` (plus cumulative totals). Drop `hold_time_samples`
   deque — that signal already lives in `CoreTelemetry::hold_time_ema/var`
-- [x] Fix `AccessibilityTelemetry::reset_deltas` (was a no-op) to zero the
-  delta fields so the adaptation tick sees recent behavior, not lifetime
-  totals. Added `delta_slow_accepts/rejects`, `delta_bounce_rejects`,
-  `delta_sticky_uses`; rates now report over the delta window and
-  `delta_sticky_uses` rides the wire alongside every other snapshot's
-  delta. Fixed the bounce denominator at the same time — it was
-  `bounce_rejects + slow_accepts`, omitting slow-rejected presses that
-  the bounce filter had already passed, which inflated the rate
-- [x] Remove doc reference to "medication cycle detection" from
-  `accessibility.rs` module doc — not our claim to make
+- [x] Windowed accessibility observations — `reset_deltas` zeroes the
+  `delta_slow_accepts/rejects`, `delta_bounce_rejects`, and
+  `delta_sticky_uses` fields. Snapshot rates use the delta window; bounce
+  rejection rates include presses accepted by the bounce filter even when
+  a later slow-key filter rejects them
+- [x] Accessibility documentation describes observed input behavior without
+  making medication or health claims
 
 *Step 2 — Telemetry observation extensions:*
 
@@ -724,15 +715,15 @@ observation (pair table), divergent interpretation per recognizer:
 combo asks "was this simultaneous or just fast sequential typing?"
 steno asks "is the user done adding keys or is another finger coming?"
 
-- [ ] `recommended_combo_term(&self, keys: &[u8]) -> u64` — worst-case
-  pair spread for the given key set + margin. Rollover envelope as
-  ceiling. Floored at authored combo_term_ms
+- [ ] Evaluate whether a board needs optional timed combo recognition before
+  adding window recommendations. Current live combos have no timing window;
+  preserve that behavior unless a concrete profile opts into different semantics
 - [ ] `recommended_tapping_term(&self) -> u64` — from core hold-time
   consistency distribution
 - [ ] `recommended_debounce(&self, key: usize) -> u16` — core per-key
   hold-time variance + accessibility bounce rejection delta rate.
-  High variance + high bounce rejections = debounce too tight for
-  this key. Session trend shifts all keys together
+  These signals identify a candidate for review, not proof that debounce
+  is too short; compare rejected intentional repeats and added latency
 - [ ] `recommended_settle_time(&self) -> u64` — core pair table read
   through steno lens + steno inter-chord gap rhythm to detect
   "done adding keys"
@@ -745,27 +736,24 @@ steno asks "is the user done adding keys or is another finger coming?"
   high rollover → bias toward transposition corrections, high hold
   variance → bias toward proximity corrections
 
-*Step 5 — Combo adaptation via pair table:*
+*Step 5 — Chord timing experiments via pair table:*
 
-- [ ] `ComboRecognizer`: no new fields. `adapted_combo_term()` takes a
-  `&[PairStat]` slice and queries worst-case spread among its key
-  pairs, floored at authored `combo_term_ms`, ceilinged at global
-  rollover envelope. `tick()` uses `adapted_combo_term()` instead of
-  fixed value
-- [ ] `StenoRecognizer`: reads pair table through different lens —
-  press-spread of chord's key pairs tells it how long to wait for
-  the user's roll to complete. Steno rolls are intentional technique,
-  not imprecision
+- [ ] Compare optional timed combo semantics with the existing live chord model
+  on a concrete board before introducing a recognizer or changing dispatch
+- [ ] `StenoEngine`: evaluate pair spread as evidence for an optional settle
+  policy alongside the existing all-release rule. Steno rolls are intentional
+  technique, not imprecision
 
 *Step 6 — Processor integration:*
 
 - [ ] `KeyboardProcessor::adapt_from_telemetry(&mut self)` — reads
-  `self.telemetry`, calls `recommended_*` methods, writes values into
-  recognizer configs and engine thresholds. No-op when telemetry is
-  `None`. Called from existing 250ms telemetry tick
-- [ ] Bidirectional: tightens parameters when consistency improves,
-  loosens when it degrades. Adaptation is relative to the user's own
-  converged baseline, not population norms
+  `self.telemetry` and records `recommended_*` results in shadow mode.
+  Apply only in an explicitly enabled adaptive profile, at safe recognizer
+  boundaries; the 250ms telemetry tick is an observation cadence, not a
+  requirement to change behaviour. No-op when telemetry is `None`
+- [ ] Compare bounded recommendations against the user's stable baseline,
+  including false activations, missed intentional input and response delay;
+  freeze manual overrides and support immediate rollback
 
 *Step 7 — Autocorrect adaptation:*
 
@@ -788,18 +776,21 @@ steno asks "is the user done adding keys or is another finger coming?"
 - [ ] Convergence: system stabilizes after N presses
 - [ ] Bidirectionality: parameters tighten when consistency improves
 - [ ] Boundary: recommendations stay in sane ranges
-- [ ] Per-combo: adapted window reflects pair table data
+- [ ] Any optional timed combo policy preserves the current live model by default
 - [ ] Debounce cross-cutting: core variance + accessibility rejections
   both influence per-key recommendation
 - [ ] Session trend: all timing recommendations drift with session trend
 - [ ] Cold boot: persisted baseline restores correctly
 - [ ] Zero-cost: telemetry disabled → no adaptation overhead
+- [ ] Intentional rapid repeats, fast taps and rolls remain available;
+  default shadow mode, profile opt-in, manual freezes and rollback are tested
 
-Graceful degradation ladder (progressive, each step only if previous
-isn't enough): widen per-key debounce → lengthen tap-hold timing →
-widen combo windows → auto-enable bounce keys. Never reduces capability
-— only loosens timing constraints when consistency drops, tightens
-them when it improves.
+Treat debounce, tap-hold timing, combo windows and bounce filtering as separate,
+reversible recommendations, not a progressive assistance ladder. Wider windows
+can add delay, merge separate actions or reject deliberate repeats. Evaluate
+each change against those costs and the user's intended actions; enabling one
+mechanism must not silently enable another. Keep the accepted stable settings
+available for comparison and restore them when a change makes input worse.
 
 Enables later (not in scope): per-key debounce in board crate hardware
 debouncers, host TUI showing live adaptation state, analog input
@@ -809,20 +800,20 @@ integration (rapid trigger thresholds from same profile).
   Findlater (CHI 2012), Aalto CHI 2018 (136M keystrokes, rollover
   ratio as #1 speed differentiator), EdgeWrite (UIST 2003)
 
-**Per-key analog input** ⭐ core research
+**Analog input** — core primitives implemented; hardware integration pending
 
-- [ ] `AnalogMatrixScanner` returning `u8` (0-255 travel) instead of `bool`
-- [ ] EMA low-pass filter with bit-shift alpha (integer-only, ~5 lines)
-- [ ] Auto-calibration: EMA-smooth idle at startup, continuously recalibrate
-  rest/bottom-out values with epsilon guard (libhmk pattern)
-- [ ] Three-state rapid trigger machine (INACTIVE/DOWN/UP with extremum
-  tracking, asymmetric up/down sensitivity) — ~40 lines of Rust
-- [ ] Dynamic Keystroke (DKS): 4 keycodes per key triggered at press,
-  bottom-out, release-from-bottom, release (as `Action<Ext>` variant)
-- [ ] Adjustable actuation points per key, driven by adaptive typing profile
+- [x] `AnalogMatrixScanner` and `AsyncAnalogMatrixScanner` traits returning
+  per-key `u8` travel, normalized by the board driver to 0–255
+- [x] Integer EMA smoothing and expand-only calibration with a noise guard
+- [x] `RapidTrigger` state tracking with asymmetric press/release sensitivity
+  and press, bottom-out, release-from-bottom, and release transitions
+- [x] `Action::Dks` and `KeyboardProcessor::process_dks_phase` for travel phases
+- [ ] Connect an actual analog scanner to a board runtime and validate travel,
+  calibration, and trigger behavior on hardware
+- [ ] Per-key actuation settings; `RapidTrigger` currently uses one shared config
+- [ ] Adaptive actuation recommendations after a stable hardware baseline
 - [ ] Velocity-sensitive typing — key travel speed as input dimension
-- Reference implementations: libhmk (C, most complete), Macrolev (ESP32),
-  Minipad (RP2040). No production Rust implementation exists — tecla first
+- Reference implementations: libhmk (C), Macrolev (ESP32), Minipad (RP2040)
 
 **Haptic language** ⭐ core research
 
@@ -845,21 +836,19 @@ integration (rapid trigger thresholds from same profile).
 - [x] Runtime toggle actions + `AccessibilityConfig` builder
 - [ ] Visual/audio feedback on accessibility state changes
 
-**Steno** ✅ research success
+**Steno** — implemented, with translation limitations
 
-- [x] `StenoRecognizer` — chord accumulation until all-release
+- [x] `StenoEngine` — chord accumulation until all-release
 - [x] `StenoEngine` — on-device DAFSA dictionary translation (Lapwing)
 - [x] GeminiPR / TXBOLT wire protocols for host-side Plover
 - [x] `steno!` macro for compile-time steno keymap declaration
 - [x] `CapTouchScanner` — capacitive touch sensing for RP2040
 - [x] Boards: Steno Uni V4 (matrix), Asterisk v1.4 (cap touch)
-- Validated: Recognizer trait handles expert chording input, on-device
-  dictionary translation works within MCU constraints, cap touch is a
-  viable scanner modality alongside mechanical switches
-- First proof that Tecla's architecture supports non-keyboard input
-  paradigms as first-class citizens
+- Hardware use demonstrates all-release chording, on-device translation, and
+  capacitive scanning. Prefix-ambiguous multi-stroke words and some Plover
+  formatting remain limited; see the [native board guide](keyboards/tecla/README.md)
 
-**DAFSA steno dictionary compression** ✅ research success — potentially publishable
+**DAFSA steno dictionary compression** — implemented
 
 - [x] Full Lapwing dictionary (159,805 entries, 5.5 MB JSON) compressed
   to 1.6 MB firmware binary — fits on a stock 2 MB RP2040 with no
@@ -867,14 +856,9 @@ integration (rapid trigger thresholds from same profile).
 - [x] Techniques: DAFSA suffix sharing, u24 stroke/offset encoding
   (3 bytes instead of 4), compact variable-length text encoding,
   binary search over sorted children
-- [x] First known keyboard firmware to fit a full production steno
-  dictionary on a standard 2 MB RP2040 Pico
-- Prior art: Javelin uses a compact hash map requiring 16 MB flash;
-  Kolibri uses a prefix trie requiring external flash. Neither fits
-  on stock hardware
-- Significance: removes the cost barrier to embedded steno — a $4 Pico
-  replaces $25+ boards with 16 MB flash, directly expanding access to
-  stenography as an assistive input method
+- This removes an external-flash requirement for Tecla's dictionary storage.
+  Dictionary fit does not imply full Plover translation compatibility or
+  establish novelty relative to other firmware
 - Potential venue: ASSETS or CHI — "Efficient On-Device Steno Dictionary
   Compression for Resource-Constrained Keyboards"
 
@@ -889,8 +873,8 @@ ______________________________________________________________________
 
 ### Lab B — Expert Expressive Input
 
-Where expert users push the input model to its limits. Tecla's steno
-engine and `Recognizer` trait make chord-like input first-class.
+Where expert users push the input model to its limits. Tecla's steno engine
+and live combo handling provide existing chord-based input to evaluate.
 
 **Chording efficiency theory** ⭐ core research (most publication-friendly)
 
@@ -964,50 +948,64 @@ substrate — without it, adaptive ideas stay vibes.
 
 **Live telemetry** ⭐ platform enabler (prerequisite for most research)
 
-Architecture: `TelemetryExt` trait — generic extension point for
-modality-specific telemetry, same pattern as `Action<Ext>`. Users
-building novel controllers implement the trait and get the full
-collection/snapshot/transport pipeline for free.
+Existing architecture: `TelemetryExt` provides a common snapshot/reset
+interface for collectors. Recording methods remain specific to each collector;
+implementing the trait does not automatically wire observations or extend the
+transport format.
 
 ```
-TelemetryState<KEYS, Ext: TelemetryExt = ()>
-├── CoreTelemetry<KEYS>     (always present)
-└── Ext                     (modality-specific, user-extensible)
+KeyboardProcessor
+├── optional ProcessorTelemetry<KEYS>
+│   ├── CoreTelemetry<KEYS>
+│   └── built-in modality collectors
+└── optional TypingTelemetry
+          │ snapshot / collect
+          ▼
+TelemetryFrame           (fixed set of optional payloads)
 ```
 
-`TelemetryExt` trait: `observe(&mut self, event)`, `snapshot(&self)`,
-`reset_deltas(&mut self)`. `()` impl is zero-cost no-op.
+The trait defines `snapshot_state`, `clear_deltas`, and `collect`, with an
+associated snapshot type and a no-op implementation for `()`. A custom modality
+needs recording calls and explicit frame/host-decoder integration.
 
-Core telemetry (canonical feature set from CMU/Aalto/BiDAlab):
+Core telemetry:
 
-- [ ] Per-key press count, hold time EMA + variance, error rate
-- [ ] Four inter-key latencies: PP, PR, RR, RP per keystroke pair
-- [ ] Per-bigram IKI for top 64 bigrams (mean+variance)
-- [ ] Rollover ratio (% of presses where next key down before prev up)
-- [ ] Sliding-window WPM from 50-entry timestamp ring buffer
-- [ ] Collection points: `handle_press`, `handle_release`, backspace detection
+- [x] Per-key press count, hold time EMA + variance, correction-key error proxy
+- [x] Press-to-press (PP) interval EMA in a bounded 64-entry bigram table
+- [ ] Press-to-release, release-to-release, and release-to-press intervals;
+  per-bigram variance and frequency-ranked retention
+- [x] Rollover ratio (% of presses where next key down before prev up)
+- [x] Raw press-rate WPM from a 50-entry timestamp ring buffer
+- [x] Since-boot active typing average, excluding idle gaps and generated text;
+  `TYPE_WPM` readout on Voyager Enter/Nav + W and NOS75 Fn + W, plus an optional
+  `typing` telemetry payload. This is separate from the raw press-rate metric.
+- [x] Collection points in processor press/release handling and backspace detection
 
-Modality-specific telemetry (feature-gated, each ~50-200 bytes):
+Implemented modality collectors (runtime wiring depends on the profile):
 
-- [ ] **Steno** — per-chord dictionary hit/miss/retry rate, multi-stroke
-  completion rate, strokes-per-minute, dictionary coverage ratio,
-  undo frequency, chord hold time distribution (rolled vs clean)
-- [ ] **MIDI** — per-note velocity distribution (mean/min/max), note
-  duration histogram, CC value range utilization, polyphony depth,
-  timing jitter between notes in intended chords
-- [ ] **Gamepad** — per-axis utilization range, dead zone noise floor,
-  button hold time distribution, simultaneous button combos
-- [ ] **Pointing** — movement velocity distribution, click-while-moving
-  rate, scroll frequency, hover duration before click
-- [ ] **Accessibility** — slow key rejection rate, bounce key rejection
-  rate, sticky key usage count, hold time trend over session (fatigue),
-  error rate trend over session (comfort and consistency drift)
+- [x] **Steno** — dictionary hit/retry and multi-stroke completion rates,
+  strokes per minute, undo counts
+- [x] **MIDI** — note velocity mean/min/max, peak polyphony, CC message counts
+- [x] **Gamepad** — observed per-axis range, button counts, peak held-button count
+- [x] **Pointing** — mean movement counts per sample, button-down edge counts,
+  click-with-movement coincidence, scroll event counts. The
+  `mean_counts_per_sample` field has no timestamps and is not physical speed
+  or an error rate
+- [x] **Accessibility** — slow/bounce rejection rates, sticky activation counts,
+  hold-time trends; these observations do not establish fatigue or health state
+- [x] **Encoder** — clockwise/counter-clockwise counts and direction reversals
+
+Additional observations remain planned:
+
+- [ ] **Steno** — dictionary coverage and chord hold-time distributions
+- [ ] **MIDI** — note durations, CC value ranges, intended-chord timing jitter
+- [ ] **Gamepad** — dead-zone noise and button hold-time distributions
+- [ ] **Pointing** — timestamped movement, hover-before-click observations
+- [ ] **Encoder** — timestamped rotation speed
 - [ ] **Split** — per-half press balance, cross-hand vs same-hand bigram
   timing, transport round-trip latency measurement
 - [ ] **Cap touch** — per-pad discharge count distribution, threshold
   margin, ambient baseline drift over time
-- [ ] **Encoder** — rotation velocity, direction reversal frequency,
-  per-encoder usage imbalance
 
 Transport:
 
@@ -1021,21 +1019,19 @@ Transport:
 - [x] `keyboard_task_telemetry` — 250ms periodic frame collection in keyboard loop
 - [x] `telemetry_task` — receives frames, serializes, writes to transport
 - [x] `AsyncTelemetryWriter` trait for board-crate transport implementations
-- [x] `CdcTelemetryWriter` (RP2040) — CDC ACM virtual serial for telemetry output
+- [x] `CdcTelemetryWriter` (RP2040 and nRF52840) — CDC ACM writer implementations;
+  firmware profiles must explicitly attach a telemetry endpoint and task
 - [x] `TelemetryChannel` type for frame routing between tasks
 - [x] Composite USB HID reporter — descriptors and wire encoding for NKRO,
   consumer, mouse, and gamepad, plus USB-MIDI behind the `usb-midi` feature.
   Shared in core (`transport::usb`) rather than per board.
 - [ ] Haptic driver implementation for a board (DRV2605L); the trait, the
   controller, and the task plumbing exist but nothing drives real hardware
-- [x] BLE builds again — the `ble` feature had rotted while nothing compiled
-  it: stale `tecla::ble`/`tecla::power` paths from the module refactor, and
-  crates.io's `nrf-sdc 0.3` pinned to bt-hci 0.4 against trouble-host's 0.9.
-  Now on published trouble-host 0.8 + bt-hci 0.10 + embassy-nrf 0.11, with
-  nrf-sdc/nrf-mpsl 0.4, and gated by a CI job.
+- [x] nRF52840 BLE firmware builds and links in the CI board matrix
 - [ ] BLE hardware validation — building and linking do not validate the radio
 - [ ] Publish `tecla-nrf52840` after hardware validation
-- [ ] CDC ACM USB endpoint in remaining board crates (nRF52840, STM32, ESP32)
+- [ ] CDC ACM telemetry integration in remaining profiles/STM32 board crates;
+  validate the standalone ESP32 writer with its firmware build
 - [ ] Host companion: Ratatui TUI (phase 1), web dashboard (phase 2)
 - [ ] Expose ability profile to host for software-side adaptation
 
@@ -1049,8 +1045,9 @@ Implementation order:
 6. ~~`telemetry_task` + CDC ACM USB endpoint (RP2040)~~ ✅
 7. Host TUI + remaining board crate CDC endpoints
 
-Total firmware RAM cost: ~2KB core + 50-200 bytes per modality.
-Without this, most of Lab A and Lab C are unmeasurable.
+RAM cost depends on key count, enabled collectors, and channel capacities.
+Measure the complete processor and task allocation for each target; telemetry
+does not by itself establish whether an input was intended or successful.
 
 **Rich runtime keymap editing** — platform enabler
 

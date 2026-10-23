@@ -50,14 +50,14 @@ fn release(pos: KeyPos, ms: u64) -> KeyEvent {
 }
 
 /// A full `KEYS`-wide layer: `actions` in flat order, the rest `NoOp`.
-fn padded(actions: &[Action]) -> Layer<()> {
+fn padded(actions: &[Action]) -> Layer<(), KEYS> {
     let mut keys = [Action::NoOp; KEYS];
     keys[..actions.len()].copy_from_slice(actions);
     Layer::new(&keys)
 }
 
 fn make_processor(base: &[Action]) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-    let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), KEYS>, LAYERS> = heapless::Vec::new();
     layers.push(padded(base)).ok();
     let stack: LayerStack<LAYERS, KEYS> = LayerStack::new(layers);
     KeyboardProcessor::new(stack, TapHoldConfig::default())
@@ -67,7 +67,7 @@ fn make_processor_two_layers(
     base: &[Action],
     overlay: &[Action],
 ) -> KeyboardProcessor<ROWS, COLS, LAYERS, KEYS> {
-    let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), KEYS>, LAYERS> = heapless::Vec::new();
     layers.push(padded(base)).ok();
     layers.push(padded(overlay)).ok();
     let stack: LayerStack<LAYERS, KEYS> = LayerStack::new(layers);
@@ -714,7 +714,7 @@ fn tap_hold_layer_hold_release_deactivates_layer() {
 #[test]
 fn hokp_hold_resolves_on_other_key_press() {
     let cfg = TapHoldConfig::new(200).with_mode(TapHoldMode::HoldOnOtherKeyPress);
-    let mut layers: heapless::Vec<Layer<()>, LAYERS> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), KEYS>, LAYERS> = heapless::Vec::new();
     layers
         .push(Layer::new(&[
             Action::ModTap {
@@ -792,7 +792,7 @@ fn oneshot_mod_applies_to_next_key() {
 #[test]
 fn nkro_mode_emits_nkro_report() {
     let layout = [Action::Key(KeyCode::A), Action::NoOp];
-    let mut layers = heapless::Vec::<Layer<()>, 1>::new();
+    let mut layers = heapless::Vec::<Layer<(), 2>, 1>::new();
     layers.push(Layer::new(&layout)).ok();
     let mut proc: KeyboardProcessor<1, 2, 1, 2> =
         KeyboardProcessor::new(LayerStack::new(layers), TapHoldConfig::default())
@@ -1086,7 +1086,7 @@ fn make_processor_three_layers(
     mid: &[Action],
     top: &[Action],
 ) -> KeyboardProcessor<ROWS, COLS, 3, KEYS> {
-    let mut layers: heapless::Vec<Layer<()>, 3> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), KEYS>, 3> = heapless::Vec::new();
     layers.push(Layer::new(base)).ok();
     layers.push(Layer::new(mid)).ok();
     layers.push(Layer::new(top)).ok();
@@ -2736,7 +2736,7 @@ fn dks_ninth_concurrent_key_is_not_pressed_and_cannot_get_stuck() {
     // keycode unreleasable forever.
     const NINE: usize = 9;
     let actions = [Action::Dks(dks1()); NINE];
-    let mut layers: heapless::Vec<Layer<()>, 1> = heapless::Vec::new();
+    let mut layers: heapless::Vec<Layer<(), NINE>, 1> = heapless::Vec::new();
     layers.push(Layer::new(&actions)).ok();
     let stack: LayerStack<1, NINE> = LayerStack::new(layers);
     let mut proc: KeyboardProcessor<1, NINE, 1, NINE> =
@@ -2808,6 +2808,7 @@ fn audio_haptic_output_and_sleep_actions_set_and_drain_pending() {
 }
 
 #[test]
+#[cfg(feature = "processor-telemetry")]
 fn telemetry_frame_snapshots_without_clearing_until_clear_deltas() {
     let mut proc = make_processor(&[Action::Key(KeyCode::A)]).with_telemetry();
     proc.process_event(press(pos(0, 0), 0), 0, &mut |_| {});
@@ -2824,6 +2825,22 @@ fn telemetry_frame_snapshots_without_clearing_until_clear_deltas() {
     let core = telemetry.frame().core.unwrap();
     assert_eq!(core.delta_presses, 0);
     assert_eq!(core.total_presses, 1);
+}
+
+#[test]
+#[cfg(not(feature = "processor-telemetry"))]
+fn omitted_telemetry_reports_none_and_preserves_keyboard_events() {
+    let mut proc = make_processor(&[Action::Key(KeyCode::A)]);
+    assert!(proc.telemetry().is_none());
+    assert!(proc.telemetry_mut().is_none());
+    let reports = collect_reports(|emit| {
+        proc.process_event(press(pos(0, 0), 0), 0, emit);
+    });
+    assert!(keyboard_keycodes(*reports.last().unwrap()).contains(&KeyCode::A.usage_id()));
+    let reports = collect_reports(|emit| {
+        proc.process_event(release(pos(0, 0), 1), 1, emit);
+    });
+    assert_eq!(keyboard_keycodes(*reports.last().unwrap()), [0; 6]);
 }
 
 #[test]
@@ -2852,4 +2869,28 @@ fn tap_toggle_tap_latches_layer() {
         proc.process_event(press(pos(0, 1), 510), 510, emit);
     });
     assert!(keyboard_keycodes(*reports.first().unwrap()).contains(&KeyCode::B.usage_id()));
+}
+
+#[test]
+fn dense_six_by_seventeen_matrix_reports_bottom_row_press_and_release() {
+    const INITIAL: KeyboardProcessor<6, 17, 1, 102> = KeyboardProcessor::new(
+        LayerStack::new(heapless::Vec::from_array([Layer::from_array({
+            let mut actions = [Action::NoOp; 102];
+            actions[100] = Action::Key(KeyCode::Right);
+            actions
+        })])),
+        TapHoldConfig::new(200),
+    );
+    let mut proc = INITIAL;
+    let key = KeyPos::new(5, 15);
+    let reports = collect_reports(|emit| {
+        proc.process_event(KeyEvent::press(key, 0), 0, emit);
+    });
+    assert!(reports
+        .iter()
+        .any(|report| keyboard_keycodes(*report).contains(&KeyCode::Right.usage_id())));
+    let reports = collect_reports(|emit| {
+        proc.process_event(KeyEvent::release(key, 10), 10, emit);
+    });
+    assert!(!keyboard_keycodes(*reports.last().unwrap()).contains(&KeyCode::Right.usage_id()));
 }

@@ -11,6 +11,10 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/tecla-nrf52840"
 
+[package.metadata.docs.rs]
+default-target = "thumbv7em-none-eabihf"
+targets = ["thumbv7em-none-eabihf"]
+
 [lints]
 workspace = true
 

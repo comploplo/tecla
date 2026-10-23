@@ -20,9 +20,10 @@ keymap! {
     ),
     layer!(Nav,
         // Left hand: outer -> inner.
+        // Hold the Enter/Nav thumb and tap W to type the boot-session WPM.
         // spacer              outer        pinky        ring         middle       index        inner
            NOOP,               ESC,         F1,          F2,          F3,          F4,          F5,
-           NOOP,               GRV,         N1,          N2,          N3,          N4,          N5,
+           NOOP,               GRV,         N1,          TYPE_WPM,    N3,          N4,          N5,
            NOOP,               TRNS,        N6,          N7,          N8,          N9,          N0,
            NOOP,               TRNS,        TRNS,        LBRC,        RBRC,        LBRC,        NOOP,
            NOOP,               NOOP,        NOOP,        NOOP,        RBRC,        NOOP,        NOOP,

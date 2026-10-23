@@ -13,8 +13,8 @@
 //! # Usage
 //!
 //! Takes the bus mutex itself, not a
-//! [`SharedI2c`](crate::shared_i2c::SharedI2c) handle — see
-//! [`Navigator::spi_tx`] for why one access has to hold the lock throughout.
+//! [`SharedI2c`](crate::shared_i2c::SharedI2c) handle, because a sensor's
+//! write/read pair must hold the lock throughout to prevent interleaved access.
 //!
 //! ```text
 //! let mut ball = Navigator::new(bus);
@@ -62,8 +62,7 @@ pub enum NavigatorError<E> {
 ///
 /// Takes the bus mutex directly rather than a
 /// [`SharedI2c`](crate::shared_i2c::SharedI2c) handle, because one sensor
-/// access is a *write then read* pair that must not be interleaved — see
-/// [`spi_tx`](Self::spi_tx).
+/// access is a *write then read* pair that must not be interleaved.
 pub struct Navigator<'a, M: RawMutex, BUS> {
     bus: &'a Mutex<M, BUS>,
     cpi: u8,

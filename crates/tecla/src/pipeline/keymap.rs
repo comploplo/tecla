@@ -11,41 +11,37 @@ use crate::action::{Action, LayerOp};
 /// Sentinel value meaning "no layer cached for this key".
 const NO_CACHE: u8 = u8::MAX;
 
-/// Maximum keys per layer. Sized for the largest single-controller board in the
-/// tree (the 12×7 = 84-key Voyager) with headroom. A `Layer` owns this many
-/// `Action`s by value, and a `KeyboardProcessor` is constructed on the stack
-/// before moving into its static home — at 256 the Voyager's 3-layer keymap was
-/// ~16 KB and overflowed the F303's 40 KB SRAM during construction.
-///
-/// The Voyager (84 keys) is the current ceiling; 88 covers it while keeping the
-/// transient construction footprint (keymap local + processor temp ≈ 16 KB)
-/// comfortably under the F303's 40 KB SRAM.
-///
-/// ponytail: fixed cap, not `KEYS`-generic. Make `Layer<KEYS, Ext>` generic if a
-/// board ever exceeds this — it threads through the `keymap!` macro and callers.
-pub const MAX_LAYER_KEYS: usize = 88;
-
 /// A single layer: a fixed-size array of actions indexed by flat key position.
 ///
 /// Flat index is computed as `row * COLS + col` by the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Layer<Ext = ()>
+pub struct Layer<Ext, const CAPACITY: usize>
 where
     Ext: Copy + PartialEq,
 {
-    actions: heapless::Vec<Action<Ext>, MAX_LAYER_KEYS>,
+    actions: heapless::Vec<Action<Ext>, CAPACITY>,
 }
 
-impl<Ext: Copy + PartialEq> Layer<Ext> {
+impl<Ext: Copy + PartialEq, const CAPACITY: usize> Layer<Ext, CAPACITY> {
+    /// Creates a full layer from an array, including in a static initializer.
+    #[must_use]
+    pub const fn from_array(actions: [Action<Ext>; CAPACITY]) -> Self {
+        Self {
+            actions: heapless::Vec::from_array(actions),
+        }
+    }
+
     /// Creates a layer from a slice of actions.
     ///
     /// Actions are stored in row-major flat order.
+    /// Panics if the slice exceeds this layer's capacity.
     #[must_use]
     #[expect(
         clippy::unused_result_ok,
-        reason = "heapless push overflow silently dropped in no_std"
+        reason = "capacity is checked before copying the actions"
     )]
     pub fn new(actions: &[Action<Ext>]) -> Self {
+        assert!(actions.len() <= CAPACITY, "layer exceeds its key capacity");
         let mut v = heapless::Vec::new();
         for &a in actions {
             v.push(a).ok();
@@ -96,7 +92,7 @@ pub struct LayerStack<const LAYERS: usize, const KEYS: usize, Ext = ()>
 where
     Ext: Copy + PartialEq,
 {
-    layers: heapless::Vec<Layer<Ext>, LAYERS>,
+    layers: heapless::Vec<Layer<Ext, KEYS>, LAYERS>,
     /// Bitmask of currently active non-default layers.
     state: u32,
     /// Bitmask of default layer(s); layer 0 is always bit 0.
@@ -110,7 +106,7 @@ impl<const LAYERS: usize, const KEYS: usize, Ext: Copy + PartialEq> LayerStack<L
     ///
     /// Layer 0 is activated as the default base layer.
     #[must_use]
-    pub fn new(layers: heapless::Vec<Layer<Ext>, LAYERS>) -> Self {
+    pub const fn new(layers: heapless::Vec<Layer<Ext, KEYS>, LAYERS>) -> Self {
         Self {
             layers,
             state: 0,
@@ -340,7 +336,7 @@ mod tests {
     }
 
     fn make_stack(base: &[Action], overlay: Option<&[Action]>) -> LayerStack<2, 6> {
-        let mut layers: heapless::Vec<Layer, 2> = heapless::Vec::new();
+        let mut layers: heapless::Vec<Layer<(), 6>, 2> = heapless::Vec::new();
         layers.push(Layer::new(base)).ok();
         if let Some(o) = overlay {
             layers.push(Layer::new(o)).ok();
@@ -418,9 +414,8 @@ mod tests {
 
     #[test]
     fn out_of_range_layer_ops_are_ignored() {
-        // `n` arrives from Via over USB as well as from the keymap. A shift of
-        // 32 or more is masked in release builds, so `Toggle(32)` used to
-        // silently toggle layer 0 — the base layer — and `Toggle(33)` layer 1.
+        // Via and keymaps can supply indices beyond the layer bitmask.
+        // Invalid operations must leave all valid layers unchanged.
         let mut stack: LayerStack<2, 6> = make_stack(&[Action::NoOp; 6], None);
         let before = stack.state();
         for n in [2u8, 31, 32, 33, 64, 255] {
@@ -493,7 +488,7 @@ mod tests {
 
     #[test]
     fn layer_api_is_accessible() {
-        let layer: Layer = Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
+        let layer: Layer<(), 2> = Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
         assert_eq!(layer.len(), 2);
         assert_eq!(layer.actions.first(), Some(&Action::Key(KeyCode::A)));
         assert_eq!(layer.get(2), None);
@@ -501,7 +496,7 @@ mod tests {
 
     #[test]
     fn empty_layer_is_empty() {
-        let layer: Layer = Layer::new(&[]);
+        let layer: Layer<(), 0> = Layer::new(&[]);
         assert!(layer.is_empty());
         assert_eq!(layer.len(), 0);
     }
@@ -564,14 +559,15 @@ mod tests {
 
     #[test]
     fn layer_set_replaces_action() {
-        let mut layer: Layer<()> = Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
+        let mut layer: Layer<(), 2> =
+            Layer::new(&[Action::Key(KeyCode::A), Action::Key(KeyCode::B)]);
         assert!(layer.set(0, Action::Key(KeyCode::C)));
         assert_eq!(layer.actions.first(), Some(&Action::Key(KeyCode::C)));
     }
 
     #[test]
     fn layer_set_out_of_bounds_returns_false() {
-        let mut layer: Layer<()> = Layer::new(&[Action::Key(KeyCode::A)]);
+        let mut layer: Layer<(), 1> = Layer::new(&[Action::Key(KeyCode::A)]);
         assert!(!layer.set(99, Action::Key(KeyCode::B)));
     }
 
@@ -624,5 +620,43 @@ mod tests {
         let mut stack = make_stack(&[Action::Key(KeyCode::A); 6], None);
         stack.apply(LayerOp::Prev);
         assert_eq!(stack.state(), 0);
+    }
+
+    #[test]
+    fn dense_matrix_capacity_preserves_bottom_row_and_release_cache() {
+        let mut actions = [Action::NoOp; 102];
+        actions[100] = Action::Key(KeyCode::Right);
+        actions[101] = Action::Key(KeyCode::A);
+        let base: Layer<(), 102> = Layer::new(&actions);
+        assert_eq!(base.len(), 102);
+        assert_eq!(base.get(101), Some(Action::Key(KeyCode::A)));
+        let mut layers = heapless::Vec::new();
+        layers.push(base).ok();
+        layers
+            .push(Layer::new(&[Action::Key(KeyCode::B); 102]))
+            .ok();
+        let mut stack: LayerStack<2, 102> = LayerStack::new(layers);
+        let key = KeyPos::new(5, 15);
+        assert_eq!(stack.resolve(key, 17), Action::Key(KeyCode::Right));
+        stack.cache_press(key, 17);
+        stack.apply(LayerOp::On(1));
+        assert_eq!(stack.resolve(key, 17), Action::Key(KeyCode::B));
+        assert_eq!(stack.release_action(key, 17), Action::Key(KeyCode::Right));
+    }
+
+    #[test]
+    fn sized_layers_only_allocate_their_requested_capacity() {
+        use core::mem::size_of;
+        assert!(size_of::<Layer<(), 26>>() < size_of::<Layer<(), 52>>());
+        assert_eq!(
+            size_of::<Layer<(), 102>>() - size_of::<Layer<(), 52>>(),
+            50 * size_of::<Action<()>>()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "layer exceeds its key capacity")]
+    fn oversized_layer_does_not_silently_truncate() {
+        let _: Layer<(), 2> = Layer::new(&[Action::NoOp; 3]);
     }
 }
